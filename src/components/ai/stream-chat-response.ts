@@ -1,8 +1,24 @@
-/** Reads a plain-text streaming body from POST /api/ai/chat. */
+import {
+  CHAT_STREAM_FORMAT_HEADER,
+  CHAT_STREAM_FORMAT_NDJSON,
+  parseChatStreamLine,
+  type ChatStreamToolEvent,
+} from "@/lib/ai/chat/stream-events";
+
+export type ChatStreamHandlers = {
+  onText: (accumulated: string) => void;
+  onToolEvent?: (event: ChatStreamToolEvent) => void;
+};
+
+/** Reads a streaming body from POST /api/ai/chat (NDJSON events or legacy plain text). */
 export async function readChatStream(
   response: Response,
   onChunk: (accumulated: string) => void,
+  onToolEvent?: (event: ChatStreamToolEvent) => void,
 ): Promise<string> {
+  const format = response.headers.get(CHAT_STREAM_FORMAT_HEADER);
+  const useNdjson = format === CHAT_STREAM_FORMAT_NDJSON;
+
   const reader = response.body?.getReader();
 
   if (!reader) {
@@ -11,6 +27,7 @@ export async function readChatStream(
 
   const decoder = new TextDecoder();
   let accumulated = "";
+  let lineBuffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -19,13 +36,63 @@ export async function readChatStream(
       break;
     }
 
-    accumulated += decoder.decode(value, { stream: true });
-    onChunk(accumulated);
+    const chunk = decoder.decode(value, { stream: true });
+
+    if (!useNdjson) {
+      accumulated += chunk;
+      onChunk(accumulated);
+      continue;
+    }
+
+    lineBuffer += chunk;
+
+    let newlineIndex = lineBuffer.indexOf("\n");
+
+    while (newlineIndex >= 0) {
+      const line = lineBuffer.slice(0, newlineIndex);
+      lineBuffer = lineBuffer.slice(newlineIndex + 1);
+
+      const event = parseChatStreamLine(line);
+
+      if (event?.type === "text") {
+        accumulated += event.delta;
+        onChunk(accumulated);
+      } else if (event?.type === "tool") {
+        onToolEvent?.(event);
+      } else if (event?.type === "error") {
+        throw new Error(event.message);
+      }
+
+      newlineIndex = lineBuffer.indexOf("\n");
+    }
   }
 
-  accumulated += decoder.decode();
-  onChunk(accumulated);
+  const trailing = decoder.decode();
 
+  if (!useNdjson) {
+    accumulated += trailing;
+    onChunk(accumulated);
+    return accumulated.trim();
+  }
+
+  if (trailing) {
+    lineBuffer += trailing;
+  }
+
+  if (lineBuffer.trim()) {
+    const event = parseChatStreamLine(lineBuffer);
+
+    if (event?.type === "text") {
+      accumulated += event.delta;
+      onChunk(accumulated);
+    } else if (event?.type === "tool") {
+      onToolEvent?.(event);
+    } else if (event?.type === "error") {
+      throw new Error(event.message);
+    }
+  }
+
+  onChunk(accumulated);
   return accumulated.trim();
 }
 

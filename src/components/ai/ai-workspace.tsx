@@ -2,6 +2,10 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AiToolDebugPanel,
+  type AiToolDebugEntry,
+} from "@/components/ai/ai-tool-debug-panel";
 import { AiComposer } from "@/components/ai/ai-composer";
 import { AiConversationSidebar } from "@/components/ai/ai-conversation-sidebar";
 import { AiMessageList } from "@/components/ai/ai-message-list";
@@ -16,6 +20,7 @@ import {
   readChatStream,
 } from "@/components/ai/stream-chat-response";
 import type { AiChatMessage } from "@/components/ai/types";
+import type { ChatStreamToolEvent } from "@/lib/ai/chat/stream-events";
 import { AI_CHAT_MESSAGE_MAX_LENGTH } from "@/lib/validations/ai";
 import { cn } from "@/lib/utils";
 import type { AiMessage } from "@/types/ai";
@@ -59,6 +64,18 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [toolDebugEvents, setToolDebugEvents] = useState<AiToolDebugEntry[]>([]);
+
+  const appendToolEvent = useCallback((event: ChatStreamToolEvent) => {
+    setToolDebugEvents((current) => [
+      ...current,
+      {
+        ...event,
+        id: createMessageId(),
+        at: new Date().toLocaleTimeString("nl-NL"),
+      },
+    ]);
+  }, []);
 
   const conversationsQuery = useQuery({
     queryKey: CONVERSATIONS_QUERY_KEY,
@@ -72,6 +89,7 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
       setMessages([]);
       setDraft("");
       setErrorMessage(null);
+      setToolDebugEvents([]);
       void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_QUERY_KEY });
     },
     onError: (error) => {
@@ -89,6 +107,7 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
     try {
       const storedMessages = await fetchConversationMessages(conversationId);
       setMessages(mapStoredMessages(storedMessages));
+      setToolDebugEvents([]);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Berichten ophalen mislukt.";
@@ -163,15 +182,19 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
           setActiveConversationId(conversationIdFromResponse);
         }
 
-        await readChatStream(response, (accumulated) => {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantMessage.id
-                ? { ...message, content: accumulated }
-                : message,
-            ),
-          );
-        });
+        await readChatStream(
+          response,
+          (accumulated) => {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantMessage.id
+                  ? { ...message, content: accumulated }
+                  : message,
+              ),
+            );
+          },
+          appendToolEvent,
+        );
 
         void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_QUERY_KEY });
       } catch (error) {
@@ -196,6 +219,7 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
       isStreaming,
       messages,
       queryClient,
+      appendToolEvent,
     ],
   );
 
@@ -268,6 +292,7 @@ export function AiWorkspace({ isConfigured }: AiWorkspaceProps) {
           errorMessage={errorMessage}
         />
       </div>
+      <AiToolDebugPanel events={toolDebugEvents} isStreaming={isStreaming} />
     </div>
   );
 }

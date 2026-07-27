@@ -10,7 +10,7 @@ const ROW_STATUSES = new Set(["active", "inactive", "prospect"]);
 
 function toDomainStatus(status: CompanyRow["status"]): CompanyStatus {
   if (status === "inactive") {
-    return "inactive";
+    return "archived";
   }
 
   if (status === "active") {
@@ -98,8 +98,12 @@ export function mapUpdateInputToRow(input: {
     row.industry = input.sector;
   }
 
-  if (input.status !== undefined && ROW_STATUSES.has(input.status)) {
-    row.status = input.status as CompanyRow["status"];
+  if (input.status !== undefined) {
+    if (input.status === "archived") {
+      row.status = "inactive";
+    } else if (ROW_STATUSES.has(input.status)) {
+      row.status = input.status as CompanyRow["status"];
+    }
   }
 
   return row;

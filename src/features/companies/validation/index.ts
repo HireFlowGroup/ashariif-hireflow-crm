@@ -1,8 +1,16 @@
 export {
+  archiveCompanyInputSchema,
   createCompanyInputSchema,
+  deleteCompanyInputSchema,
+  getCompanyInputSchema,
+  listCompaniesInputSchema,
   searchCompaniesInputSchema,
   updateCompanyInputSchema,
+  type ArchiveCompanyInputDto,
   type CreateCompanyInputDto,
+  type DeleteCompanyInputDto,
+  type GetCompanyInputDto,
+  type ListCompaniesInputDto,
   type SearchCompaniesInputDto,
   type UpdateCompanyInputDto,
 } from "./company.schemas";

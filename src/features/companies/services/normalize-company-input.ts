@@ -1,4 +1,4 @@
-import type { CreateCompanyInput } from "@/features/companies/domain";
+import type { CreateCompanyInput, UpdateCompanyInput } from "@/features/companies/domain";
 
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -43,6 +43,56 @@ export function normalizeCreateCompanyInput(input: CreateCompanyInput): CreateCo
     priority: input.priority,
     status: input.status,
   };
+}
+
+export function normalizeUpdateCompanyInput(input: UpdateCompanyInput): UpdateCompanyInput {
+  const normalized: UpdateCompanyInput = {};
+
+  if (input.name !== undefined) {
+    normalized.name = collapseWhitespace(input.name);
+  }
+
+  if (input.website !== undefined) {
+    normalized.website = normalizeOptionalUrl(input.website);
+  }
+
+  if (input.sector !== undefined) {
+    normalized.sector = normalizeOptionalString(input.sector);
+  }
+
+  if (input.city !== undefined) {
+    normalized.city = normalizeOptionalString(input.city);
+  }
+
+  if (input.notes !== undefined) {
+    normalized.notes = normalizeOptionalString(input.notes);
+  }
+
+  if (input.email !== undefined) {
+    normalized.email = normalizeOptionalString(input.email);
+  }
+
+  if (input.phone !== undefined) {
+    normalized.phone = normalizeOptionalString(input.phone);
+  }
+
+  if (input.ownerId !== undefined) {
+    normalized.ownerId = input.ownerId;
+  }
+
+  if (input.employeeCount !== undefined) {
+    normalized.employeeCount = input.employeeCount;
+  }
+
+  if (input.priority !== undefined) {
+    normalized.priority = input.priority;
+  }
+
+  if (input.status !== undefined) {
+    normalized.status = input.status;
+  }
+
+  return normalized;
 }
 
 export function composeCompanyNotes(input: {

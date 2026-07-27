@@ -5,6 +5,7 @@ import { isOpenAIConfigured } from "@/lib/env";
 
 export const metadata: Metadata = {
   title: "AI Workspace",
+  description: "Beheer bedrijven in gewone taal met HireFlow AI en CRM-tools.",
 };
 
 export default function AiAssistantPage() {
@@ -13,8 +14,8 @@ export default function AiAssistantPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="AI Workspace"
-        description="Recruitment-, sales- en planningassistent met live streaming antwoorden."
+        title="HireFlow AI"
+        description="Chat met de assistent om bedrijven aan te maken, te zoeken, te openen, bij te werken, te archiveren of soft te verwijderen — zonder aparte formulieren."
       />
       <AiAssistantPanel isConfigured={isConfigured} />
     </div>

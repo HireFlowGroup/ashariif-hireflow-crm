@@ -2,6 +2,8 @@ import type {
   Company,
   CompanyId,
   CreateCompanyInput,
+  ListCompaniesInput,
+  ListCompaniesResult,
   SearchCompaniesInput,
   UpdateCompanyInput,
 } from "@/features/companies/domain";
@@ -23,5 +25,9 @@ export interface CompaniesRepository {
 
   search(organizationId: string, input: SearchCompaniesInput): Promise<Company[]>;
 
+  list(organizationId: string, input: ListCompaniesInput): Promise<ListCompaniesResult>;
+
   archive(organizationId: string, companyId: CompanyId): Promise<Company>;
+
+  delete(organizationId: string, companyId: CompanyId): Promise<Company>;
 }

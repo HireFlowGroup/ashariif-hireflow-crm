@@ -7,31 +7,41 @@ export type AiSuggestion = {
 
 export const AI_SUGGESTIONS: AiSuggestion[] = [
   {
-    id: "vacancy",
-    title: "Vacature analyseren",
-    description: "Maak een zoekprofiel en interviewrichting.",
+    id: "company-create",
+    title: "Bedrijf aanmaken",
+    description: "Nieuw CRM-bedrijf via de assistent.",
     prompt:
-      "Ik heb een vacature. Help me met een zoekprofiel, must-haves en eerste interviewvragen.",
+      "Maak een bedrijf aan met de naam HireFlow BV, sector software, website https://hireflow.example.",
   },
   {
-    id: "outreach",
-    title: "Acquisitie opstellen",
-    description: "Schrijf een korte, professionele benadering.",
-    prompt:
-      "Schrijf een acquisitiemail voor een logistiek bedrijf in Rotterdam. Houd het kort en concreet.",
+    id: "company-list",
+    title: "Bedrijvenlijst",
+    description: "Actieve bedrijven in je organisatie.",
+    prompt: "Laat alle actieve bedrijven zien.",
   },
   {
-    id: "planning",
-    title: "Dagplanning",
-    description: "Structuur voor opvolging en prioriteiten.",
-    prompt:
-      "Help me mijn werkdag plannen: leads opvolgen, kandidaten bellen en vacatures bijwerken.",
+    id: "company-search",
+    title: "Bedrijf zoeken",
+    description: "Zoek op naam of klant.",
+    prompt: "Zoek alle klanten met HireFlow in de naam.",
   },
   {
-    id: "interview",
-    title: "Interviewvragen",
-    description: "Gerichte vragen voor een functiegesprek.",
+    id: "company-open",
+    title: "Bedrijf openen",
+    description: "Details na zoeken.",
+    prompt: "Zoek bedrijf HireFlow en toon daarna de volledige bedrijfsinformatie.",
+  },
+  {
+    id: "company-update",
+    title: "Bedrijf bijwerken",
+    description: "Telefoon, website of notities.",
+    prompt: "Zoek HireFlow en werk het telefoonnummer bij naar +31 20 123 4567.",
+  },
+  {
+    id: "company-archive",
+    title: "Archiveren",
+    description: "Bedrijf inactief zetten.",
     prompt:
-      "Geef interviewvragen voor een senior accountmanager in B2B sales, inclusief gedragsvragen.",
+      "Zoek bedrijf HireFlow en archiveer het met reden: geen actieve samenwerking meer.",
   },
 ];

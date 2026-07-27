@@ -10,6 +10,7 @@ import {
   DEFAULT_TEMPERATURE,
   MAX_OUTPUT_TOKENS,
 } from "@/lib/ai/config";
+import type { ChatStreamToolEvent } from "@/lib/ai/chat/stream-events";
 import { HIREFLOW_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { executeTool } from "@/lib/ai/tools/execute-tool";
 import { getOpenAIToolDefinitions } from "@/lib/ai/tools/registry";
@@ -22,6 +23,7 @@ type StreamModelWithToolsParams = {
   input: EasyInputMessage[];
   context: ToolExecutionContext;
   onTextDelta: (delta: string) => void;
+  onToolEvent?: (event: Omit<ChatStreamToolEvent, "type">) => void;
 };
 
 function isFunctionToolCall(item: ResponseOutputItem): item is ResponseFunctionToolCall {
@@ -68,6 +70,28 @@ export async function streamModelResponseWithTools(
           toolCall.arguments,
           params.context,
         );
+
+        try {
+          const parsedOutput = JSON.parse(toolOutput) as {
+            success?: boolean;
+            message?: string;
+          };
+
+          params.onToolEvent?.({
+            name: toolCall.name,
+            success: parsedOutput.success === true,
+            message:
+              typeof parsedOutput.message === "string"
+                ? parsedOutput.message
+                : "Tool uitgevoerd.",
+          });
+        } catch {
+          params.onToolEvent?.({
+            name: toolCall.name,
+            success: false,
+            message: "Toolresultaat kon niet worden gelezen.",
+          });
+        }
 
         conversationInput.push({
           type: "function_call_output",

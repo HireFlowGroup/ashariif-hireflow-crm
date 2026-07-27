@@ -1,7 +1,11 @@
 import type {
+  ArchiveCompanyInput,
   Company,
   CompanyId,
   CreateCompanyInput,
+  DeleteCompanyInput,
+  ListCompaniesInput,
+  ListCompaniesResult,
   SearchCompaniesInput,
   UpdateCompanyInput,
 } from "@/features/companies/domain";
@@ -10,8 +14,17 @@ import { CompaniesValidationError } from "@/features/companies/services/errors";
 import {
   composeCompanyNotes,
   normalizeCreateCompanyInput,
+  normalizeUpdateCompanyInput,
 } from "@/features/companies/services/normalize-company-input";
-import { createCompanyInputSchema } from "@/features/companies/validation";
+import {
+  archiveCompanyInputSchema,
+  createCompanyInputSchema,
+  deleteCompanyInputSchema,
+  getCompanyInputSchema,
+  listCompaniesInputSchema,
+  searchCompaniesInputSchema,
+  updateCompanyInputSchema,
+} from "@/features/companies/validation";
 
 export type CompaniesServiceContext = {
   organizationId: string;
@@ -72,30 +85,195 @@ export class CompaniesService {
   }
 
   async updateCompany(
-    ...args: [CompaniesServiceContext, CompanyId, UpdateCompanyInput]
+    context: CompaniesServiceContext,
+    companyId: CompanyId,
+    input: UpdateCompanyInput,
   ): Promise<Company> {
-    void args;
-    throw new Error("Not implemented");
+    const normalized = normalizeUpdateCompanyInput(input);
+
+    const parsed = updateCompanyInputSchema.safeParse(normalized);
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige update-invoer.",
+      );
+    }
+
+    const existing = await this.repository.findById(context.organizationId, companyId);
+
+    if (!existing) {
+      throw new CompaniesValidationError("Bedrijf niet gevonden.");
+    }
+
+    const persistedInput: UpdateCompanyInput = {};
+
+    if (parsed.data.name !== undefined) {
+      persistedInput.name = parsed.data.name;
+    }
+
+    if (parsed.data.website !== undefined) {
+      persistedInput.website = parsed.data.website;
+    }
+
+    if (parsed.data.sector !== undefined) {
+      persistedInput.sector = parsed.data.sector;
+    }
+
+    if (parsed.data.status !== undefined) {
+      persistedInput.status = parsed.data.status;
+    }
+
+    const updated = await this.repository.update(
+      context.organizationId,
+      companyId,
+      persistedInput,
+    );
+
+    const composedNotes = composeCompanyNotes({
+      notes: parsed.data.notes ?? existing.notes,
+      email: parsed.data.email,
+      phone: parsed.data.phone,
+    });
+
+    return {
+      ...updated,
+      ownerId: existing.ownerId,
+      notes: composedNotes ?? updated.notes,
+      city: parsed.data.city ?? existing.city,
+    };
   }
 
-  async findCompany(
-    ...args: [CompaniesServiceContext, CompanyId]
-  ): Promise<Company | null> {
-    void args;
-    throw new Error("Not implemented");
+  async getCompany(
+    context: CompaniesServiceContext,
+    companyId: CompanyId,
+  ): Promise<Company> {
+    const parsed = getCompanyInputSchema.safeParse({
+      companyId: companyId as string,
+    });
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige bedrijfsinvoer.",
+      );
+    }
+
+    const company = await this.repository.findById(context.organizationId, companyId);
+
+    if (!company) {
+      throw new CompaniesValidationError("Bedrijf niet gevonden.");
+    }
+
+    return company;
+  }
+
+  async listCompanies(
+    context: CompaniesServiceContext,
+    input: ListCompaniesInput = {},
+  ): Promise<ListCompaniesResult> {
+    const parsed = listCompaniesInputSchema.safeParse({
+      limit: input.limit ?? 50,
+      offset: input.offset ?? 0,
+      includeArchived: input.includeArchived ?? false,
+    });
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige lijst-invoer.",
+      );
+    }
+
+    return this.repository.list(context.organizationId, parsed.data);
   }
 
   async searchCompanies(
-    ...args: [CompaniesServiceContext, SearchCompaniesInput]
+    context: CompaniesServiceContext,
+    input: SearchCompaniesInput,
   ): Promise<Company[]> {
-    void args;
-    throw new Error("Not implemented");
+    const parsed = searchCompaniesInputSchema.safeParse({
+      ...input,
+      query: input.query?.replace(/\s+/g, " ").trim() || undefined,
+      city: input.city?.replace(/\s+/g, " ").trim() || undefined,
+      sector: input.sector?.replace(/\s+/g, " ").trim() || undefined,
+      limit: input.limit ?? 20,
+    });
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige zoekopdracht.",
+      );
+    }
+
+    return this.repository.search(context.organizationId, parsed.data);
   }
 
   async archiveCompany(
-    ...args: [CompaniesServiceContext, CompanyId]
+    context: CompaniesServiceContext,
+    companyId: CompanyId,
+    input: ArchiveCompanyInput = {},
   ): Promise<Company> {
-    void args;
-    throw new Error("Not implemented");
+    const parsed = archiveCompanyInputSchema.safeParse({
+      companyId: companyId as string,
+      reason: input.reason?.replace(/\s+/g, " ").trim() || undefined,
+    });
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige archiveringsinvoer.",
+      );
+    }
+
+    const existing = await this.repository.findById(context.organizationId, companyId);
+
+    if (!existing) {
+      throw new CompaniesValidationError("Bedrijf niet gevonden.");
+    }
+
+    if (existing.status === "archived" || existing.status === "inactive") {
+      throw new CompaniesValidationError("Bedrijf is al gearchiveerd.");
+    }
+
+    const archived = await this.repository.archive(context.organizationId, companyId);
+
+    const reason = parsed.data.reason;
+
+    if (!reason) {
+      return archived;
+    }
+
+    const reasonNote = `Archiveringsreden: ${reason}`;
+
+    return {
+      ...archived,
+      notes: archived.notes ? `${archived.notes}\n${reasonNote}` : reasonNote,
+    };
+  }
+
+  async deleteCompany(
+    context: CompaniesServiceContext,
+    companyId: CompanyId,
+    input: DeleteCompanyInput = {},
+  ): Promise<Company> {
+    const parsed = deleteCompanyInputSchema.safeParse({
+      companyId: companyId as string,
+      reason: input.reason?.replace(/\s+/g, " ").trim() || undefined,
+    });
+
+    if (!parsed.success) {
+      throw new CompaniesValidationError(
+        parsed.error.issues[0]?.message ?? "Ongeldige verwijderingsinvoer.",
+      );
+    }
+
+    const existing = await this.repository.findById(context.organizationId, companyId);
+
+    if (!existing) {
+      throw new CompaniesValidationError("Bedrijf niet gevonden.");
+    }
+
+    if (existing.status === "archived" || existing.status === "inactive") {
+      throw new CompaniesValidationError("Bedrijf is al verwijderd.");
+    }
+
+    return this.repository.delete(context.organizationId, companyId);
   }
 }

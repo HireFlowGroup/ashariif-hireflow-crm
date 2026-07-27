@@ -45,6 +45,8 @@ export type UpdateCompanyInput = {
   name?: string;
   ownerId?: string | null;
   website?: string | null;
+  email?: string | null;
+  phone?: string | null;
   sector?: string | null;
   city?: string | null;
   employeeCount?: number | null;
@@ -55,8 +57,33 @@ export type UpdateCompanyInput = {
 
 export type SearchCompaniesInput = {
   query?: string;
+  city?: string;
+  sector?: string;
+  archived?: boolean;
   status?: CompanyStatus;
   priority?: CompanyPriority;
-  city?: string;
   limit?: number;
+};
+
+/** Input for listing companies with pagination. */
+export type ListCompaniesInput = {
+  limit?: number;
+  offset?: number;
+  includeArchived?: boolean;
+};
+
+/** Result of a paginated company list. */
+export type ListCompaniesResult = {
+  companies: Company[];
+  total: number;
+};
+
+/** Input for archiving a company (reason is not persisted until notes column exists). */
+export type ArchiveCompanyInput = {
+  reason?: string;
+};
+
+/** Input for soft-deleting a company (reason is not persisted until notes column exists). */
+export type DeleteCompanyInput = {
+  reason?: string;
 };

@@ -4,6 +4,9 @@ import type { EasyInputMessage } from "openai/resources/responses/responses";
 import {
   getOpenAIClient,
   streamModelResponseWithTools,
+  CHAT_STREAM_FORMAT_HEADER,
+  CHAT_STREAM_FORMAT_NDJSON,
+  encodeChatStreamEvent,
 } from "@/lib/ai";
 import {
   insertConversationMessage,
@@ -146,7 +149,18 @@ export async function POST(request: Request): Promise<Response> {
             context: conversationContext,
             onTextDelta: (delta) => {
               assistantContent += delta;
-              controller.enqueue(encoder.encode(delta));
+              controller.enqueue(
+                encoder.encode(
+                  encodeChatStreamEvent({ type: "text", delta }),
+                ),
+              );
+            },
+            onToolEvent: (event) => {
+              controller.enqueue(
+                encoder.encode(
+                  encodeChatStreamEvent({ type: "tool", ...event }),
+                ),
+              );
             },
           });
 
@@ -165,7 +179,16 @@ export async function POST(request: Request): Promise<Response> {
           }
         } catch (streamError) {
           console.error("[api/ai/chat] Streaming mislukt");
-          controller.error(streamError);
+          const message =
+            streamError instanceof Error
+              ? streamError.message
+              : "Streaming mislukt.";
+          controller.enqueue(
+            encoder.encode(
+              encodeChatStreamEvent({ type: "error", message }),
+            ),
+          );
+          controller.close();
         }
       },
     });
@@ -176,6 +199,7 @@ export async function POST(request: Request): Promise<Response> {
         "Cache-Control": "no-cache, no-transform",
         "X-Content-Type-Options": "nosniff",
         "X-Conversation-Id": activeConversationId,
+        [CHAT_STREAM_FORMAT_HEADER]: CHAT_STREAM_FORMAT_NDJSON,
       },
     });
   } catch (error) {

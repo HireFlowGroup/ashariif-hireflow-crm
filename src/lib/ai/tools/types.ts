@@ -13,6 +13,8 @@ export type ToolResult<TData = unknown> = {
   data?: TData;
   companyId?: string;
   company?: unknown;
+  companies?: unknown[];
+  total?: number;
 };
 
 /** HireFlow tool definition bound to a Zod input schema. */

@@ -1,5 +1,11 @@
 import { z } from "zod";
+import { archiveCompanyTool } from "@/lib/ai/tools/companies/archive-company";
+import { deleteCompanyTool } from "@/lib/ai/tools/companies/delete-company";
 import { createCompanyTool } from "@/lib/ai/tools/companies/create-company";
+import { getCompanyTool } from "@/lib/ai/tools/companies/get-company";
+import { listCompaniesTool } from "@/lib/ai/tools/companies/list-companies";
+import { searchCompaniesTool } from "@/lib/ai/tools/companies/search-companies";
+import { updateCompanyTool } from "@/lib/ai/tools/companies/update-company";
 import { getCurrentTimeTool } from "@/lib/ai/tools/system/get-current-time";
 import type { RegisteredTool, ToolExecutionContext, ToolResult } from "@/lib/ai/tools/types";
 import { zodObjectToJsonSchema } from "@/lib/ai/tools/schemas";
@@ -18,6 +24,12 @@ function registerTool(tool: RegisteredTool): void {
 function registerBuiltInTools(): void {
   registerTool(getCurrentTimeTool);
   registerTool(createCompanyTool);
+  registerTool(listCompaniesTool);
+  registerTool(searchCompaniesTool);
+  registerTool(getCompanyTool);
+  registerTool(updateCompanyTool);
+  registerTool(archiveCompanyTool);
+  registerTool(deleteCompanyTool);
 }
 
 registerBuiltInTools();
