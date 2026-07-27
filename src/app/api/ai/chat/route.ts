@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 import { APIConnectionError } from "openai";
 import type { EasyInputMessage } from "openai/resources/responses/responses";
 import {
-  DEFAULT_MODEL,
-  DEFAULT_TEMPERATURE,
   getOpenAIClient,
-  HIREFLOW_SYSTEM_PROMPT,
-  MAX_OUTPUT_TOKENS,
+  streamModelResponseWithTools,
 } from "@/lib/ai";
 import {
   insertConversationMessage,
@@ -136,15 +133,6 @@ export async function POST(request: Request): Promise<Response> {
   }));
 
   try {
-    const openaiStream = await openai.responses.create({
-      model: DEFAULT_MODEL,
-      instructions: HIREFLOW_SYSTEM_PROMPT,
-      input,
-      stream: true,
-      temperature: DEFAULT_TEMPERATURE,
-      max_output_tokens: MAX_OUTPUT_TOKENS,
-    });
-
     const encoder = new TextEncoder();
 
     const readable = new ReadableStream<Uint8Array>({
@@ -152,16 +140,19 @@ export async function POST(request: Request): Promise<Response> {
         let assistantContent = "";
 
         try {
-          for await (const event of openaiStream) {
-            if (event.type === "response.output_text.delta" && event.delta) {
-              assistantContent += event.delta;
-              controller.enqueue(encoder.encode(event.delta));
-            }
-          }
+          const finalText = await streamModelResponseWithTools({
+            client: openai,
+            input,
+            context: conversationContext,
+            onTextDelta: (delta) => {
+              assistantContent += delta;
+              controller.enqueue(encoder.encode(delta));
+            },
+          });
 
           controller.close();
 
-          const trimmed = assistantContent.trim();
+          const trimmed = (finalText || assistantContent).trim();
 
           if (trimmed) {
             await insertConversationMessage(
