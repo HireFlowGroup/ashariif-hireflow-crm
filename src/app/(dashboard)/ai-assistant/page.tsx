@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { isOpenAIConfigured } from "@/lib/env";
 
 export const metadata: Metadata = {
-  title: "AI Assistant",
+  title: "AI Workspace",
 };
 
 export default function AiAssistantPage() {
@@ -13,8 +13,8 @@ export default function AiAssistantPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="AI Assistant"
-        description="Recruiting copilot for screening guidance, outreach, and interview preparation."
+        title="AI Workspace"
+        description="Recruitment-, sales- en planningassistent met live streaming antwoorden."
       />
       <AiAssistantPanel isConfigured={isConfigured} />
     </div>
