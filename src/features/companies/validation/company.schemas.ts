@@ -4,6 +4,30 @@ const companyStatusSchema = z.enum(["active", "inactive", "prospect", "archived"
 
 const companyPrioritySchema = z.enum(["low", "medium", "high"]);
 
+const optionalUrlSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  },
+  z.string().url("Ongeldige website-URL.").nullable().optional(),
+);
+
+const optionalEmailSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  },
+  z.string().email("Ongeldig e-mailadres.").nullable().optional(),
+);
+
 export const createCompanyInputSchema = z.object({
   name: z
     .string()
@@ -11,7 +35,9 @@ export const createCompanyInputSchema = z.object({
     .min(1, "Bedrijfsnaam is verplicht.")
     .max(200, "Bedrijfsnaam is te lang."),
   ownerId: z.string().uuid("Ongeldige ownerId.").nullable().optional(),
-  website: z.string().trim().url("Ongeldige website-URL.").nullable().optional(),
+  website: optionalUrlSchema,
+  email: optionalEmailSchema,
+  phone: z.string().trim().max(40, "Telefoonnummer is te lang.").nullable().optional(),
   sector: z.string().trim().max(120, "Sector is te lang.").nullable().optional(),
   city: z.string().trim().max(120, "Plaats is te lang.").nullable().optional(),
   employeeCount: z

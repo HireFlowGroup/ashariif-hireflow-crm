@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createCompanyTool } from "@/lib/ai/tools/companies/create-company";
 import { getCurrentTimeTool } from "@/lib/ai/tools/system/get-current-time";
 import type { RegisteredTool, ToolExecutionContext, ToolResult } from "@/lib/ai/tools/types";
 import { zodObjectToJsonSchema } from "@/lib/ai/tools/schemas";
@@ -16,6 +17,7 @@ function registerTool(tool: RegisteredTool): void {
 
 function registerBuiltInTools(): void {
   registerTool(getCurrentTimeTool);
+  registerTool(createCompanyTool);
 }
 
 registerBuiltInTools();

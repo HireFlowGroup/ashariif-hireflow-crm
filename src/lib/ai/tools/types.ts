@@ -11,6 +11,8 @@ export type ToolResult<TData = unknown> = {
   success: boolean;
   message: string;
   data?: TData;
+  companyId?: string;
+  company?: unknown;
 };
 
 /** HireFlow tool definition bound to a Zod input schema. */

@@ -30,6 +30,8 @@ export type CreateCompanyInput = {
   name: string;
   ownerId?: string | null;
   website?: string | null;
+  email?: string | null;
+  phone?: string | null;
   sector?: string | null;
   city?: string | null;
   employeeCount?: number | null;
