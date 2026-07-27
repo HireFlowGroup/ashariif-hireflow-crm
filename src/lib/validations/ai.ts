@@ -27,6 +27,7 @@ const aiChatMessageSchema = z.object({
 
 export const aiChatStreamRequestSchema = z
   .object({
+    conversationId: z.string().uuid("Ongeldig gesprek-id.").optional(),
     messages: z
       .array(aiChatMessageSchema)
       .min(1, "Minimaal één bericht is verplicht.")

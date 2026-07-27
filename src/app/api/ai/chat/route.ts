@@ -8,7 +8,13 @@ import {
   HIREFLOW_SYSTEM_PROMPT,
   MAX_OUTPUT_TOKENS,
 } from "@/lib/ai";
-import { getSessionUser } from "@/lib/supabase/server";
+import {
+  insertConversationMessage,
+  maybeUpdateConversationTitle,
+  resolveConversationForChat,
+  touchConversationUpdatedAt,
+} from "@/lib/ai/conversation-repository";
+import { getSessionProfile, getSessionUser } from "@/lib/supabase/server";
 import { aiChatStreamRequestSchema } from "@/lib/validations/ai";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" } as const;
@@ -50,6 +56,12 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const profile = await getSessionProfile();
+
+  if (!profile) {
+    return jsonError("Gebruikersprofiel niet gevonden.", 403);
+  }
+
   let body: unknown;
 
   try {
@@ -65,6 +77,14 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(message, 400);
   }
 
+  const latestUserMessage = [...parsed.data.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+
+  if (!latestUserMessage) {
+    return jsonError("Het laatste bericht moet van de gebruiker zijn.", 400);
+  }
+
   let openai;
 
   try {
@@ -74,6 +94,40 @@ export async function POST(request: Request): Promise<Response> {
       "De AI-assistent is momenteel niet beschikbaar. Probeer het later opnieuw.",
       500,
     );
+  }
+
+  const conversationContext = {
+    userId: user.id,
+    organizationId: profile.organization_id,
+  };
+
+  let activeConversationId: string;
+
+  try {
+    activeConversationId = await resolveConversationForChat(
+      conversationContext,
+      parsed.data.conversationId,
+      latestUserMessage.content,
+    );
+
+    await insertConversationMessage(
+      conversationContext,
+      activeConversationId,
+      "user",
+      latestUserMessage.content,
+    );
+    await maybeUpdateConversationTitle(
+      activeConversationId,
+      latestUserMessage.content,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message === "Gesprek niet gevonden."
+        ? error.message
+        : "Gesprek kon niet worden opgeslagen.";
+
+    const status = message === "Gesprek niet gevonden." ? 404 : 500;
+    return jsonError(message, status);
   }
 
   const input: EasyInputMessage[] = parsed.data.messages.map((message) => ({
@@ -95,13 +149,29 @@ export async function POST(request: Request): Promise<Response> {
 
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
+        let assistantContent = "";
+
         try {
           for await (const event of openaiStream) {
             if (event.type === "response.output_text.delta" && event.delta) {
+              assistantContent += event.delta;
               controller.enqueue(encoder.encode(event.delta));
             }
           }
+
           controller.close();
+
+          const trimmed = assistantContent.trim();
+
+          if (trimmed) {
+            await insertConversationMessage(
+              conversationContext,
+              activeConversationId,
+              "assistant",
+              trimmed,
+            );
+            await touchConversationUpdatedAt(activeConversationId);
+          }
         } catch (streamError) {
           console.error("[api/ai/chat] Streaming mislukt");
           controller.error(streamError);
@@ -114,6 +184,7 @@ export async function POST(request: Request): Promise<Response> {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         "X-Content-Type-Options": "nosniff",
+        "X-Conversation-Id": activeConversationId,
       },
     });
   } catch (error) {

@@ -8,6 +8,7 @@ import type {
   Task,
   Vacancy,
 } from "@/types/crm";
+import type { AiConversation, AiMessage } from "@/types/ai";
 
 export type Json =
   | string
@@ -96,6 +97,26 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<Task>;
+        Relationships: [];
+      };
+      ai_conversations: {
+        Row: AiConversation;
+        Insert: Omit<AiConversation, "id" | "created_at" | "updated_at"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<AiConversation>;
+        Relationships: [];
+      };
+      ai_messages: {
+        Row: AiMessage;
+        Insert: Omit<AiMessage, "id" | "created_at" | "tool_name"> & {
+          id?: string;
+          created_at?: string;
+          tool_name?: string | null;
+        };
+        Update: Partial<AiMessage>;
         Relationships: [];
       };
     };

@@ -43,3 +43,24 @@ export async function getSessionUser() {
 
   return user;
 }
+
+export async function getSessionProfile() {
+  const supabase = await createClient();
+  const user = await getSessionUser();
+
+  if (!user) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    return null;
+  }
+
+  return data;
+}
