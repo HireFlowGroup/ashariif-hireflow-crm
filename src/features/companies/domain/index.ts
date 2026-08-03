@@ -6,8 +6,12 @@ export type {
   CompanyStatus,
   CreateCompanyInput,
   DeleteCompanyInput,
+  HiringSignal,
+  LeadPriority,
   ListCompaniesInput,
   ListCompaniesResult,
+  OutreachStatus,
+  ScoreBreakdown,
   SearchCompaniesInput,
   UpdateCompanyInput,
 } from "./company";

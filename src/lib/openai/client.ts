@@ -1,22 +1,10 @@
-import OpenAI from "openai";
-import { getServerEnv } from "@/lib/env";
+/**
+ * @deprecated Import from `@/lib/ai/client` or `@/platform/config/env`.
+ */
+export { getOpenAIClient } from "@/lib/ai/client";
+export { isOpenAIConfigured } from "@/platform/config/env";
 
-let openaiClient: OpenAI | null = null;
-
-export function getOpenAIClient(): OpenAI {
-  const { OPENAI_API_KEY } = getServerEnv();
-
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
-  }
-
-  return openaiClient;
-}
-
+/** @deprecated Use HIREFLOW_SYSTEM_PROMPT from `@/lib/ai/prompts`. */
 export const openAIRecruitingSystemPrompt = `You are HireFlow AI, an expert recruitment assistant embedded in a CRM.
 Help recruiters with candidate screening guidance, job description improvements, interview questions,
 and pipeline next steps. Be concise, actionable, and professional. Do not invent candidate or company data.`;

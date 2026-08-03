@@ -9,14 +9,18 @@ import type {
 } from "@/features/companies/domain";
 import type { CompaniesRepository } from "@/features/companies/repositories/companies.repository";
 import {
+  mapBareDiscoveryCreateInputToRow,
   mapCompanyIdToString,
   mapCompanyRowToDomain,
   mapCreateInputToRow,
+  mapDiscoveryCreateInputToRow,
   mapUpdateInputToRow,
 } from "@/features/companies/repositories/company.mapper";
 import { CompaniesRepositoryError } from "@/features/companies/repositories/errors";
 import { escapeIlikePattern } from "@/features/companies/repositories/search-utils";
+import { logSupabaseError } from "@/lib/supabase/log-error";
 import type { Database } from "@/types/database";
+import type { Company as CompanyRow } from "@/types/crm";
 
 /**
  * Supabase-backed companies repository.
@@ -25,20 +29,90 @@ import type { Database } from "@/types/database";
 export class SupabaseCompaniesRepository implements CompaniesRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
 
-  async create(organizationId: string, input: CreateCompanyInput): Promise<Company> {
-    const row = mapCreateInputToRow(organizationId, input);
+  private logError(
+    operation: string,
+    organizationId: string,
+    error: { code?: string; message?: string; details?: string; hint?: string } | null,
+  ): void {
+    logSupabaseError({
+      operation,
+      repository: "SupabaseCompaniesRepository",
+      organizationId,
+      error: error as never,
+    });
+  }
 
+  private mapRowsSafely(
+    rows: CompanyRow[],
+    organizationId: string,
+  ): Company[] {
+    const companies: Company[] = [];
+
+    for (const row of rows) {
+      try {
+        companies.push(mapCompanyRowToDomain(row, null));
+      } catch (error) {
+        this.logError("companies.map", organizationId, {
+          message: error instanceof Error ? error.message : "Mapping mislukt",
+        });
+      }
+    }
+
+    return companies;
+  }
+
+  async create(organizationId: string, input: CreateCompanyInput): Promise<Company> {
+    return this.insertCompanyRow(organizationId, mapCreateInputToRow(organizationId, input), input.ownerId ?? null);
+  }
+
+  async createDiscovery(organizationId: string, input: CreateCompanyInput): Promise<Company> {
+    const discoveryRow = mapDiscoveryCreateInputToRow(organizationId, input);
+
+    try {
+      return await this.insertCompanyRow(organizationId, discoveryRow, input.ownerId ?? null);
+    } catch (error) {
+      const code = error instanceof CompaniesRepositoryError ? error.supabaseCode : undefined;
+      const isSchemaMismatch =
+        code === "42703" || code === "PGRST204" || code === "PGRST205";
+
+      if (!isSchemaMismatch) {
+        throw error;
+      }
+
+      console.warn("[CompaniesRepository] Discovery insert fallback naar minimale kolommen", {
+        organizationId,
+        name: input.name,
+        supabaseCode: code,
+      });
+
+      return this.insertCompanyRow(
+        organizationId,
+        mapBareDiscoveryCreateInputToRow(organizationId, input),
+        input.ownerId ?? null,
+      );
+    }
+  }
+
+  private async insertCompanyRow(
+    organizationId: string,
+    row: Record<string, unknown>,
+    ownerId: string | null,
+  ): Promise<Company> {
     const { data, error } = await this.client
       .from("companies")
-      .insert(row)
+      .insert(row as never)
       .select("*")
       .single();
 
     if (error || !data) {
-      throw new CompaniesRepositoryError("Bedrijf kon niet worden opgeslagen.");
+      this.logError("companies.create", organizationId, error);
+      throw new CompaniesRepositoryError(
+        error?.message ?? "Bedrijf kon niet worden opgeslagen.",
+        error,
+      );
     }
 
-    return mapCompanyRowToDomain(data, input.ownerId ?? null);
+    return mapCompanyRowToDomain(data, ownerId);
   }
 
   async update(
@@ -54,7 +128,7 @@ export class SupabaseCompaniesRepository implements CompaniesRepository {
 
     const { data, error } = await this.client
       .from("companies")
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...updates, updated_at: new Date().toISOString() } as never)
       .eq("id", mapCompanyIdToString(companyId))
       .eq("organization_id", organizationId)
       .select("*")
@@ -118,16 +192,22 @@ export class SupabaseCompaniesRepository implements CompaniesRepository {
 
     const sectorTerm = input.sector?.trim();
     if (sectorTerm) {
-      query = query.ilike("industry", `%${escapeIlikePattern(sectorTerm)}%`);
+      const pattern = `%${escapeIlikePattern(sectorTerm)}%`;
+      query = query.or(
+        [`sector.ilike.${pattern}`, `industry.ilike.${pattern}`].join(","),
+      );
     }
 
     const searchTerm = input.query?.trim();
     if (searchTerm) {
       const pattern = `%${escapeIlikePattern(searchTerm)}%`;
       query = query.or(
-        [`name.ilike.${pattern}`, `website.ilike.${pattern}`, `industry.ilike.${pattern}`].join(
-          ",",
-        ),
+        [
+          `name.ilike.${pattern}`,
+          `website.ilike.${pattern}`,
+          `sector.ilike.${pattern}`,
+          `industry.ilike.${pattern}`,
+        ].join(","),
       );
     }
 
@@ -157,49 +237,73 @@ export class SupabaseCompaniesRepository implements CompaniesRepository {
     const offset = input.offset ?? 0;
     const includeArchived = input.includeArchived ?? false;
 
-    const applyStatusFilter = <T extends { neq: (column: string, value: string) => T }>(
-      builder: T,
-    ): T => {
-      if (includeArchived) {
-        return builder;
-      }
+    let dataQuery = this.client
+      .from("companies")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("lead_score", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
-      return builder.neq("status", "inactive");
-    };
+    if (!includeArchived) {
+      dataQuery = dataQuery.neq("status", "inactive");
+    }
+
+    if (input.leadPriority) {
+      dataQuery = dataQuery.eq("priority", input.leadPriority);
+    }
+
+    if (input.hasVacancies) {
+      dataQuery = dataQuery.gt("vacancy_count", 0);
+    }
+
+    if (input.outreachReady) {
+      dataQuery = dataQuery
+        .gte("lead_score", 50)
+        .in("outreach_status", ["none", "draft"]);
+    }
+
+    const { data, error } = await dataQuery;
+
+    if (error) {
+      this.logError("companies.list.data", organizationId, error);
+      throw new CompaniesRepositoryError("Bedrijven konden niet worden opgehaald.", error);
+    }
+
+    const companies = this.mapRowsSafely((data ?? []) as CompanyRow[], organizationId);
 
     let countQuery = this.client
       .from("companies")
       .select("*", { count: "exact", head: true })
       .eq("organization_id", organizationId);
 
-    countQuery = applyStatusFilter(countQuery);
+    if (!includeArchived) {
+      countQuery = countQuery.neq("status", "inactive");
+    }
+
+    if (input.leadPriority) {
+      countQuery = countQuery.eq("priority", input.leadPriority);
+    }
+
+    if (input.hasVacancies) {
+      countQuery = countQuery.gt("vacancy_count", 0);
+    }
+
+    if (input.outreachReady) {
+      countQuery = countQuery
+        .gte("lead_score", 50)
+        .in("outreach_status", ["none", "draft"]);
+    }
 
     const { count, error: countError } = await countQuery;
 
     if (countError) {
-      throw new CompaniesRepositoryError("Bedrijven konden niet worden geteld.");
+      this.logError("companies.list.count", organizationId, countError);
     }
-
-    let dataQuery = this.client
-      .from("companies")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .order("name", { ascending: true })
-      .range(offset, offset + limit - 1);
-
-    dataQuery = applyStatusFilter(dataQuery);
-
-    const { data, error } = await dataQuery;
-
-    if (error) {
-      throw new CompaniesRepositoryError("Bedrijven konden niet worden opgehaald.");
-    }
-
-    const companies = (data ?? []).map((row) => mapCompanyRowToDomain(row, null));
 
     return {
       companies,
-      total: count ?? companies.length,
+      total: countError ? companies.length : (count ?? companies.length),
     };
   }
 

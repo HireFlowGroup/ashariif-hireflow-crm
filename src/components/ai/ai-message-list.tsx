@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { AiMessageBubble } from "@/components/ai/ai-message-bubble";
+import { CopilotWelcomeScreen } from "@/components/ai/copilot-welcome-screen";
 import { AiWelcomeScreen } from "@/components/ai/ai-welcome-screen";
 import type { AiChatMessage } from "@/components/ai/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,6 +13,7 @@ type AiMessageListProps = {
   streamingMessageId: string | null;
   composerDisabled?: boolean;
   onSelectSuggestion: (prompt: string) => void;
+  useCopilotWelcome?: boolean;
 };
 
 export function AiMessageList({
@@ -20,6 +22,7 @@ export function AiMessageList({
   streamingMessageId,
   composerDisabled = false,
   onSelectSuggestion,
+  useCopilotWelcome = false,
 }: AiMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -28,8 +31,10 @@ export function AiMessageList({
   }, [messages, isStreaming]);
 
   if (messages.length === 0) {
+    const Welcome = useCopilotWelcome ? CopilotWelcomeScreen : AiWelcomeScreen;
+
     return (
-      <AiWelcomeScreen
+      <Welcome
         disabled={composerDisabled}
         onSelectSuggestion={onSelectSuggestion}
       />

@@ -28,6 +28,34 @@ const optionalEmailSchema = z.preprocess(
   z.string().email("Ongeldig e-mailadres.").nullable().optional(),
 );
 
+const leadPrioritySchema = z.enum(["A", "B", "C", "D"]);
+
+const scoreBreakdownSchema = z
+  .object({
+    version: z.string().optional(),
+    components: z.record(z.number()).optional(),
+    recruitmentActivity: z.number().optional(),
+    growth: z.number().optional(),
+    hiringUrgency: z.number().optional(),
+    urgency: z.number().optional(),
+    contactability: z.number().optional(),
+    digitalPresence: z.number().optional(),
+    decisionMakerAvailability: z.number().optional(),
+    aiMatch: z.number().optional(),
+    outreachDifficulty: z.number().optional(),
+    outreachPotential: z.number().optional(),
+    sectorMatch: z.number().optional(),
+    regionMatch: z.number().optional(),
+    companySize: z.number().optional(),
+    activeVacancies: z.number().optional(),
+    relevantVacancies: z.number().optional(),
+    contactCompleteness: z.number().optional(),
+    sourceQuality: z.number().optional(),
+    crmStatus: z.number().optional(),
+    exclusionPenalty: z.number().optional(),
+  })
+  .passthrough();
+
 export const createCompanyInputSchema = z.object({
   name: z
     .string()
@@ -36,17 +64,34 @@ export const createCompanyInputSchema = z.object({
     .max(200, "Bedrijfsnaam is te lang."),
   ownerId: z.string().uuid("Ongeldige ownerId.").nullable().optional(),
   website: optionalUrlSchema,
+  domain: z.string().trim().max(200).nullable().optional(),
+  linkedinUrl: optionalUrlSchema,
   email: optionalEmailSchema,
   phone: z.string().trim().max(40, "Telefoonnummer is te lang.").nullable().optional(),
   sector: z.string().trim().max(120, "Sector is te lang.").nullable().optional(),
   city: z.string().trim().max(120, "Plaats is te lang.").nullable().optional(),
-  employeeCount: z
-    .number()
-    .int("Aantal medewerkers moet een geheel getal zijn.")
-    .positive("Aantal medewerkers moet positief zijn.")
-    .nullable()
-    .optional(),
+  region: z.string().trim().max(120).nullable().optional(),
+  country: z.string().trim().max(80).nullable().optional(),
+  employeeCount: z.number().int().positive().nullable().optional(),
+  employeeCountMin: z.number().int().positive().nullable().optional(),
+  employeeCountMax: z.number().int().positive().nullable().optional(),
   priority: companyPrioritySchema.nullable().optional(),
+  leadScore: z.number().int().min(0).max(100).nullable().optional(),
+  leadPriority: leadPrioritySchema.nullable().optional(),
+  scoreReason: z.string().trim().max(500).nullable().optional(),
+  scoreBreakdown: scoreBreakdownSchema.nullable().optional(),
+  vacancyCount: z.number().int().min(0).optional(),
+  hiringSignals: z.array(z.object({
+    type: z.string(),
+    description: z.string(),
+    source: z.string(),
+    confidence: z.number(),
+  })).optional(),
+  source: z.string().trim().max(120).nullable().optional(),
+  sourceUrl: optionalUrlSchema,
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  lastVerifiedAt: z.string().datetime().nullable().optional(),
+  outreachStatus: z.enum(["none", "queued", "draft", "review", "sent", "blocked"]).optional(),
   status: companyStatusSchema.optional(),
   notes: z.string().trim().max(5000, "Notities zijn te lang.").nullable().optional(),
 });
@@ -123,6 +168,9 @@ export const listCompaniesInputSchema = z.object({
     .optional()
     .default(0),
   includeArchived: z.boolean().optional().default(false),
+  leadPriority: z.enum(["A", "B", "C", "D"]).optional(),
+  hasVacancies: z.boolean().optional(),
+  outreachReady: z.boolean().optional(),
 });
 
 export const deleteCompanyInputSchema = z.object({

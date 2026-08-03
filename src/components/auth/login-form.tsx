@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
@@ -22,7 +22,6 @@ import { defaultAuthenticatedRoute } from "@/config/navigation";
 import { siteConfig } from "@/config/site";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -50,13 +49,12 @@ export function LoginForm() {
     setIsSubmitting(false);
 
     if (error) {
-      toast.error("Sign in failed", { description: error.message });
+      toast.error("Inloggen mislukt", { description: error.message });
       return;
     }
 
     const nextPath = searchParams.get("next") ?? defaultAuthenticatedRoute;
-    router.push(nextPath);
-    router.refresh();
+    window.location.assign(nextPath);
   }
 
   return (

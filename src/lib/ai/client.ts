@@ -1,28 +1,40 @@
+import "server-only";
+
 import OpenAI from "openai";
+
+import { getOpenAiApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 
 /**
  * Server-only OpenAI access. Do not import this module from Client Components.
  */
 
 let openaiClient: OpenAI | null = null;
+let cachedApiKey: string | null = null;
 
 function requireOpenAIApiKey(): string {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey = getOpenAiApiKey()?.trim();
 
   if (!apiKey) {
     throw new Error(
-      "OPENAI_API_KEY ontbreekt. Stel deze omgevingsvariabele in op de server (bijv. .env.local).",
+      "OpenAI API key ontbreekt. Configureer via Settings → Providers of stel OPENAI_API_KEY in.",
     );
   }
 
   return apiKey;
 }
 
-/** Returns the shared OpenAI client (initialized once per process). */
+/** Returns the shared OpenAI client (re-init when vault key changes). */
 export function getOpenAIClient(): OpenAI {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: requireOpenAIApiKey() });
+  const apiKey = requireOpenAIApiKey();
+
+  if (!openaiClient || cachedApiKey !== apiKey) {
+    openaiClient = new OpenAI({ apiKey });
+    cachedApiKey = apiKey;
   }
 
   return openaiClient;
+}
+
+export function isOpenAIConfiguredForActiveOrg(): boolean {
+  return Boolean(getOpenAiApiKey()?.trim());
 }

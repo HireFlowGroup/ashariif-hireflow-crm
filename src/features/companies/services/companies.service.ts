@@ -39,6 +39,22 @@ export class CompaniesService {
     context: CompaniesServiceContext,
     input: CreateCompanyInput,
   ): Promise<Company> {
+    return this.persistNewCompany(context, input, "full");
+  }
+
+  /** Discovery-only create: minimal columns, schema-safe fallback insert. */
+  async createDiscoveryCompany(
+    context: CompaniesServiceContext,
+    input: CreateCompanyInput,
+  ): Promise<Company> {
+    return this.persistNewCompany(context, input, "discovery");
+  }
+
+  private async persistNewCompany(
+    context: CompaniesServiceContext,
+    input: CreateCompanyInput,
+    mode: "full" | "discovery",
+  ): Promise<Company> {
     const normalized = normalizeCreateCompanyInput(input);
 
     if (!normalized.name) {
@@ -54,18 +70,15 @@ export class CompaniesService {
     }
 
     const persistedInput: CreateCompanyInput = {
-      name: parsed.data.name,
+      ...parsed.data,
       ownerId: context.userId,
-      website: parsed.data.website ?? null,
-      sector: parsed.data.sector ?? null,
-      city: parsed.data.city ?? null,
       status: parsed.data.status ?? "prospect",
-      notes: parsed.data.notes ?? null,
-      employeeCount: parsed.data.employeeCount ?? null,
-      priority: parsed.data.priority ?? null,
     };
 
-    const company = await this.repository.create(context.organizationId, persistedInput);
+    const company =
+      mode === "discovery"
+        ? await this.repository.createDiscovery(context.organizationId, persistedInput)
+        : await this.repository.create(context.organizationId, persistedInput);
 
     const composedNotes = composeCompanyNotes({
       notes: parsed.data.notes,
@@ -105,23 +118,7 @@ export class CompaniesService {
       throw new CompaniesValidationError("Bedrijf niet gevonden.");
     }
 
-    const persistedInput: UpdateCompanyInput = {};
-
-    if (parsed.data.name !== undefined) {
-      persistedInput.name = parsed.data.name;
-    }
-
-    if (parsed.data.website !== undefined) {
-      persistedInput.website = parsed.data.website;
-    }
-
-    if (parsed.data.sector !== undefined) {
-      persistedInput.sector = parsed.data.sector;
-    }
-
-    if (parsed.data.status !== undefined) {
-      persistedInput.status = parsed.data.status;
-    }
+    const persistedInput: UpdateCompanyInput = { ...parsed.data };
 
     const updated = await this.repository.update(
       context.organizationId,
@@ -174,6 +171,9 @@ export class CompaniesService {
       limit: input.limit ?? 50,
       offset: input.offset ?? 0,
       includeArchived: input.includeArchived ?? false,
+      leadPriority: input.leadPriority,
+      hasVacancies: input.hasVacancies,
+      outreachReady: input.outreachReady,
     });
 
     if (!parsed.success) {

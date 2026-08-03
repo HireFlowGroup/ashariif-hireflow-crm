@@ -119,6 +119,8 @@ create or replace function public.current_organization_id()
 returns uuid
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select organization_id
   from public.profiles
@@ -126,43 +128,128 @@ as $$
   limit 1;
 $$;
 
-create policy "profiles_select_own_org"
-on public.profiles
-for select
-using (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "profiles_select_own"
+    on public.profiles
+    for select
+    using (id = auth.uid())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_companies"
-on public.companies
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "profiles_select_own_org"
+    on public.profiles
+    for select
+    using (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_contacts"
-on public.contacts
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_companies"
+    on public.companies
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_candidates"
-on public.candidates
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_contacts"
+    on public.contacts
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_vacancies"
-on public.vacancies
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_candidates"
+    on public.candidates
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_pipeline_entries"
-on public.pipeline_entries
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_vacancies"
+    on public.vacancies
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "tenant_isolation_tasks"
-on public.tasks
-for all
-using (organization_id = public.current_organization_id())
-with check (organization_id = public.current_organization_id());
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_pipeline_entries"
+    on public.pipeline_entries
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
+
+do $policy$
+begin
+  execute $sql$
+    create policy "tenant_isolation_tasks"
+    on public.tasks
+    for all
+    using (organization_id = public.current_organization_id())
+    with check (organization_id = public.current_organization_id())
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;

@@ -1,3 +1,5 @@
+import "server-only";
+
 export { getOpenAIClient } from "./client";
 export {
   DEFAULT_MODEL,

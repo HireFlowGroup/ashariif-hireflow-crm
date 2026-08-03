@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/daily-intelligence",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/process-intelligence-queue",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}

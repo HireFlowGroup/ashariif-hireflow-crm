@@ -11,7 +11,7 @@ import {
   MAX_OUTPUT_TOKENS,
 } from "@/lib/ai/config";
 import type { ChatStreamToolEvent } from "@/lib/ai/chat/stream-events";
-import { HIREFLOW_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { RECRUITMENT_COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { executeTool } from "@/lib/ai/tools/execute-tool";
 import { getOpenAIToolDefinitions } from "@/lib/ai/tools/registry";
 import type { ToolExecutionContext } from "@/lib/ai/tools/types";
@@ -51,7 +51,7 @@ export async function streamModelResponseWithTools(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const preparation = await params.client.responses.create({
       model: DEFAULT_MODEL,
-      instructions: HIREFLOW_SYSTEM_PROMPT,
+      instructions: RECRUITMENT_COPILOT_SYSTEM_PROMPT,
       input: conversationInput,
       tools,
       stream: false,
@@ -112,7 +112,7 @@ export async function streamModelResponseWithTools(
 
     const stream = await params.client.responses.create({
       model: DEFAULT_MODEL,
-      instructions: HIREFLOW_SYSTEM_PROMPT,
+      instructions: RECRUITMENT_COPILOT_SYSTEM_PROMPT,
       input: conversationInput,
       tools,
       stream: true,

@@ -11,6 +11,7 @@ type AiComposerProps = {
   disabled?: boolean;
   isStreaming?: boolean;
   errorMessage?: string | null;
+  placeholder?: string;
 };
 
 export function AiComposer({
@@ -20,6 +21,7 @@ export function AiComposer({
   disabled = false,
   isStreaming = false,
   errorMessage = null,
+  placeholder = "Stel een vraag aan HireFlow AI…",
 }: AiComposerProps) {
   const isDisabled = disabled || isStreaming;
 
@@ -44,7 +46,7 @@ export function AiComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Stel een vraag aan HireFlow AI…"
+          placeholder={placeholder}
           rows={3}
           disabled={isDisabled}
           className="min-h-[88px] resize-none sm:flex-1"

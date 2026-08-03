@@ -1,22 +1,22 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/layout/page-header";
-import { EmptyState } from "@/components/shared/empty-state";
+import { redirect } from "next/navigation";
+import { VacanciesOverview } from "@/components/vacancies/vacancies-overview";
+import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
+import { loadCompanyOptionsForUi } from "@/lib/vacancies/load-companies-for-ui";
+import { authRoutes } from "@/config/navigation";
 
 export const metadata: Metadata = {
-  title: "Vacancies",
+  title: "Vacatures",
 };
 
-export default function VacanciesPage() {
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Vacancies"
-        description="Publish and track open roles across client companies."
-      />
-      <EmptyState
-        title="No vacancies created"
-        description="Define job requisitions linked to companies to start filling your hiring pipeline."
-      />
-    </div>
-  );
+export default async function VacanciesPage() {
+  const context = await getAuthenticatedServiceContext();
+
+  if (!context) {
+    redirect(authRoutes.login);
+  }
+
+  const companies = await loadCompanyOptionsForUi(context);
+
+  return <VacanciesOverview companies={companies} />;
 }

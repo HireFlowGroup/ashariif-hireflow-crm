@@ -15,6 +15,11 @@ export interface CompaniesRepository {
     input: CreateCompanyInput,
   ): Promise<Company>;
 
+  createDiscovery(
+    organizationId: string,
+    input: CreateCompanyInput,
+  ): Promise<Company>;
+
   update(
     organizationId: string,
     companyId: CompanyId,

@@ -9,16 +9,74 @@ export type CompanyStatus = "active" | "inactive" | "prospect" | "archived";
 
 export type CompanyPriority = "low" | "medium" | "high";
 
+export type LeadPriority = "A" | "B" | "C" | "D";
+
+export type OutreachStatus = "none" | "queued" | "draft" | "review" | "sent" | "blocked";
+
+export type HiringSignal = {
+  type: string;
+  description: string;
+  source: string;
+  confidence: number;
+};
+
+/** @deprecated Use LeadScoreComponents from lead-scoring feature */
+export type ScoreBreakdown = {
+  recruitmentActivity?: number;
+  growth?: number;
+  urgency?: number;
+  contactability?: number;
+  digitalPresence?: number;
+  aiMatch?: number;
+  outreachPotential?: number;
+  sectorMatch?: number;
+  regionMatch?: number;
+  companySize?: number;
+  activeVacancies?: number;
+  relevantVacancies?: number;
+  contactCompleteness?: number;
+  sourceQuality?: number;
+  crmStatus?: number;
+  exclusionPenalty?: number;
+};
+
 export type Company = {
   id: CompanyId;
   organizationId: string;
   ownerId: string | null;
   name: string;
   website: string | null;
+  domain: string | null;
+  linkedinUrl: string | null;
+  email: string | null;
+  phone: string | null;
   sector: string | null;
   city: string | null;
+  region: string | null;
+  province: string | null;
+  country: string | null;
   employeeCount: number | null;
+  employeeCountMin: number | null;
+  employeeCountMax: number | null;
+  employeeCountLabel: string | null;
   priority: CompanyPriority | null;
+  leadScore: number | null;
+  leadPriority: LeadPriority | null;
+  scoreReason: string | null;
+  scoreBreakdown: ScoreBreakdown | null;
+  vacancyCount: number;
+  hiringSignals: HiringSignal[];
+  careersUrl: string | null;
+  vacancyPageUrl: string | null;
+  generalEmail: string | null;
+  hrEmail: string | null;
+  kvkNumber: string | null;
+  aiSummary: string | null;
+  source: string | null;
+  sourceUrl: string | null;
+  confidence: number | null;
+  lastVerifiedAt: string | null;
+  outreachStatus: OutreachStatus;
   status: CompanyStatus;
   notes: string | null;
   createdAt: string;
@@ -30,12 +88,37 @@ export type CreateCompanyInput = {
   name: string;
   ownerId?: string | null;
   website?: string | null;
+  domain?: string | null;
+  linkedinUrl?: string | null;
   email?: string | null;
   phone?: string | null;
   sector?: string | null;
   city?: string | null;
+  region?: string | null;
+  province?: string | null;
+  country?: string | null;
   employeeCount?: number | null;
+  employeeCountMin?: number | null;
+  employeeCountMax?: number | null;
+  employeeCountLabel?: string | null;
   priority?: CompanyPriority | null;
+  leadScore?: number | null;
+  leadPriority?: LeadPriority | null;
+  scoreReason?: string | null;
+  scoreBreakdown?: ScoreBreakdown | null;
+  vacancyCount?: number;
+  hiringSignals?: HiringSignal[];
+  careersUrl?: string | null;
+  vacancyPageUrl?: string | null;
+  generalEmail?: string | null;
+  hrEmail?: string | null;
+  kvkNumber?: string | null;
+  aiSummary?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  confidence?: number | null;
+  lastVerifiedAt?: string | null;
+  outreachStatus?: OutreachStatus;
   status?: CompanyStatus;
   notes?: string | null;
 };
@@ -45,14 +128,48 @@ export type UpdateCompanyInput = {
   name?: string;
   ownerId?: string | null;
   website?: string | null;
+  domain?: string | null;
+  linkedinUrl?: string | null;
   email?: string | null;
   phone?: string | null;
   sector?: string | null;
   city?: string | null;
+  region?: string | null;
+  province?: string | null;
+  country?: string | null;
   employeeCount?: number | null;
+  employeeCountMin?: number | null;
+  employeeCountMax?: number | null;
+  employeeCountLabel?: string | null;
   priority?: CompanyPriority | null;
+  leadScore?: number | null;
+  leadPriority?: LeadPriority | null;
+  scoreReason?: string | null;
+  scoreBreakdown?: ScoreBreakdown | null;
+  vacancyCount?: number;
+  hiringSignals?: HiringSignal[];
+  careersUrl?: string | null;
+  vacancyPageUrl?: string | null;
+  generalEmail?: string | null;
+  hrEmail?: string | null;
+  kvkNumber?: string | null;
+  aiSummary?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  confidence?: number | null;
+  lastVerifiedAt?: string | null;
+  outreachStatus?: OutreachStatus;
   status?: CompanyStatus;
   notes?: string | null;
+};
+
+export type ListCompaniesInput = {
+  limit?: number;
+  offset?: number;
+  includeArchived?: boolean;
+  leadPriority?: LeadPriority;
+  hasVacancies?: boolean;
+  outreachReady?: boolean;
 };
 
 export type SearchCompaniesInput = {
@@ -62,14 +179,9 @@ export type SearchCompaniesInput = {
   archived?: boolean;
   status?: CompanyStatus;
   priority?: CompanyPriority;
+  leadPriority?: LeadPriority;
+  hasVacancies?: boolean;
   limit?: number;
-};
-
-/** Input for listing companies with pagination. */
-export type ListCompaniesInput = {
-  limit?: number;
-  offset?: number;
-  includeArchived?: boolean;
 };
 
 /** Result of a paginated company list. */

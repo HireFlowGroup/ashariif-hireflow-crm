@@ -28,34 +28,54 @@ create index if not exists ai_messages_conversation_created_idx
 alter table public.ai_conversations enable row level security;
 alter table public.ai_messages enable row level security;
 
-create policy "ai_conversations_own_org"
-on public.ai_conversations
-for all
-using (
-  user_id = auth.uid()
-  and organization_id = public.current_organization_id()
-)
-with check (
-  user_id = auth.uid()
-  and organization_id = public.current_organization_id()
-);
+do $policy$
+begin
+  execute $sql$
+    create policy "ai_conversations_own_org"
+    on public.ai_conversations
+    for all
+    using (
+      user_id = auth.uid()
+      and organization_id = public.current_organization_id()
+    )
+    with check (
+      user_id = auth.uid()
+      and organization_id = public.current_organization_id()
+    )
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
 
-create policy "ai_messages_own_conversations"
-on public.ai_messages
-for all
-using (
-  organization_id = public.current_organization_id()
-  and conversation_id in (
-    select id
-    from public.ai_conversations
-    where user_id = auth.uid()
-  )
-)
-with check (
-  organization_id = public.current_organization_id()
-  and conversation_id in (
-    select id
-    from public.ai_conversations
-    where user_id = auth.uid()
-  )
-);
+do $policy$
+begin
+  execute $sql$
+    create policy "ai_messages_own_conversations"
+    on public.ai_messages
+    for all
+    using (
+      organization_id = public.current_organization_id()
+      and conversation_id in (
+        select id
+        from public.ai_conversations
+        where user_id = auth.uid()
+      )
+    )
+    with check (
+      organization_id = public.current_organization_id()
+      and conversation_id in (
+        select id
+        from public.ai_conversations
+        where user_id = auth.uid()
+      )
+    )
+  $sql$;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+  when undefined_column then null;
+end
+$policy$;
