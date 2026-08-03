@@ -105,3 +105,24 @@ export type CompanyFinderStreamEventType =
   | "vacancy_found"
   | "scoring_completed"
   | "job_completed";
+
+/** Discovery quality metrics emitted after URL classification and validation. */
+export type CompanyFinderQualityReport = {
+  totalUrls: number;
+  rejected: number;
+  blogs: number;
+  directories: number;
+  listings: number;
+  news: number;
+  government: number;
+  social: number;
+  jobboards: number;
+  unknown: number;
+  realCompanies: number;
+  saved: number;
+  rejectedByHeuristics: number;
+  rejectedByAiCategory: number;
+  rejectedByHomepageSignals: number;
+  rejectedByAiValidation: number;
+  rejectedByScore: number;
+};

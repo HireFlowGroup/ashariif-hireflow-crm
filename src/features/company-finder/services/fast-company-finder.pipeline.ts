@@ -8,8 +8,10 @@ import {
   PipelineStepTimer,
 } from "@/features/company-finder/pipeline/pipeline-step-timer";
 import { scheduleBackgroundCompanyEnrichment } from "@/features/company-finder/services/background-enrichment.service";
-import { buildDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
-import { runFastTavilyDiscovery } from "@/features/company-finder/services/fast-discovery.service";
+import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
+import { runFastTavilySearch } from "@/features/company-finder/services/fast-discovery.service";
+import { runDiscoveryQualityGate } from "@/features/company-finder/discovery/discovery-quality-gate";
+import type { DiscoveryQualityReport, QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
 import type {
@@ -81,23 +83,63 @@ export async function* runFastCompanyFinderPipeline(input: {
   });
 
   let candidates: LeadCandidate[] = [];
+  let qualityReport: DiscoveryQualityReport = {
+    totalUrls: 0,
+    rejected: 0,
+    blogs: 0,
+    directories: 0,
+    listings: 0,
+    news: 0,
+    government: 0,
+    social: 0,
+    jobboards: 0,
+    unknown: 0,
+    realCompanies: 0,
+    saved: 0,
+    rejectedByHeuristics: 0,
+    rejectedByAiCategory: 0,
+    rejectedByHomepageSignals: 0,
+    rejectedByAiValidation: 0,
+    rejectedByScore: 0,
+  };
+  let qualifiedCandidates: QualifiedDiscoveryCandidate[] = [];
 
   try {
     const discoveryStarted = Date.now();
-    candidates = await runFastTavilyDiscovery(input.searchCriteria, {
+    const tavily = await runFastTavilySearch(input.searchCriteria, {
       maxResults: Math.min(
         input.searchCriteria.maxResults ?? config.fastModeMaxResults,
         config.fastModeMaxResults,
       ),
       timeoutMs: config.tavilyTimeoutMs,
     });
-    timer.complete("tavily_discovery", { resultCount: candidates.length, provider: "tavily" });
+
+    timer.start("discovery_quality_gate", "quality");
+    deadline.assert("discovery_quality_gate");
+
+    const qualityGate = await runDiscoveryQualityGate({
+      results: tavily.results,
+      criteria: input.searchCriteria,
+      provider: tavily.providerId,
+      jobId: input.jobId,
+    });
+
+    timer.complete("discovery_quality_gate", {
+      resultCount: qualityGate.qualified.length,
+      provider: "quality",
+    });
+
+    qualityReport = qualityGate.report;
+    qualifiedCandidates = qualityGate.qualified;
+    candidates = qualityGate.qualified.map((entry) => entry.candidate);
+
+    timer.complete("tavily_discovery", { resultCount: tavily.results.length, provider: "tavily" });
     logPipelinePhase({
       phase: "DISCOVERY",
       provider: "tavily",
       status: "completed",
       durationMs: Date.now() - discoveryStarted,
-      resultCount: candidates.length,
+      resultCount: tavily.results.length,
       jobId: input.jobId,
     });
   } catch (error) {
@@ -130,19 +172,36 @@ export async function* runFastCompanyFinderPipeline(input: {
   yield {
     type: "event",
     eventType: "discovery_preview",
-    payload: { count: candidates.length, provider: "tavily" },
+    payload: {
+      count: candidates.length,
+      provider: "tavily",
+      totalUrls: qualityReport.totalUrls,
+      rejected: qualityReport.rejected,
+      realCompanies: qualityReport.realCompanies,
+    },
   };
 
-  yield input.emitProgress("saving", `${candidates.length} bedrijven gevonden — opslaan…`, {
-    foundCount: candidates.length,
-    progressPercent: 35,
-  });
+  yield {
+    type: "event",
+    eventType: "discovery_quality_report",
+    payload: qualityReport,
+  };
+
+  yield input.emitProgress(
+    "saving",
+    `${qualityReport.realCompanies} echte bedrijven van ${qualityReport.totalUrls} URLs — opslaan…`,
+    {
+      foundCount: qualityReport.totalUrls,
+      progressPercent: 35,
+    },
+  );
 
   timer.start("fast_save", "supabase");
   deadline.assert("fast_save");
 
   const saveResults = await runWithConcurrencySettled(
-    candidates.map((candidate) => async () => {
+    qualifiedCandidates.map((qualified) => async () => {
+      const candidate = qualified.candidate;
       if (isExcludedCandidate(candidate, input.searchCriteria.excludedNames, input.searchCriteria.excludedSectors)) {
         return { type: "skipped" as const, candidate };
       }
@@ -159,7 +218,7 @@ export async function* runFastCompanyFinderPipeline(input: {
       try {
         const created = await input.companiesService.createDiscoveryCompany(
           input.context,
-          buildDiscoveryCreateInput(candidate, input.context.userId, "tavily"),
+          buildQualifiedDiscoveryCreateInput(qualified, input.context.userId),
         );
 
         logPipelinePhase({
@@ -268,23 +327,33 @@ export async function* runFastCompanyFinderPipeline(input: {
 
   currentJob = await input.jobRepository.update(input.context.organizationId, input.jobId, {
     status: finalStatus,
-    foundCount: candidates.length,
+    foundCount: qualityReport.totalUrls,
     savedCount,
-    skippedCount,
+    skippedCount: skippedCount + qualityReport.rejected,
     errorCount: saveErrorCount,
     providerErrors: [],
     errorMessage,
   });
 
+  qualityReport.saved = savedCount;
+
+  yield {
+    type: "event",
+    eventType: "discovery_quality_report",
+    payload: qualityReport,
+  };
+
   const completionMessage =
     savedCount > 0
-      ? `${savedCount} bedrijven opgeslagen — verrijking op de achtergrond`
-      : errorMessage ?? "Geen bedrijven opgeslagen";
+      ? `${savedCount} bedrijven opgeslagen (${qualityReport.rejected} afgewezen) — verrijking op de achtergrond`
+      : qualityReport.rejected > 0
+        ? `Geen bedrijven opgeslagen: ${qualityReport.rejected} URLs afgewezen (${qualityReport.directories} directories, ${qualityReport.blogs + qualityReport.news} blogs/nieuws)`
+        : errorMessage ?? "Geen bedrijven opgeslagen";
 
   yield input.emitProgress(finalStatus === "completed" ? "completed" : "failed", completionMessage, {
-    foundCount: candidates.length,
+    foundCount: qualityReport.totalUrls,
     savedCount,
-    skippedCount,
+    skippedCount: skippedCount + qualityReport.rejected,
     errorCount: saveErrorCount,
     progressPercent: 100,
   });

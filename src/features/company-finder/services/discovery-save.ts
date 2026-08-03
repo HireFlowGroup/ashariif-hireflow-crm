@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CreateCompanyInput } from "@/features/companies/domain";
+import type { QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import type { ExternalCompanyCandidate as LeadCandidate } from "@/features/lead-intelligence/domain";
 import { extractDomain } from "@/features/lead-intelligence/services/normalize";
 import {
@@ -13,6 +14,10 @@ export function buildDiscoveryCreateInput(
   candidate: LeadCandidate,
   _userId: string,
   sourceOverride?: string,
+  metadata?: Pick<
+    QualifiedDiscoveryCandidate,
+    "companyType" | "companyConfidence" | "discoveryReason" | "discoveryProvider"
+  >,
 ): CreateCompanyInput {
   const website = sanitizeDiscoveryUrl(candidate.website);
   const sourceUrl = sanitizeDiscoveryUrl(candidate.sourceUrl);
@@ -28,7 +33,23 @@ export function buildDiscoveryCreateInput(
     source: sourceOverride ?? candidate.source ?? "tavily",
     sourceUrl,
     confidence: candidate.confidence,
+    companyType: metadata?.companyType ?? null,
+    companyConfidence: metadata?.companyConfidence ?? null,
+    discoveryReason: metadata?.discoveryReason ?? null,
+    discoveryProvider: metadata?.discoveryProvider ?? sourceOverride ?? candidate.source ?? "tavily",
     status: "prospect",
     notes: discoveryUrlFallbackNote(candidate.website ?? candidate.sourceUrl, candidate.description),
   };
+}
+
+export function buildQualifiedDiscoveryCreateInput(
+  qualified: QualifiedDiscoveryCandidate,
+  userId: string,
+): CreateCompanyInput {
+  return buildDiscoveryCreateInput(
+    qualified.candidate,
+    userId,
+    qualified.discoveryProvider,
+    qualified,
+  );
 }

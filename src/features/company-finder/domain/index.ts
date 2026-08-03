@@ -1,6 +1,7 @@
 export {
   type CompanyFinderCriteria,
   type CompanyFinderProgress,
+  type CompanyFinderQualityReport,
   type CompanySearchJob,
   type CompanySearchJobStatus,
   type EmployeeCountRange,

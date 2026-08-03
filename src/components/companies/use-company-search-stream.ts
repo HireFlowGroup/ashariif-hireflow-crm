@@ -6,7 +6,7 @@ import {
   CompanySearchPipelineTimeline,
   createInitialPipelineSteps,
 } from "@/components/companies/company-search-pipeline-timeline";
-import type { CompanyFinderProgress } from "@/features/company-finder/domain";
+import type { CompanyFinderProgress, CompanyFinderQualityReport } from "@/features/company-finder/domain";
 import type { PipelineStepSnapshot } from "@/features/company-finder/pipeline/pipeline-viewer.types";
 import type { PipelineStreamEvent } from "@/features/company-finder/pipeline/pipeline-viewer.types";
 import type {
@@ -27,6 +27,7 @@ type UseCompanySearchStreamResult = {
   steps: PipelineStepSnapshot[];
   progress: CompanyFinderProgress | null;
   recentCandidates: RecentCandidate[];
+  qualityReport: CompanyFinderQualityReport | null;
   errorMessage: string | null;
   isConnected: boolean;
   isComplete: boolean;
@@ -53,6 +54,7 @@ export function useCompanySearchStream({
   const [steps, setSteps] = useState<PipelineStepSnapshot[]>(createInitialPipelineSteps());
   const [progress, setProgress] = useState<CompanyFinderProgress | null>(null);
   const [recentCandidates, setRecentCandidates] = useState<RecentCandidate[]>([]);
+  const [qualityReport, setQualityReport] = useState<CompanyFinderQualityReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -77,6 +79,7 @@ export function useCompanySearchStream({
     setSteps(createInitialPipelineSteps());
     setProgress(null);
     setRecentCandidates([]);
+    setQualityReport(null);
     setErrorMessage(null);
     setIsComplete(false);
     setIsConnected(false);
@@ -117,8 +120,11 @@ export function useCompanySearchStream({
       try {
         const payload = JSON.parse(raw.data) as {
           eventType?: string;
-          payload?: { message?: string };
+          payload?: { message?: string } & Partial<CompanyFinderQualityReport>;
         };
+        if (payload.eventType === "discovery_quality_report" && payload.payload) {
+          setQualityReport(payload.payload as CompanyFinderQualityReport);
+        }
         if (payload.eventType === "enrichment_partial" && payload.payload?.message) {
           onEnrichmentPartialRef.current?.(payload.payload.message);
         }
@@ -165,6 +171,7 @@ export function useCompanySearchStream({
     steps,
     progress,
     recentCandidates,
+    qualityReport,
     errorMessage,
     isConnected,
     isComplete,

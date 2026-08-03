@@ -33,6 +33,10 @@ type CompanyRowExtended = CompanyRow & {
   source?: string | null;
   source_url?: string | null;
   confidence?: number | null;
+  company_type?: string | null;
+  company_confidence?: number | null;
+  discovery_reason?: string | null;
+  discovery_provider?: string | null;
   lead_score?: number | null;
   priority?: LeadPriority | null;
   score_reason?: string | null;
@@ -91,6 +95,10 @@ export function mapCompanyRowToDomain(
     source: extended.source ?? null,
     sourceUrl: extended.source_url ?? null,
     confidence: extended.confidence ?? null,
+    companyType: extended.company_type ?? null,
+    companyConfidence: extended.company_confidence ?? null,
+    discoveryReason: extended.discovery_reason ?? null,
+    discoveryProvider: extended.discovery_provider ?? null,
     lastVerifiedAt: extended.last_verified_at ?? null,
     outreachStatus: extended.outreach_status ?? "none",
     status: toDomainStatus(row.status),
@@ -132,6 +140,10 @@ type LeadFieldsInput = {
   source?: string | null;
   sourceUrl?: string | null;
   confidence?: number | null;
+  companyType?: string | null;
+  companyConfidence?: number | null;
+  discoveryReason?: string | null;
+  discoveryProvider?: string | null;
   lastVerifiedAt?: string | null;
   outreachStatus?: OutreachStatus;
   status?: CompanyStatus;
@@ -158,6 +170,10 @@ export function mapDiscoveryCreateInputToRow(
     source: input.source ?? "tavily",
     source_url: input.sourceUrl ?? null,
     confidence: input.confidence ?? null,
+    company_type: input.companyType ?? null,
+    company_confidence: input.companyConfidence ?? null,
+    discovery_reason: input.discoveryReason ?? null,
+    discovery_provider: input.discoveryProvider ?? null,
     status: toDbCompanyStatus(input.status ?? "prospect"),
     owner_id: input.ownerId ?? null,
     notes: input.notes ?? null,

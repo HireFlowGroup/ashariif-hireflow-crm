@@ -75,6 +75,10 @@ export type Company = {
   source: string | null;
   sourceUrl: string | null;
   confidence: number | null;
+  companyType: string | null;
+  companyConfidence: number | null;
+  discoveryReason: string | null;
+  discoveryProvider: string | null;
   lastVerifiedAt: string | null;
   outreachStatus: OutreachStatus;
   status: CompanyStatus;
@@ -117,6 +121,10 @@ export type CreateCompanyInput = {
   source?: string | null;
   sourceUrl?: string | null;
   confidence?: number | null;
+  companyType?: string | null;
+  companyConfidence?: number | null;
+  discoveryReason?: string | null;
+  discoveryProvider?: string | null;
   lastVerifiedAt?: string | null;
   outreachStatus?: OutreachStatus;
   status?: CompanyStatus;
@@ -157,6 +165,10 @@ export type UpdateCompanyInput = {
   source?: string | null;
   sourceUrl?: string | null;
   confidence?: number | null;
+  companyType?: string | null;
+  companyConfidence?: number | null;
+  discoveryReason?: string | null;
+  discoveryProvider?: string | null;
   lastVerifiedAt?: string | null;
   outreachStatus?: OutreachStatus;
   status?: CompanyStatus;

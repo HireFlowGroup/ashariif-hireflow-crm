@@ -63,6 +63,7 @@ export function CompanyFinderDialog({
     steps: pipelineSteps,
     progress,
     recentCandidates,
+    qualityReport,
     errorMessage: streamError,
     isConnected,
     isComplete: streamComplete,
@@ -325,6 +326,20 @@ export function CompanyFinderDialog({
             <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
               {enrichmentNotice}
             </p>
+          ) : null}
+
+          {qualityReport ? (
+            <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
+              <p className="font-medium">Discovery kwaliteit</p>
+              <p className="mt-1 text-muted-foreground">
+                {qualityReport.totalUrls} URLs · {qualityReport.rejected} afgewezen ·{" "}
+                {qualityReport.realCompanies} echte bedrijven · {qualityReport.saved} opgeslagen
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Directories: {qualityReport.directories + qualityReport.listings} · Blogs/nieuws:{" "}
+                {qualityReport.blogs + qualityReport.news} · Gemeente/overheid: {qualityReport.government}
+              </p>
+            </div>
           ) : null}
 
           {summary ? (

@@ -24,6 +24,10 @@ export type Company = {
   source?: string | null;
   source_url?: string | null;
   confidence?: number | null;
+  company_type?: string | null;
+  company_confidence?: number | null;
+  discovery_reason?: string | null;
+  discovery_provider?: string | null;
   /** @deprecated Use company_scores table */
   lead_score?: number | null;
   /** @deprecated Use company_scores table */
