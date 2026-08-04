@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bot,
   BrainCircuit,
   Briefcase,
   Building2,
@@ -123,6 +124,14 @@ export const navGroups: NavGroup[] = [
         shortcut: "⌘ /",
         keywords: ["chat", "assistant", "vraag"],
       },
+      {
+        title: "AI Recruiter",
+        href: "/ai-recruiter",
+        icon: Bot,
+        description: "Autonome prospectresearch en outreach-voorbereiding",
+        shortcut: "G R",
+        keywords: ["recruiter", "automation", "run", "prospects"],
+      },
     ],
   },
 ];
@@ -154,6 +163,7 @@ const protectedPrefixes = [
   "/settings/",
   "/intelligence/",
   "/copilot",
+  "/ai-recruiter",
   "/contacts",
   "/pipeline",
 ];

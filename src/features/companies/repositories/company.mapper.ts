@@ -103,6 +103,7 @@ export function mapCompanyRowToDomain(
     outreachStatus: extended.outreach_status ?? "none",
     status: toDomainStatus(row.status),
     notes: null,
+    outreachOptOut: Boolean((row as { outreach_opt_out?: boolean }).outreach_opt_out),
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? row.created_at,
   };

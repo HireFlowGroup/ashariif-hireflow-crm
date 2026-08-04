@@ -64,7 +64,7 @@ export function CompaniesTable({
                     },
                     {
                       id: "outreach",
-                      label: "Queue outreach",
+                      label: "Outreach concept",
                       onSelect: () => onQueueOutreach(company),
                     },
                     {

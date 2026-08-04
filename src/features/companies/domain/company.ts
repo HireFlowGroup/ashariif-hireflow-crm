@@ -83,6 +83,7 @@ export type Company = {
   outreachStatus: OutreachStatus;
   status: CompanyStatus;
   notes: string | null;
+  outreachOptOut?: boolean;
   createdAt: string;
   updatedAt: string;
 };

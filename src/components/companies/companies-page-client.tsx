@@ -60,17 +60,19 @@ export function CompaniesPageClient({
     setActionMessage(null);
 
     try {
-      const response = await fetch(`/api/companies/${company.id}/outreach-queue`, {
+      const response = await fetch("/api/outreach/messages", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId: company.id }),
       });
 
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as { error?: string; message?: { id: string } };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "Outreach kon niet worden voorbereid.");
+        throw new Error(payload.error ?? "Outreach-concept kon niet worden aangemaakt.");
       }
 
-      setActionMessage(`${company.name} staat klaar voor outreach (review vereist).`);
+      setActionMessage(`${company.name}: concept aangemaakt — ga naar Outreach om te reviewen.`);
       router.refresh();
     } catch (error) {
       setActionMessage(
