@@ -132,17 +132,48 @@ export const scoreBreakdownSchema = z.object({
 export type AiRecruiterScoreBreakdown = z.infer<typeof scoreBreakdownSchema>;
 
 export const replyClassificationSchema = z.enum([
-  "positive",
-  "interested_later",
-  "referral",
-  "not_interested",
-  "unsubscribe",
+  "nieuwe_opdracht",
+  "interesse",
+  "later",
+  "geen_interesse",
+  "afgewezen",
+  "automatisch_antwoord",
   "out_of_office",
-  "bounce",
-  "unknown",
+  "spam",
+  "onbekend",
 ]);
 
 export type ReplyClassification = z.infer<typeof replyClassificationSchema>;
+
+export const REPLY_CLASSIFICATION_LABELS: Record<ReplyClassification, string> = {
+  nieuwe_opdracht: "Nieuwe opdracht",
+  interesse: "Interesse",
+  later: "Later",
+  geen_interesse: "Geen interesse",
+  afgewezen: "Afgewezen",
+  automatisch_antwoord: "Automatisch antwoord",
+  out_of_office: "Out of office",
+  spam: "Spam",
+  onbekend: "Onbekend",
+};
+
+export const replyAnalysisSchema = z.object({
+  classification: replyClassificationSchema,
+  confidence: z.number().min(0).max(1),
+  signals: z.array(z.string()),
+  reasoning: z.string(),
+});
+
+export type ReplyAnalysis = z.infer<typeof replyAnalysisSchema>;
+
+export const suggestedReplySchema = z.object({
+  subject: z.string().nullable(),
+  bodyText: z.string().nullable(),
+  shouldSend: z.boolean(),
+  confidence: z.number().min(0).max(1),
+});
+
+export type SuggestedReply = z.infer<typeof suggestedReplySchema>;
 
 export const outreachDraftContentSchema = z.object({
   subjectOptions: z.array(z.string()).length(3),

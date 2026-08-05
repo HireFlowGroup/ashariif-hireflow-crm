@@ -2,3 +2,10 @@ export * from "@/features/ai-recruiter/domain/types";
 export { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 export { createAiRecruiterOrchestrator } from "@/features/ai-recruiter/create-ai-recruiter-service";
 export { AiRecruiterOrchestrator } from "@/features/ai-recruiter/services/ai-recruiter-orchestrator.service";
+export {
+  classifyReply,
+  classifyReplyWithConfidence,
+  getReplyFollowUpAction,
+} from "@/features/ai-recruiter/services/reply-classifier.service";
+export { generateSuggestedReply } from "@/features/ai-recruiter/services/reply-response-generator.service";
+export { processIncomingReply } from "@/features/ai-recruiter/services/incoming-reply.service";

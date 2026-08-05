@@ -53,6 +53,7 @@ RLS op `organization_id` via `current_organization_id()`.
 | POST | `/api/ai-recruiter/runs/[runId]/start` | Start (→ stream URL) |
 | GET | `/api/ai-recruiter/runs/[runId]/stream` | SSE live pipeline |
 | POST | `/api/ai-recruiter/runs/[runId]/cancel` | Annuleren |
+| POST | `/api/ai-recruiter/replies/process` | Classificeer binnenkomende reactie + stel antwoord voor |
 
 Outreach acties via bestaande `/api/outreach/messages/*`.
 

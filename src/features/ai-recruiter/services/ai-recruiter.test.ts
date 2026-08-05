@@ -257,25 +257,25 @@ describe("AI Recruiter contact & outreach rules", () => {
 
 describe("AI Recruiter reply classification", () => {
   it("classifies positive reply", () => {
-    expect(classifyReply("Re: Kennismaking", "Graag een afspraak volgende week")).toBe("positive");
+    expect(classifyReply("Re: Kennismaking", "Graag een afspraak volgende week")).toBe("interesse");
   });
 
   it("classifies unsubscribe", () => {
-    expect(classifyReply(null, "Please unsubscribe me")).toBe("unsubscribe");
+    expect(classifyReply(null, "Please unsubscribe me")).toBe("afgewezen");
   });
 
   it("classifies bounce", () => {
-    expect(classifyReply("Delivery failed", "Undeliverable")).toBe("bounce");
+    expect(classifyReply("Delivery failed", "Undeliverable")).toBe("automatisch_antwoord");
   });
 
   it("creates follow-up task for positive", () => {
-    const action = getReplyFollowUpAction("positive");
+    const action = getReplyFollowUpAction("interesse");
     expect(action.createTask).toBe(true);
     expect(action.pipelineStage).toBe("replied_positive");
   });
 
   it("adds suppression for unsubscribe", () => {
-    const action = getReplyFollowUpAction("unsubscribe");
+    const action = getReplyFollowUpAction("afgewezen");
     expect(action.addSuppression).toBe(true);
   });
 });
