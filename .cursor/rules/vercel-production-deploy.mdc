@@ -1,0 +1,29 @@
+---
+description: After pushing feature work, merge to main for Vercel production deploy
+alwaysApply: true
+---
+
+# Vercel production deploy
+
+Production URL: https://hireflow-ai-hireflowgroup1.vercel.app
+
+Vercel deploys from the **`main`** branch (GitHub → Vercel integration).
+
+## After every push that should reach production
+
+When the user asks to push, deploy, or ship to Vercel (or does not specify a branch-only push):
+
+1. Push the feature branch to `origin`.
+2. **Merge into `main`** (fast-forward or merge commit) and **`git push origin main`**.
+3. Confirm Vercel build triggered (GitHub commit on `main` is sufficient when integration is connected).
+4. Optionally verify key routes respond (e.g. `/outreach`, `/ai-recruiter` → expect auth redirect, not 404).
+
+## Do not
+
+- Force-push `main`
+- Skip `main` merge when user wants changes on the Vercel link
+- Commit `.github/workflows/` unless user has GitHub `workflow` OAuth scope
+
+## Env vars on Vercel
+
+After schema or env changes, remind user to update Vercel project env and run `supabase db push` for migrations.

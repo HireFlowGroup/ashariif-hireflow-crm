@@ -82,7 +82,7 @@ export class AiRecruiterOrchestrator {
     const config = getAiRecruiterConfig();
     const timeoutMs = config.runTimeoutMinutes * 60_000;
     const startedAt = Date.now();
-    let counters = { ...run.counters };
+    const counters = { ...run.counters };
     let consecutiveFailures = 0;
 
     const pipeline = new RecruiterPipelineTracker(run.pipelineSteps, () => undefined);
