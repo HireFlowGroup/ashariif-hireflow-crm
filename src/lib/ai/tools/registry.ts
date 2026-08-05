@@ -1,3 +1,4 @@
+import { matchCandidateToVacancyTool } from "@/lib/ai/tools/candidates/match-candidate-to-vacancy";
 import { archiveCompanyTool } from "@/lib/ai/tools/companies/archive-company";
 import { deleteCompanyTool } from "@/lib/ai/tools/companies/delete-company";
 import { createCompanyTool } from "@/lib/ai/tools/companies/create-company";
@@ -65,6 +66,7 @@ function registerBuiltInTools(): void {
   registerTool(getVacancyTool);
   registerTool(updateVacancyTool);
   registerTool(archiveVacancyTool);
+  registerTool(matchCandidateToVacancyTool);
   registerTool(getTopGrowingCompaniesTool);
   registerTool(getCompaniesWithNewVacanciesTool);
   registerTool(getCompaniesHiringRecruitersTool);

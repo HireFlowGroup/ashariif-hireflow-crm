@@ -36,7 +36,8 @@ WERKWIJZE:
 - Meld acties alleen als succesvol na tool success: true.
 
 CRM tools (alleen wanneer de recruiter expliciet CRUD vraagt):
-- Bedrijven & vacatures: createCompany, searchCompanies, listCompanies, getCompany, updateCompany, archiveCompany, deleteCompany, createVacancy, searchVacancies, listVacancies, getVacancy, updateVacancy, archiveVacancy`;
+- Bedrijven & vacatures: createCompany, searchCompanies, listCompanies, getCompany, updateCompany, archiveCompany, deleteCompany, createVacancy, searchVacancies, listVacancies, getVacancy, updateVacancy, archiveVacancy
+- Kandidaatmatching: matchCandidateToVacancy — lees vacature + kandidaat, bereken matchscore, sterke punten, risico's, salaris, beschikbaarheid en schrijf een eerlijke introductie (max 150 woorden) voor de opdrachtgever`;
 
 /** @deprecated Use RECRUITMENT_COPILOT_SYSTEM_PROMPT */
 export const HIREFLOW_SYSTEM_PROMPT = RECRUITMENT_COPILOT_SYSTEM_PROMPT;

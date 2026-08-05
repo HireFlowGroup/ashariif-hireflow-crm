@@ -1,3 +1,4 @@
+import { CandidatesServiceError } from "@/features/candidates/repositories/errors";
 import { VacanciesValidationError } from "@/features/vacancies/services/errors";
 import { VacanciesRepositoryError } from "@/features/vacancies/repositories/errors";
 
@@ -19,6 +20,14 @@ export function mapVacancyErrorToStatus(error: unknown): {
 
   if (error instanceof Error && error.message === "Vacature niet gevonden.") {
     return { status: 404, message: error.message };
+  }
+
+  if (error instanceof CandidatesServiceError) {
+    return { status: 404, message: error.message };
+  }
+
+  if (error instanceof Error && error.message === "Geef candidateId of candidate-profiel op.") {
+    return { status: 400, message: error.message };
   }
 
   return {
