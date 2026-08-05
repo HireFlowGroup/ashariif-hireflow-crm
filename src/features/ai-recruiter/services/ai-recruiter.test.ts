@@ -6,6 +6,7 @@ import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/type
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeLeadScore } from "@/features/ai-recruiter/services/lead-scoring.service";
 import { computeOpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
+import { computeSalesIntelligence } from "@/features/ai-recruiter/services/sales-intelligence.service";
 import {
   classifyReply,
   getReplyFollowUpAction,
@@ -123,10 +124,12 @@ describe("AI Recruiter lead scoring", () => {
   it("assigns transparent score with explanations", () => {
     const hiring = computeHiringIntelligenceProfile(company(), basePlan);
     const opportunity = computeOpportunityAssessment(company(), basePlan);
+    const sales = computeSalesIntelligence(company(), hiring, basePlan);
     const result = computeLeadScore(
       company(),
       hiring,
       opportunity,
+      sales,
       {
         hasContact: true,
         contactName: "Jan Jansen",
@@ -146,10 +149,12 @@ describe("AI Recruiter lead scoring", () => {
     const lowCompany = company({ vacancyCount: 0, hiringSignals: [], sector: null, city: null });
     const hiring = computeHiringIntelligenceProfile(lowCompany, basePlan);
     const opportunity = computeOpportunityAssessment(lowCompany, basePlan);
+    const sales = computeSalesIntelligence(lowCompany, hiring, basePlan);
     const result = computeLeadScore(
       lowCompany,
       hiring,
       opportunity,
+      sales,
       { hasContact: false, contactName: null, contactEmail: null, verificationStatus: "unknown", confidence: null },
       basePlan,
     );
@@ -157,15 +162,18 @@ describe("AI Recruiter lead scoring", () => {
   });
 
   it("rejects when opportunity score below minimum", () => {
-    const hiring = computeHiringIntelligenceProfile(company(), basePlan);
-    const opportunity = computeOpportunityAssessment(
-      company({ vacancyCount: 0, hiringSignals: [] }),
-      basePlan,
-    );
+    const testCompany = company({
+      vacancyCount: 1,
+      hiringSignals: [{ type: "growth", description: "Scale-up", source: "web", confidence: 0.9 }],
+    });
+    const hiring = computeHiringIntelligenceProfile(testCompany, basePlan);
+    const opportunity = computeOpportunityAssessment(testCompany, basePlan);
+    const sales = computeSalesIntelligence(testCompany, hiring, basePlan);
     const result = computeLeadScore(
-      company({ vacancyCount: 0, hiringSignals: [] }),
+      testCompany,
       hiring,
       opportunity,
+      sales,
       {
         hasContact: true,
         contactName: "Jan",
@@ -176,7 +184,11 @@ describe("AI Recruiter lead scoring", () => {
       { ...basePlan, minimum_opportunity_score: 70 },
     );
     expect(result.priority).toBe("Reject");
-    expect(result.breakdown.explanations.some((e) => e.includes("Opportunity score onder"))).toBe(true);
+    expect(
+      result.breakdown.explanations.some(
+        (e) => e.includes("Opportunity score onder") || e.includes("Sales Intelligence"),
+      ),
+    ).toBe(true);
   });
 });
 

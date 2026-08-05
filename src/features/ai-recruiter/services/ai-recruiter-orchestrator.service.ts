@@ -27,6 +27,12 @@ import {
   isOutreachEligible,
   type OpportunityAssessment,
 } from "@/features/ai-recruiter/services/opportunity-scorer.service";
+import {
+  computeSalesIntelligence,
+  isSalesOutreachEligible,
+  salesToScoreBreakdownFields,
+  type SalesIntelligenceAssessment,
+} from "@/features/ai-recruiter/services/sales-intelligence.service";
 import { RecruiterPipelineTracker } from "@/features/ai-recruiter/services/recruiter-pipeline-tracker";
 import {
   parseAiRecruiterSearchPlan,
@@ -186,6 +192,7 @@ export class AiRecruiterOrchestrator {
         company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
         hiring: HiringIntelligenceProfile;
         opportunity: OpportunityAssessment;
+        sales: SalesIntelligenceAssessment;
         outreachEligible: boolean;
         outreachRejectionReason: string | null;
       };
@@ -199,6 +206,7 @@ export class AiRecruiterOrchestrator {
           const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
           const hiring = computeHiringIntelligenceProfile(company, plan);
           const opportunity = computeOpportunityAssessment(company, plan);
+          const sales = computeSalesIntelligence(company, hiring, plan);
 
           if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
@@ -208,6 +216,9 @@ export class AiRecruiterOrchestrator {
 
           if (!outreachEligible) {
             outreachRejectionReason = `Opportunity score ${opportunity.opportunityScore} onder drempel ${plan.minimum_opportunity_score} — geen outreach`;
+          } else if (!isSalesOutreachEligible(sales.tier)) {
+            outreachEligible = false;
+            outreachRejectionReason = `Sales Intelligence ${sales.tier} (${sales.salesScore}/100) — geen outreach`;
           } else if (plan.vacancy_required && hiring.vacancyCount === 0) {
             outreachEligible = false;
             outreachRejectionReason = "Vacature vereist maar niet gevonden";
@@ -215,6 +226,15 @@ export class AiRecruiterOrchestrator {
             outreachEligible = false;
             outreachRejectionReason = `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`;
           }
+
+          console.info("[SalesIntelligence] assessment", {
+            companyId,
+            companyName: name,
+            salesScore: sales.salesScore,
+            tier: sales.tier,
+            breakdown: sales.breakdown,
+            why: sales.why.slice(0, 3),
+          });
 
           console.info("[Opportunity] assessment", {
             companyId,
@@ -233,6 +253,7 @@ export class AiRecruiterOrchestrator {
             company,
             hiring,
             opportunity,
+            sales,
             outreachEligible,
             outreachRejectionReason,
           });
@@ -431,7 +452,8 @@ export class AiRecruiterOrchestrator {
         }
 
         const { result, hiring, outreachEligible, outreachRejectionReason } = discovery;
-        const { opportunity, company } = entry;
+        const { opportunity, sales, company } = entry;
+        const salesFields = salesToScoreBreakdownFields(sales);
         const contactDiscoveryPayload = {
           contactDiscovery: {
             stage: result.stage,
@@ -465,6 +487,7 @@ export class AiRecruiterOrchestrator {
               bestApproach: opportunity.bestApproach,
               recruitmentPotential: opportunity.recruitmentPotential,
               recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+              ...salesFields,
             },
             rejectionReason: result.errorMessage ?? outreachRejectionReason,
             warnings: hiring.warnings,
@@ -506,6 +529,7 @@ export class AiRecruiterOrchestrator {
               bestApproach: opportunity.bestApproach,
               recruitmentPotential: opportunity.recruitmentPotential,
               recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+              ...salesFields,
             },
             rejectionReason: outreachRejectionReason,
             warnings: hiring.warnings,
@@ -525,7 +549,7 @@ export class AiRecruiterOrchestrator {
           confidence: result.selected.relevanceScore / 100,
         };
 
-        const leadScore = computeLeadScore(company, hiring, opportunity, contactInput, plan);
+        const leadScore = computeLeadScore(company, hiring, opportunity, sales, contactInput, plan);
 
         const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
           stage: result.stage,

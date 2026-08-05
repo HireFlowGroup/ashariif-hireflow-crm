@@ -84,7 +84,7 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
       outreachReadiness: 0,
       explanations: [],
       opportunityWhy: [],
-      rolesSought: [],
+      salesWhy: [],
     },
     rejectionReason: (row.rejection_reason as string) ?? null,
     warnings: (row.warnings as string[]) ?? [],

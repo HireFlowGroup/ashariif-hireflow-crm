@@ -6,6 +6,7 @@ import type {
 import { priorityFromTotalScore } from "@/features/ai-recruiter/domain/types";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { OpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
+import type { SalesIntelligenceAssessment } from "@/features/ai-recruiter/services/sales-intelligence.service";
 
 export type ContactScoreInput = {
   hasContact: boolean;
@@ -31,14 +32,53 @@ export function computeLeadScore(
   company: Company,
   hiring: HiringIntelligenceProfile,
   opportunity: OpportunityAssessment,
+  sales: SalesIntelligenceAssessment,
   contact: ContactScoreInput,
   plan: AiRecruiterSearchPlan,
 ): LeadScoreResult {
+  const salesFields = {
+    salesScore: sales.salesScore,
+    salesTier: sales.tier,
+    salesWhy: sales.why,
+    salesBreakdown: sales.breakdown,
+  };
+
   const explanations: string[] = [
     ...hiring.explanations,
+    `Sales Intelligence: ${sales.salesScore}/100 → ${sales.tier}.`,
+    ...sales.why,
     `Opportunity score: ${opportunity.opportunityScore}/100 (${opportunity.agencyNeedLikelihood}).`,
     ...opportunity.why,
   ];
+
+  if (sales.tier === "IGNORE") {
+    return {
+      companyFitScore: 0,
+      hiringScore: hiring.hiringScore,
+      opportunityScore: opportunity.opportunityScore,
+      contactScore: 0,
+      personalizationScore: 0,
+      outreachReadinessScore: 0,
+      totalScore: sales.salesScore,
+      priority: "Reject",
+      breakdown: {
+        companyFit: 0,
+        hiring: hiring.hiringScore,
+        opportunity: opportunity.opportunityScore,
+        contact: 0,
+        personalization: 0,
+        outreachReadiness: 0,
+        explanations: [...explanations, "Geblokkeerd: Sales Intelligence tier IGNORE (<50)."],
+        opportunityWhy: opportunity.why,
+        rolesSought: opportunity.rolesSought,
+        urgency: opportunity.urgency,
+        bestApproach: opportunity.bestApproach,
+        recruitmentPotential: opportunity.recruitmentPotential,
+        recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+        ...salesFields,
+      },
+    };
+  }
 
   if (opportunity.opportunityScore < plan.minimum_opportunity_score) {
     return {
@@ -67,6 +107,7 @@ export function computeLeadScore(
         bestApproach: opportunity.bestApproach,
         recruitmentPotential: opportunity.recruitmentPotential,
         recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+        ...salesFields,
       },
     };
   }
@@ -152,6 +193,7 @@ export function computeLeadScore(
       bestApproach: opportunity.bestApproach,
       recruitmentPotential: opportunity.recruitmentPotential,
       recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+      ...salesFields,
     },
   };
 }

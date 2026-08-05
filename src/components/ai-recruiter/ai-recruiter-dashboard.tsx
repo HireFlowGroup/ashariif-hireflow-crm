@@ -422,7 +422,7 @@ export function AiRecruiterDashboard() {
                       >
                         <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
                         <p className="text-xs text-muted-foreground">
-                          Opp. {item.scoreBreakdown?.opportunity ?? "—"} · Totaal {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
+                          Opp. {item.scoreBreakdown?.opportunity ?? "—"} · Sales {item.scoreBreakdown?.salesScore ?? "—"} {item.scoreBreakdown?.salesTier ? `· ${item.scoreBreakdown.salesTier}` : ""} · Totaal {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
                         </p>
                       </button>
                     ))
@@ -438,6 +438,39 @@ export function AiRecruiterDashboard() {
                         <p><span className="text-muted-foreground">Locatie:</span> {selectedItem.companyCity ?? "—"}</p>
                         <p><span className="text-muted-foreground">Sector:</span> {selectedItem.companySector ?? "—"}</p>
                         <p><span className="text-muted-foreground">Opportunity score:</span> {selectedItem.scoreBreakdown?.opportunity ?? "—"}</p>
+                        {selectedItem.scoreBreakdown?.salesTier ? (
+                          <p>
+                            <span className="text-muted-foreground">Sales Intelligence:</span>{" "}
+                            <span className={
+                              selectedItem.scoreBreakdown.salesTier === "HOT LEAD"
+                                ? "font-semibold text-red-600"
+                                : selectedItem.scoreBreakdown.salesTier === "WARM LEAD"
+                                  ? "font-medium text-orange-600"
+                                  : selectedItem.scoreBreakdown.salesTier === "FOLLOW"
+                                    ? "font-medium text-amber-700"
+                                    : "text-muted-foreground"
+                            }>
+                              {selectedItem.scoreBreakdown.salesTier}
+                            </span>
+                            {selectedItem.scoreBreakdown.salesScore != null ? ` (${selectedItem.scoreBreakdown.salesScore}/100)` : ""}
+                          </p>
+                        ) : null}
+                        {(selectedItem.scoreBreakdown?.salesBreakdown) ? (
+                          <div className="text-xs text-muted-foreground grid grid-cols-2 gap-x-3 gap-y-0.5">
+                            <span>Vacatures: {selectedItem.scoreBreakdown.salesBreakdown.openVacancies}/25</span>
+                            <span>Groei: {selectedItem.scoreBreakdown.salesBreakdown.growth}/20</span>
+                            <span>Recruitment: {selectedItem.scoreBreakdown.salesBreakdown.recruitmentActivity}/20</span>
+                            <span>Omvang: {selectedItem.scoreBreakdown.salesBreakdown.companySize}/10</span>
+                            <span className="col-span-2">Externe recruiter: {selectedItem.scoreBreakdown.salesBreakdown.externalRecruiterChance}/25</span>
+                          </div>
+                        ) : null}
+                        {(selectedItem.scoreBreakdown?.salesWhy?.length ?? 0) > 0 ? (
+                          <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                            {selectedItem.scoreBreakdown!.salesWhy!.map((reason) => (
+                              <li key={reason}>{reason}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                         {selectedItem.scoreBreakdown?.recruitmentPotential ? (
                           <p>
                             <span className="text-muted-foreground">Recruitment Potential:</span>{" "}

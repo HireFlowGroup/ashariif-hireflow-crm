@@ -115,6 +115,18 @@ export const scoreBreakdownSchema = z.object({
   bestApproach: z.string().optional(),
   recruitmentPotential: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
   recruitmentPotentialMotivation: z.string().optional(),
+  salesScore: z.number().optional(),
+  salesTier: z.enum(["HOT LEAD", "WARM LEAD", "FOLLOW", "IGNORE"]).optional(),
+  salesWhy: z.array(z.string()).default([]),
+  salesBreakdown: z
+    .object({
+      openVacancies: z.number(),
+      growth: z.number(),
+      recruitmentActivity: z.number(),
+      companySize: z.number(),
+      externalRecruiterChance: z.number(),
+    })
+    .optional(),
 });
 
 export type AiRecruiterScoreBreakdown = z.infer<typeof scoreBreakdownSchema>;
