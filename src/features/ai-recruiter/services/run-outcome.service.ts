@@ -1,6 +1,7 @@
 import type { AiRecruiterRunCounters, AiRecruiterRunStatus } from "@/features/ai-recruiter/domain/types";
 import type { RunDiagnostics, RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { isProviderFailure } from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
+import type { EligibilityRunSummary } from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
 
 export type RunOutcome = {
   status: AiRecruiterRunStatus;
@@ -11,8 +12,9 @@ export function resolveRunOutcome(input: {
   counters: AiRecruiterRunCounters;
   diagnostics: RunDiagnostics;
   draftsCreated: number;
+  eligibilitySummary?: EligibilityRunSummary | null;
 }): RunOutcome {
-  const { counters, diagnostics, draftsCreated } = input;
+  const { counters, diagnostics, draftsCreated, eligibilitySummary } = input;
 
   if (isProviderFailure(diagnostics.errorCode)) {
     return {
@@ -36,10 +38,22 @@ export function resolveRunOutcome(input: {
   }
 
   if (counters.validated > 0) {
+    const summaryParts = eligibilitySummary
+      ? [
+          `${eligibilitySummary.prospectsReviewed} prospects beoordeeld`,
+          `gem. score ${eligibilitySummary.averageScore}`,
+          `drempel ${eligibilitySummary.threshold}`,
+          eligibilitySummary.topRejectionReasons[0]
+            ? `top afwijsreden: ${eligibilitySummary.topRejectionReasons[0].reason} (${eligibilitySummary.topRejectionReasons[0].count}x)`
+            : null,
+        ].filter(Boolean).join(" · ")
+      : null;
+
     return {
       status: "partially_completed",
-      errorMessage:
-        "Geen concepten aangemaakt — geen bedrijven kwamen door contact- en scoredrempels.",
+      errorMessage: summaryParts
+        ? `Geen concepten aangemaakt — ${summaryParts}.`
+        : "Geen concepten aangemaakt — geen eligible prospects na contact- en scoredrempels.",
     };
   }
 

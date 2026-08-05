@@ -117,7 +117,7 @@ export function selectBestDiscoveredContact(
     if (prefixDiff !== 0) return prefixDiff;
     return b.relevanceScore - a.relevanceScore;
   });
-  const bestMailbox = sortedMailboxes.find((c) => c.relevanceScore >= Math.min(minScore, 45));
+  const bestMailbox = sortedMailboxes.find((c) => c.relevanceScore >= Math.min(minScore, 35));
   if (bestMailbox?.email) {
     const local = bestMailbox.email.split("@")[0] ?? "mailbox";
     return toSelected(

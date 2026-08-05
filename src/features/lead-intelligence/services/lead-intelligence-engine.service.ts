@@ -84,6 +84,10 @@ function criteriaToSearchCriteria(criteria: CompanyFinderCriteria): CompanySearc
     maxResults: criteria.maxResults,
     excludedNames: criteria.excludedNames,
     excludedSectors: criteria.excludedSectors,
+    locations: criteria.locations,
+    regions: criteria.regions,
+    sectors: criteria.sectors,
+    desiredRoles: criteria.desiredRoles,
   };
 }
 

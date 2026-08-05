@@ -78,6 +78,10 @@ export type CompanySearchCriteria = {
   maxResults?: number;
   excludedNames?: string[];
   excludedSectors?: string[];
+  locations?: string[];
+  regions?: string[];
+  sectors?: string[];
+  desiredRoles?: string[];
   /** @deprecated Legacy compat */
   employeeCountRange?: string;
 };

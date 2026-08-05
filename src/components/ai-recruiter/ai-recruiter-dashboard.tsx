@@ -9,6 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
 import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
 import { WorkspacePage } from "@/components/layout/workspace-page";
@@ -362,11 +363,27 @@ export function AiRecruiterDashboard() {
                     <Badge>{activeRun.status}</Badge>
                     <span>Gevonden: {activeRun.counters?.found ?? 0}</span>
                     <span>Gevalideerd: {activeRun.counters?.validated ?? 0}</span>
+                    <span>Vacatures: {activeRun.counters?.withVacancies ?? 0}</span>
                     <span>Contact: {activeRun.counters?.contactFound ?? 0}</span>
                     <span>Mailbox: {activeRun.counters?.generalMailboxFound ?? 0}</span>
                     <span>Geen contact: {activeRun.counters?.blockedMissingContact ?? 0}</span>
                     <span>Concepten: {activeRun.counters?.draftsCreated ?? 0}</span>
                   </div>
+                  {activeRun.errorMessage ? (
+                    <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+                      {activeRun.errorMessage}
+                    </p>
+                  ) : null}
+                  {(activeRun.counters?.draftsCreated ?? 0) === 0
+                  && (activeRun.counters?.validated ?? 0) > 0
+                  && !streaming ? (
+                    <div className="mb-4">
+                      <ProspectDecisionsPanel
+                        runId={activeRun.id}
+                        onDraftCreated={() => void loadRuns()}
+                      />
+                    </div>
+                  ) : null}
                   <div className="grid gap-2 sm:grid-cols-2">
                     {(pipelineSteps.length ? pipelineSteps : activeRun.pipelineSteps ?? []).map((step) => (
                       <div key={step.id} className="rounded-md border px-3 py-2 text-sm">

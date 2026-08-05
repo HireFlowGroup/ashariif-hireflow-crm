@@ -13,5 +13,11 @@ export function getAiRecruiterConfig() {
     ),
     defaultMaximumCompanies: parseInt(process.env.AI_RECRUITER_DEFAULT_MAX_COMPANIES ?? "25", 10),
     defaultMaximumDrafts: parseInt(process.env.AI_RECRUITER_DEFAULT_MAX_DRAFTS ?? "10", 10),
+    /** Minimum deterministic score (0–100) to allow concept generation. */
+    conceptScoreThreshold: parseInt(process.env.AI_RECRUITER_CONCEPT_SCORE_THRESHOLD ?? "30", 10),
+    /** Minimum queries per search plan (vacancy-driven discovery). */
+    minDiscoveryQueries: parseInt(process.env.AI_RECRUITER_MIN_DISCOVERY_QUERIES ?? "5", 10),
+    /** Max results per individual discovery query. */
+    maxResultsPerQuery: parseInt(process.env.AI_RECRUITER_MAX_RESULTS_PER_QUERY ?? "10", 10),
   };
 }

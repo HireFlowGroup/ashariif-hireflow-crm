@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { listDiscoveryQueryRuns } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
 import { getPipelineRuns } from "@/features/lead-intelligence/providers/manager";
 import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
 
@@ -20,5 +21,9 @@ export async function GET(request: Request) {
     runs = runs.filter((run) => run.jobId === jobId);
   }
 
-  return NextResponse.json({ runs });
+  const discoveryQueries = listDiscoveryQueryRuns(limit).filter(
+    (entry) => !context.organizationId || entry.organizationId === context.organizationId,
+  );
+
+  return NextResponse.json({ runs, discoveryQueries });
 }

@@ -31,6 +31,11 @@ export type CompanyFinderCriteria = {
   sourceQuery?: string;
   /** Fast path: Tavily-only discovery, direct save, background enrichment */
   fastMode?: boolean;
+  /** Multi-location discovery (AI Recruiter) */
+  locations?: string[];
+  regions?: string[];
+  sectors?: string[];
+  desiredRoles?: string[];
 };
 
 /** Legacy slim candidate for backward-compatible stream events. */

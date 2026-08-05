@@ -10,6 +10,7 @@ import {
 import { scheduleBackgroundCompanyEnrichment } from "@/features/company-finder/services/background-enrichment.service";
 import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
 import { runFastTavilySearch } from "@/features/company-finder/services/fast-discovery.service";
+import { recordDiscoveryQueryRun } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
 import { runDiscoveryQualityGate } from "@/features/company-finder/discovery/discovery-quality-gate";
 import type { DiscoveryQualityReport, QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
@@ -112,6 +113,37 @@ export async function* runFastCompanyFinderPipeline(input: {
         config.fastModeMaxResults,
       ),
       timeoutMs: config.tavilyTimeoutMs,
+      searchPlan: {
+        locations: input.job.criteria.locations ?? (input.job.criteria.city ? [input.job.criteria.city] : []),
+        regions: input.job.criteria.regions ?? (input.job.criteria.region ? [input.job.criteria.region] : []),
+        sectors: input.job.criteria.sectors ?? (input.job.criteria.sector ? [input.job.criteria.sector] : []),
+        desired_roles: input.job.criteria.desiredRoles ?? input.job.criteria.vacancyTitles ?? [],
+        employee_range: {
+          min: input.job.criteria.employeeCountMin ?? null,
+          max: input.job.criteria.employeeCountMax ?? null,
+        },
+        vacancy_required: input.job.criteria.searchVacancies ?? false,
+        minimum_hiring_score: 30,
+        minimum_opportunity_score: 30,
+        maximum_companies: input.job.criteria.maxResults ?? 25,
+        maximum_drafts: 10,
+        contact_roles: [],
+        outreach_mode: "draft_only",
+        approval_mode: "manual",
+        exclusions: input.job.criteria.excludedNames ?? [],
+        uncertainties: [],
+        reasoning: "",
+      },
+    });
+
+    recordDiscoveryQueryRun({
+      jobId: input.jobId,
+      organizationId: input.context.organizationId ?? null,
+      providerId: tavily.providerId,
+      totalRawResults: tavily.totalRawResults,
+      classifiedCounts: tavily.classifiedCounts,
+      queries: tavily.queries,
+      recordedAt: new Date().toISOString(),
     });
 
     timer.start("discovery_quality_gate", "quality");

@@ -2,6 +2,11 @@ import "server-only";
 
 import { toCompanyId } from "@/features/companies/domain";
 import type { CompaniesService } from "@/features/companies/services/companies.service";
+import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
+import {
+  evaluateProspectPipeline,
+  summarizeEligibilityDecisions,
+} from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import type {
   AiRecruiterEngineContext,
@@ -21,8 +26,6 @@ import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories
 import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
-import { computeLeadScoreFromAnalysis } from "@/features/ai-recruiter/services/lead-scoring-from-analysis.service";
-import type { ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
 import {
   computeOpportunityAssessment,
   type OpportunityAssessment,
@@ -59,7 +62,6 @@ import type { ContactDiscoveryEngine } from "@/features/contact-finder/services/
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 import { createRecruitmentIntelligenceEngine } from "@/features/recruitment-intelligence/create-recruitment-intelligence-engine";
 import type { RecruitmentIntelligenceAnalysis } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
-import { INSUFFICIENT_DATA } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 import { OutreachEngine, OutreachEngineError } from "@/features/outreach-engine/services/outreach-engine.service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -78,6 +80,7 @@ export class AiRecruiterOrchestrator {
     private readonly companiesService: CompaniesService,
     private readonly outreachEngine: OutreachEngine,
     private readonly contactsClient: SupabaseClient,
+    private readonly prospectAudit: ProspectAuditRepository,
   ) {}
 
   async parsePlan(prompt: string) {
@@ -125,6 +128,8 @@ export class AiRecruiterOrchestrator {
     });
 
     yield { type: "connected", runId };
+
+    let eligibilitySummary: import("@/features/ai-recruiter/services/prospect-eligibility-pipeline.service").EligibilityRunSummary | null = null;
 
     try {
       await this.repository.updateRun(context.organizationId, runId, {
@@ -347,8 +352,6 @@ export class AiRecruiterOrchestrator {
         hiring: HiringIntelligenceProfile;
         opportunity: OpportunityAssessment;
         sales: SalesIntelligenceAssessment;
-        outreachEligible: boolean;
-        outreachRejectionReason: string | null;
       };
 
       const companyContactContexts: CompanyContactContext[] = [];
@@ -365,17 +368,6 @@ export class AiRecruiterOrchestrator {
           if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
-          let outreachEligible = true;
-          let outreachRejectionReason: string | null = null;
-
-          if (plan.vacancy_required && hiring.vacancyCount === 0) {
-            outreachEligible = false;
-            outreachRejectionReason = "Vacature vereist maar niet gevonden";
-          } else if (hiring.hiringScore < plan.minimum_hiring_score) {
-            outreachEligible = false;
-            outreachRejectionReason = `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`;
-          }
-
           console.info("[SalesIntelligence] assessment", {
             companyId,
             companyName: name,
@@ -391,8 +383,8 @@ export class AiRecruiterOrchestrator {
             opportunityScore: opportunity.opportunityScore,
             urgency: opportunity.urgency,
             rolesSought: opportunity.rolesSought,
-            outreachEligible,
-            why: opportunity.why.slice(0, 3),
+            hiringScore: hiring.hiringScore,
+            vacancyCount: hiring.vacancyCount,
           });
 
           companyContactContexts.push({
@@ -403,8 +395,6 @@ export class AiRecruiterOrchestrator {
             hiring,
             opportunity,
             sales,
-            outreachEligible,
-            outreachRejectionReason,
           });
         } catch (error) {
           consecutiveFailures += 1;
@@ -501,8 +491,6 @@ export class AiRecruiterOrchestrator {
         itemId: string;
         companyId: string;
         hiring: HiringIntelligenceProfile;
-        outreachEligible: boolean;
-        outreachRejectionReason: string | null;
         result: Awaited<ReturnType<ContactDiscoveryEngine["discoverForCompany"]>>;
       };
 
@@ -577,8 +565,6 @@ export class AiRecruiterOrchestrator {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
-            outreachEligible: entry.outreachEligible,
-            outreachRejectionReason: entry.outreachRejectionReason,
             result,
           });
         } catch (error) {
@@ -596,8 +582,6 @@ export class AiRecruiterOrchestrator {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
-            outreachEligible: entry.outreachEligible,
-            outreachRejectionReason: entry.outreachRejectionReason,
             result: {
               stage: "contact_lookup_failed",
               selected: null,
@@ -622,6 +606,9 @@ export class AiRecruiterOrchestrator {
 
       pipeline.startStep("lead_score");
 
+      const recruiterConfig = getAiRecruiterConfig();
+      const eligibilityDecisions: import("@/features/ai-recruiter/domain/concept-eligibility.types").ConceptEligibilityResult[] = [];
+
       for (const entry of companyContactContexts) {
         const discovery = discoveryByItem.get(entry.itemId);
         if (!discovery) {
@@ -633,25 +620,23 @@ export class AiRecruiterOrchestrator {
           continue;
         }
 
-        const { result, hiring, outreachRejectionReason: preContactRejection } = discovery;
+        const { result, hiring } = discovery;
         const { opportunity, sales, company } = entry;
         const analysis = analysisByCompanyId.get(entry.companyId) ?? null;
-        const analysisScore = analysis?.recruitment_opportunity_score ?? null;
-
-        const outreachEligible =
-          analysisScore !== null
-          && analysisScore >= plan.minimum_opportunity_score
-          && (preContactRejection === null);
-
-        const outreachRejectionReason = !outreachEligible
-          ? analysisScore === null
-            ? INSUFFICIENT_DATA
-            : analysisScore < plan.minimum_opportunity_score
-              ? `Recruitment Opportunity Score ${analysisScore} onder drempel ${plan.minimum_opportunity_score}`
-              : preContactRejection
-          : null;
-
         const salesFields = salesToScoreBreakdownFields(sales);
+
+        const pipelineDecision = evaluateProspectPipeline({
+          company,
+          plan,
+          hiring,
+          analysis,
+          contact: result.selected,
+          contactStage: result.stage,
+          contactRejectionReason: result.errorMessage,
+        });
+
+        eligibilityDecisions.push(pipelineDecision.eligibility);
+
         const contactDiscoveryPayload = {
           contactDiscovery: {
             stage: result.stage,
@@ -659,37 +644,63 @@ export class AiRecruiterOrchestrator {
             alternatives: result.alternatives,
             errorMessage: result.errorMessage,
           },
+          eligibility: pipelineDecision.eligibility,
+          vacancyEvidence: pipelineDecision.vacancies,
         };
 
-        if (!result.selected) {
-          if (result.stage === "blocked_missing_contact") {
-            counters.blockedMissingContact += 1;
-          }
+        if (result.stage === "contact_found") {
+          counters.contactFound += 1;
+        } else if (result.stage === "general_mailbox_found") {
+          counters.generalMailboxFound += 1;
+        } else if (result.stage === "blocked_missing_contact") {
+          counters.blockedMissingContact += 1;
+        }
 
+        const scoreBreakdown = {
+          companyFit: pipelineDecision.eligibility.score,
+          hiring: hiring.hiringScore,
+          opportunity: pipelineDecision.aiOpportunityScore ?? opportunity.opportunityScore,
+          contact: result.selected ? (result.selected.isGeneralMailbox ? 12 : 20) : 0,
+          personalization: 0,
+          outreachReadiness: pipelineDecision.eligibility.eligible ? 50 : 0,
+          explanations: [
+            ...pipelineDecision.eligibility.acceptedRules,
+            ...pipelineDecision.eligibility.rejectedRules.map((rule) => `Afgewezen: ${rule}`),
+          ],
+          opportunityWhy: opportunity.why,
+          rolesSought: opportunity.rolesSought,
+          urgency: opportunity.urgency,
+          bestApproach: opportunity.bestApproach,
+          recruitmentPotential: opportunity.recruitmentPotential,
+          recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+          recruitmentIntelligenceScore: pipelineDecision.aiOpportunityScore ?? undefined,
+          ...salesFields,
+        };
+
+        if (!pipelineDecision.eligibility.eligible) {
           const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
             stage: result.stage,
             status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
             hiringScore: hiring.hiringScore,
-            totalScore: opportunity.opportunityScore,
-            scoreBreakdown: {
-              companyFit: 0,
-              hiring: hiring.hiringScore,
-              opportunity: opportunity.opportunityScore,
-              contact: 0,
-              personalization: 0,
-              outreachReadiness: 0,
-              explanations: opportunity.why,
-              opportunityWhy: opportunity.why,
-              rolesSought: opportunity.rolesSought,
-              urgency: opportunity.urgency,
-              bestApproach: opportunity.bestApproach,
-              recruitmentPotential: opportunity.recruitmentPotential,
-              recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
-              ...salesFields,
-            },
-            rejectionReason: result.errorMessage ?? outreachRejectionReason,
+            contactScore: result.selected ? 12 : 0,
+            totalScore: pipelineDecision.eligibility.score,
+            scoreBreakdown,
+            rejectionReason: pipelineDecision.eligibility.userMessage,
             warnings: hiring.warnings,
+            selectedContactId: result.selected?.contactId ?? null,
             externalCompanyData: contactDiscoveryPayload,
+          });
+
+          await this.prospectAudit.upsertDecision({
+            organizationId: context.organizationId,
+            runId,
+            runItemId: entry.itemId,
+            company,
+            eligibility: pipelineDecision.eligibility,
+            vacancies: pipelineDecision.vacancies,
+            contact: result.selected,
+            contactStage: result.stage,
+            conceptStatus: "skipped",
           });
 
           if (result.stage !== "contact_lookup_failed") {
@@ -700,84 +711,49 @@ export class AiRecruiterOrchestrator {
           continue;
         }
 
-        if (result.stage === "contact_found") {
-          counters.contactFound += 1;
-        } else if (result.stage === "general_mailbox_found") {
-          counters.generalMailboxFound += 1;
-        }
-
-        if (!outreachEligible) {
-          const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
-            stage: result.stage,
-            status: "skipped",
-            hiringScore: hiring.hiringScore,
-            contactScore: 50,
-            totalScore: opportunity.opportunityScore,
-            scoreBreakdown: {
-              companyFit: 0,
-              hiring: hiring.hiringScore,
-              opportunity: opportunity.opportunityScore,
-              contact: 50,
-              personalization: 0,
-              outreachReadiness: 0,
-              explanations: opportunity.why,
-              opportunityWhy: opportunity.why,
-              rolesSought: opportunity.rolesSought,
-              urgency: opportunity.urgency,
-              bestApproach: opportunity.bestApproach,
-              recruitmentPotential: opportunity.recruitmentPotential,
-              recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
-              ...salesFields,
-            },
-            rejectionReason: outreachRejectionReason,
-            warnings: hiring.warnings,
-            selectedContactId: result.selected.contactId,
-            externalCompanyData: contactDiscoveryPayload,
-          });
-          counters.skipped += 1;
-          yield { type: "item", item: updatedItem };
-          continue;
-        }
-
-        const contactInput: ContactScoreInput = {
-          hasContact: true,
-          contactName: result.selected.recipientName,
-          contactEmail: result.selected.email,
-          verificationStatus: result.selected.verificationStatus,
-          confidence: result.selected.relevanceScore / 100,
-        };
-
-        const leadScore = computeLeadScoreFromAnalysis(company, analysis, contactInput, plan);
-
         const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
           stage: result.stage,
-          status: leadScore.priority === "Reject" ? "skipped" : "completed",
+          status: "completed",
           hiringScore: hiring.hiringScore,
-          contactScore: leadScore.contactScore,
-          outreachScore: leadScore.outreachReadinessScore,
-          totalScore: leadScore.totalScore,
-          scoreBreakdown: leadScore.breakdown,
-          rejectionReason: leadScore.priority === "Reject" ? "Score onder drempel" : null,
+          contactScore: result.selected?.isGeneralMailbox ? 12 : 20,
+          outreachScore: 50,
+          totalScore: pipelineDecision.eligibility.score,
+          scoreBreakdown,
+          rejectionReason: null,
           warnings: hiring.warnings,
-          selectedContactId: result.selected.contactId,
+          selectedContactId: result.selected?.contactId ?? null,
           externalCompanyData: contactDiscoveryPayload,
+        });
+
+        await this.prospectAudit.upsertDecision({
+          organizationId: context.organizationId,
+          runId,
+          runItemId: entry.itemId,
+          company,
+          eligibility: pipelineDecision.eligibility,
+          vacancies: pipelineDecision.vacancies,
+          contact: result.selected,
+          contactStage: result.stage,
+          conceptStatus: "pending",
         });
 
         yield { type: "item", item: updatedItem };
 
-        if (leadScore.priority === "Reject") {
-          counters.skipped += 1;
-          continue;
+        if (result.selected) {
+          qualifiedItems.push({
+            itemId: entry.itemId,
+            companyId: entry.companyId,
+            totalScore: pipelineDecision.eligibility.score,
+            opportunity,
+            selected: result.selected,
+          });
         }
-
-        qualifiedItems.push({
-          itemId: entry.itemId,
-          companyId: entry.companyId,
-          totalScore: leadScore.totalScore,
-          opportunity,
-          selected: result.selected,
-        });
       }
+
+      eligibilitySummary = summarizeEligibilityDecisions(
+        eligibilityDecisions,
+        recruiterConfig.conceptScoreThreshold,
+      );
 
       const avgDuration =
         contactStats.processed > 0
@@ -888,7 +864,20 @@ export class AiRecruiterOrchestrator {
         }
       }
 
-      pipeline.completeStep("drafts", { succeeded: counters.draftsCreated, processed: qualifiedItems.length });
+      pipeline.completeStep("drafts", {
+        succeeded: counters.draftsCreated,
+        processed: qualifiedItems.length,
+        skipped: eligibilitySummary.rejectedCount,
+        message: [
+          `ontvangen ${eligibilitySummary.prospectsReviewed}`,
+          `eligible ${eligibilitySummary.eligibleCount}`,
+          `afgewezen ${eligibilitySummary.rejectedCount}`,
+          `concepten ${counters.draftsCreated}`,
+          eligibilitySummary.topRejectionReasons[0]
+            ? `top reden: ${eligibilitySummary.topRejectionReasons[0].reason}`
+            : null,
+        ].filter(Boolean).join(" · "),
+      });
       pipeline.skipStep("sending", "Handmatige goedkeuring vereist");
       pipeline.skipStep("follow_up", "Na verzending");
       if (counters.draftsCreated > 0) {
@@ -903,6 +892,7 @@ export class AiRecruiterOrchestrator {
         counters,
         diagnostics: runDiagnostics!,
         draftsCreated: counters.draftsCreated,
+        eligibilitySummary,
       });
       const uiMessage =
         outcome.errorMessage && runDiagnostics

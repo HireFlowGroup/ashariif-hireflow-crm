@@ -13,7 +13,7 @@ import { buildOutreachSalutation } from "@/features/contact-finder/services/cont
 import { isOpenAIConfigured } from "@/platform/config/env";
 import { getOpenAIClient } from "@/lib/ai/client";
 
-const MAX_WORDS = 140;
+const MAX_WORDS = 120;
 const MAX_FOLLOW_UP_WORDS = 120;
 
 const BANNED_PHRASES = [

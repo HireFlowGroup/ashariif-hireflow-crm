@@ -31,6 +31,28 @@ type PipelineRunDiagnostic = {
   steps: PipelineStepDiagnostic[];
 };
 
+type DiscoveryQueryRow = {
+  query: string;
+  intent: string;
+  label: string;
+  rawResultCount: number;
+  companyResults: number;
+  vacancyResults: number;
+  directoryResults: number;
+  rejectedResults: number;
+  durationMs: number;
+  error: string | null;
+};
+
+type DiscoveryQueryRun = {
+  jobId: string;
+  providerId: string;
+  totalRawResults: number;
+  classifiedCounts: Record<string, number>;
+  queries: DiscoveryQueryRow[];
+  recordedAt: string;
+};
+
 const STEP_ORDER: PipelineStepDiagnostic["step"][] = [
   "discovery",
   "crawler",
@@ -74,9 +96,11 @@ function statusVariant(status: PipelineRunDiagnostic["status"]) {
 
 export function DiagnosticsSettingsClient() {
   const [runs, setRuns] = useState<PipelineRunDiagnostic[]>([]);
+  const [discoveryQueries, setDiscoveryQueries] = useState<DiscoveryQueryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedDiscoveryJobId, setSelectedDiscoveryJobId] = useState<string | null>(null);
 
   const loadDiagnostics = useCallback(async () => {
     setLoading(true);
@@ -84,15 +108,22 @@ export function DiagnosticsSettingsClient() {
 
     try {
       const response = await fetch("/api/settings/diagnostics?limit=20");
-      const payload = (await response.json()) as { runs?: PipelineRunDiagnostic[]; error?: string };
+      const payload = (await response.json()) as {
+        runs?: PipelineRunDiagnostic[];
+        discoveryQueries?: DiscoveryQueryRun[];
+        error?: string;
+      };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Diagnostics laden mislukt");
       }
 
       const nextRuns = payload.runs ?? [];
+      const nextDiscovery = payload.discoveryQueries ?? [];
       setRuns(nextRuns);
+      setDiscoveryQueries(nextDiscovery);
       setSelectedRunId((current) => current ?? nextRuns[0]?.id ?? null);
+      setSelectedDiscoveryJobId((current) => current ?? nextDiscovery[0]?.jobId ?? null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Onbekende fout");
     } finally {
@@ -107,6 +138,10 @@ export function DiagnosticsSettingsClient() {
   }, [loadDiagnostics]);
 
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null;
+  const selectedDiscovery =
+    discoveryQueries.find((entry) => entry.jobId === selectedDiscoveryJobId)
+    ?? discoveryQueries[0]
+    ?? null;
 
   const stepsByName = new Map(
     (selectedRun?.steps ?? []).map((step) => [step.step, step] as const),
@@ -118,7 +153,7 @@ export function DiagnosticsSettingsClient() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Diagnostics</h1>
           <p className="text-sm text-muted-foreground">
-            Volledige Lead Intelligence pipeline — geen log-debugging meer nodig.
+            Pipeline-stappen en discovery-queryresultaten per zoekjob.
           </p>
         </div>
         <Button variant="outline" onClick={() => void loadDiagnostics()} disabled={loading}>
@@ -246,6 +281,90 @@ export function DiagnosticsSettingsClient() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Discovery queries</CardTitle>
+          <CardDescription>
+            Vacaturegedreven zoekqueries — provider, resultaten per query, classificatie
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {discoveryQueries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nog geen discovery-querydiagnostiek. Start een AI Recruiter-run om queries te zien.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {discoveryQueries.map((entry) => (
+                  <Button
+                    key={entry.jobId}
+                    type="button"
+                    size="sm"
+                    variant={selectedDiscovery?.jobId === entry.jobId ? "default" : "outline"}
+                    onClick={() => setSelectedDiscoveryJobId(entry.jobId)}
+                  >
+                    Job {entry.jobId.slice(0, 8)}… · {entry.queries.length} queries
+                  </Button>
+                ))}
+              </div>
+
+              {selectedDiscovery ? (
+                <>
+                  <div className="grid gap-2 sm:grid-cols-4 text-sm">
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground">Provider</p>
+                      <p className="font-medium">{selectedDiscovery.providerId}</p>
+                    </div>
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground">Ruwe resultaten</p>
+                      <p className="font-medium">{selectedDiscovery.totalRawResults}</p>
+                    </div>
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground">Bedrijven</p>
+                      <p className="font-medium">{selectedDiscovery.classifiedCounts.company ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground">Vacatures</p>
+                      <p className="font-medium">{selectedDiscovery.classifiedCounts.vacancy ?? 0}</p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full min-w-[720px] text-sm">
+                      <thead className="bg-muted/40 text-left">
+                        <tr>
+                          <th className="px-3 py-2">Label</th>
+                          <th className="px-3 py-2">Query</th>
+                          <th className="px-3 py-2">Ruwe</th>
+                          <th className="px-3 py-2">Bedrijf</th>
+                          <th className="px-3 py-2">Vacature</th>
+                          <th className="px-3 py-2">Afgewezen</th>
+                          <th className="px-3 py-2">Duur</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedDiscovery.queries.map((query) => (
+                          <tr key={`${query.label}-${query.query}`} className="border-t">
+                            <td className="px-3 py-2">{query.label}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{query.query}</td>
+                            <td className="px-3 py-2">{query.rawResultCount}</td>
+                            <td className="px-3 py-2">{query.companyResults}</td>
+                            <td className="px-3 py-2">{query.vacancyResults}</td>
+                            <td className="px-3 py-2">{query.rejectedResults}</td>
+                            <td className="px-3 py-2">{formatDuration(query.durationMs)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import type {
 } from "@/features/ai-recruiter/domain/types";
 import { aiRecruiterRunSettingsSchema } from "@/features/ai-recruiter/domain/types";
 import { SupabaseAiRecruiterRepository } from "@/features/ai-recruiter/repositories/supabase-ai-recruiter.repository";
+import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
 import { AiRecruiterOrchestrator } from "@/features/ai-recruiter/services/ai-recruiter-orchestrator.service";
 import { createOutreachEngineService } from "@/features/outreach-engine/create-outreach-engine-service";
 
@@ -43,6 +44,7 @@ export async function createAiRecruiterOrchestrator(): Promise<AiRecruiterOrches
   const contactsService = createContactsServiceFromClient(authClient);
   const contactDiscovery = await createContactDiscoveryEngine(authClient, contactsService, companiesService);
   const outreachEngine = await createOutreachEngineService();
+  const prospectAudit = new ProspectAuditRepository(authClient);
 
   return new AiRecruiterOrchestrator(
     repository,
@@ -51,5 +53,6 @@ export async function createAiRecruiterOrchestrator(): Promise<AiRecruiterOrches
     companiesService,
     outreachEngine,
     authClient,
+    prospectAudit,
   );
 }
