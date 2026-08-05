@@ -3,17 +3,32 @@ import "server-only";
 import type { CompanyFinderCriteria } from "@/features/company-finder/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
 import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
+import {
+  AI_RECRUITER_SEARCH_PLAN_JSON_SCHEMA,
+  AI_RECRUITER_SEARCH_PLAN_SCHEMA_NAME,
+} from "@/features/ai-recruiter/services/extract-search-plan-json-schema";
+import {
+  aiRecruiterSearchPlanRawSchema,
+  sanitizeAiRecruiterSearchPlan,
+} from "@/features/ai-recruiter/validation/search-plan.schemas";
 import { DEFAULT_MODEL } from "@/lib/ai/config";
 import { getOpenAIClient } from "@/lib/ai/client";
 import { isOpenAIConfigured } from "@/platform/config/env";
+import type { ZodIssue } from "zod";
 
 export class SearchPlanParserError extends Error {
+  readonly code: "OPENAI_NOT_CONFIGURED" | "INVALID_OUTPUT";
+  readonly issues?: ZodIssue[];
+
   constructor(
     message: string,
-    readonly code: "OPENAI_NOT_CONFIGURED" | "INVALID_OUTPUT" = "INVALID_OUTPUT",
+    code: "OPENAI_NOT_CONFIGURED" | "INVALID_OUTPUT" = "INVALID_OUTPUT",
+    issues?: ZodIssue[],
   ) {
     super(message);
     this.name = "SearchPlanParserError";
+    this.code = code;
+    this.issues = issues;
   }
 }
 
@@ -22,17 +37,19 @@ const SYSTEM_PROMPT = `Je vertaalt Nederlandse recruitment-zoekopdrachten naar e
 STRICTE REGELS:
 1. Extraheer ALLEEN wat expliciet in de prompt staat of daar direct uit volgt.
 2. Verzin GEEN locaties, sectoren, aantallen of functies die niet genoemd zijn.
-3. Zet ontbrekende of onduidelijke velden op null/leeg en vermeld die in uncertainties[].
-4. maximum_companies: gebruik expliciet genoemd aantal, anders null → default 25.
-5. maximum_drafts: gebruik expliciet genoemd aantal (bijv. "beste 10"), anders null → default 10.
-6. employee_range: alleen invullen als medewerkersaantal genoemd is.
-7. desired_roles: vacaturefuncties die gezocht worden (recruiters, planners, etc.).
+3. Zet ontbrekende of onduidelijke waarden op null (employee_range) of lege arrays en vermeld die in uncertainties[].
+4. maximum_companies: gebruik expliciet genoemd aantal; anders 25.
+5. maximum_drafts: gebruik expliciet genoemd aantal (bijv. "beste 10"); anders 10.
+6. employee_range.min/max: alleen invullen als medewerkersaantal genoemd is, anders null.
+7. desired_roles: vacaturefuncties die gezocht worden (recruiters, accountmanagers, etc.).
 8. vacancy_required: true als vacatures expliciet vereist zijn.
 9. outreach_mode: altijd "draft_only" tenzij expliciet automatisch verzenden gevraagd.
 10. approval_mode: altijd "manual" tenzij expliciet anders.
 11. exclusions: bedrijven/sectoren die uitgesloten moeten worden.
+12. minimum_hiring_score: default 40 tenzij expliciet anders.
+13. contact_roles: standaard HR/recruitment rollen tenzij prompt specifieke rollen noemt.
 
-Antwoord uitsluitend als JSON volgens het schema.`;
+Vul ALLE schema-velden in. Geen vrije tekst buiten het JSON-object.`;
 
 function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
   const numbers = prompt.match(/\b(\d{1,3})\b/g)?.map(Number) ?? [];
@@ -64,39 +81,103 @@ function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
   });
 }
 
+function parseStructuredPlanContent(rawContent: string | null | undefined, prompt: string): AiRecruiterSearchPlan {
+  if (!rawContent?.trim()) {
+    throw new SearchPlanParserError("Leeg AI-antwoord.");
+  }
+
+  // TEMP debug logging — remove after schema stabilizes
+  console.log("[AI Recruiter] parse-plan prompt:", prompt);
+  console.log("[AI Recruiter] rawResponse:", rawContent);
+
+  let json: unknown;
+
+  try {
+    json = JSON.parse(rawContent);
+  } catch (error) {
+    console.log("[AI Recruiter] parsedResponse: JSON.parse failed", error);
+    throw new SearchPlanParserError("AI-antwoord kon niet worden gelezen als JSON.");
+  }
+
+  console.log("[AI Recruiter] parsedResponse:", json);
+
+  const rawParsed = aiRecruiterSearchPlanRawSchema.safeParse(json);
+
+  if (!rawParsed.success) {
+    console.log("[AI Recruiter] schemaErrors (raw):", rawParsed.error.issues);
+    console.log("[AI Recruiter] missingFields:", rawParsed.error.issues.map((i) => i.path.join(".")));
+    throw new SearchPlanParserError(
+      "AI-antwoord voldeed niet aan het schema.",
+      "INVALID_OUTPUT",
+      rawParsed.error.issues,
+    );
+  }
+
+  try {
+    const sanitized = sanitizeAiRecruiterSearchPlan(rawParsed.data);
+    const validated = aiRecruiterSearchPlanSchema.safeParse(sanitized);
+
+    if (!validated.success) {
+      console.log("[AI Recruiter] schemaErrors (final):", validated.error.issues);
+      console.log("[AI Recruiter] missingFields:", validated.error.issues.map((i) => i.path.join(".")));
+      throw new SearchPlanParserError(
+        "Gevalideerd plan voldeed niet aan het domeinschema.",
+        "INVALID_OUTPUT",
+        validated.error.issues,
+      );
+    }
+
+    return validated.data;
+  } catch (error) {
+    if (error instanceof SearchPlanParserError) throw error;
+    throw new SearchPlanParserError(
+      error instanceof Error ? error.message : "Plan sanitization mislukt.",
+    );
+  }
+}
+
 export async function parseAiRecruiterSearchPlan(prompt: string): Promise<AiRecruiterSearchPlan> {
   if (!isOpenAIConfigured()) {
     return buildFallbackPlan(prompt);
   }
 
+  const trimmedPrompt = prompt.trim();
+
   try {
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
       model: DEFAULT_MODEL,
+      temperature: 0,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Prompt:\n${prompt}\n\nSchema velden: locations[], regions[], sectors[], employee_range{min,max}, desired_roles[], vacancy_required, minimum_hiring_score, maximum_companies, maximum_drafts, contact_roles[], outreach_mode, approval_mode, exclusions[], uncertainties[], reasoning`,
-        },
+        { role: "user", content: trimmedPrompt },
       ],
-      response_format: { type: "json_object" },
-      temperature: 0.1,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: AI_RECRUITER_SEARCH_PLAN_SCHEMA_NAME,
+          strict: true,
+          schema: AI_RECRUITER_SEARCH_PLAN_JSON_SCHEMA,
+        },
+      },
       max_tokens: 1200,
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new SearchPlanParserError("Leeg AI-antwoord.");
+    const rawResponse = response.choices[0]?.message?.content;
 
-    const parsed = aiRecruiterSearchPlanSchema.safeParse(JSON.parse(content));
-    if (!parsed.success) {
-      throw new SearchPlanParserError("AI-antwoord voldeed niet aan het schema.");
-    }
+    console.log("[AI Recruiter] openai", {
+      id: response.id,
+      model: response.model,
+      finishReason: response.choices[0]?.finish_reason,
+      usage: response.usage,
+    });
 
-    return parsed.data;
+    return parseStructuredPlanContent(rawResponse, trimmedPrompt);
   } catch (error) {
     if (error instanceof SearchPlanParserError) throw error;
-    return buildFallbackPlan(prompt);
+
+    console.error("[AI Recruiter] parse-plan OpenAI/unexpected error", error);
+    return buildFallbackPlan(trimmedPrompt);
   }
 }
 

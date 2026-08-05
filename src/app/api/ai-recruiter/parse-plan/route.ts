@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
-import { parseAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-parser.service";
+import { parseAiRecruiterSearchPlan, SearchPlanParserError } from "@/features/ai-recruiter/services/search-plan-parser.service";
+import { aiRecruiterPlanSchema } from "@/features/ai-recruiter/validation/search-plan.schemas";
 import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
 import { aiRecruiterParsePlanBodySchema } from "@/lib/validations/ai-recruiter-api";
 
@@ -21,18 +21,40 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Ongeldige prompt" }, { status: 400 });
   }
 
+  console.log("[AI Recruiter] parse-plan API prompt:", parsed.data.prompt);
+
   try {
     const plan = await parseAiRecruiterSearchPlan(parsed.data.prompt);
-    const validated = aiRecruiterSearchPlanSchema.safeParse(plan);
+    const validated = aiRecruiterPlanSchema.safeParse(plan);
 
     if (!validated.success) {
-      console.error("[AI Recruiter] parse-plan schema mismatch", validated.error.flatten());
+      console.error("[AI Recruiter] parse-plan final schema mismatch", validated.error.flatten());
+      console.log("[AI Recruiter] schemaErrors:", validated.error.issues);
       return NextResponse.json({ error: "Zoekplan validatie mislukt." }, { status: 500 });
     }
 
     return NextResponse.json({ plan: validated.data, prompt: parsed.data.prompt });
   } catch (error) {
-    console.error("[AI Recruiter] parse-plan failed", error);
+    if (error instanceof SearchPlanParserError) {
+      console.error("[AI Recruiter] parse-plan failed", {
+        code: error.code,
+        message: error.message,
+        issues: error.issues,
+      });
+      console.log("[AI Recruiter] schemaErrors:", error.issues);
+      return NextResponse.json(
+        {
+          error: error.message,
+          issues: error.issues?.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        { status: 422 },
+      );
+    }
+
+    console.error("[AI Recruiter] parse-plan unexpected error", error);
     const message = error instanceof Error ? error.message : "Plan kon niet worden geparsed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
