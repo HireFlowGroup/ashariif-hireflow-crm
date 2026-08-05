@@ -10,6 +10,7 @@ import { isOpenAIConfigured } from "@/platform/config/env";
 import { getOpenAIClient } from "@/lib/ai/client";
 
 const MAX_WORDS = 180;
+const MAX_FOLLOW_UP_WORDS = 120;
 
 const BANNED_PHRASES = [
   "baanbrekend",
@@ -55,6 +56,47 @@ export type DraftRecipient = {
   email: string;
   isGeneralMailbox: boolean;
 };
+
+export type PreviousOutreachDraft = {
+  subject: string;
+  bodyText: string;
+};
+
+export type RecruiterFollowUpDraft = {
+  subject: string;
+  bodyText: string;
+  warnings: string[];
+  confidence: number;
+};
+
+const FOLLOW_UP_BANNED_PHRASES = [
+  ...BANNED_PHRASES,
+  "ik wilde even",
+  "even follow-up",
+  "laatste kans",
+  "mis niet",
+  "dringend",
+  "nu nog",
+  "alleen vandaag",
+  "steeds geen reactie",
+  "hopelijk leest u",
+];
+
+const FOLLOW_UP_SYSTEM_PROMPT = `Je bent een Senior Sales Consultant bij HireFlow Group.
+Schrijf een follow-up e-mail in het Nederlands — vriendelijk professioneel, nooit opdringerig.
+
+STRUCTUUR:
+1. Verwijs kort naar je eerdere mail (onderwerp of inhoud)
+2. Herhaal kort waarom HireFlow kan helpen (praktisch, nuchter)
+3. Eén duidelijke vraag of actie — geen meerdere opties
+
+REGELS:
+- Maximaal ${MAX_FOLLOW_UP_WORDS} woorden in bodyText
+- NOOIT: "ik wilde even", druk uitoefenen, meerdere CTAs, schuldgevoel opwekken
+- Geen hype of superlatieven
+- Gebruik exact de opgegeven aanhef
+- Ondertekening: "Met vriendelijke groet,\\nHireFlow Group"
+- subject: kort, met referentie naar eerdere mail (bijv. "Re: ...")`;
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -133,6 +175,74 @@ function buildUnderstandingParagraph(
 
 function buildHireFlowParagraph(): string {
   return "Bij HireFlow Group helpen we organisaties met flexibele recruitment-ondersteuning: meedenken over werving, schalen wanneer het druk wordt — zonder vaste FTE of ingewikkelde trajecten.";
+}
+
+function buildHireFlowFollowUpLine(): string {
+  return "HireFlow Group ondersteunt teams met flexibele recruitment-capaciteit — meedenken en opschalen wanneer interne werving krap wordt.";
+}
+
+function buildPreviousMailReference(company: Company, previous: PreviousOutreachDraft): string {
+  const topic = previous.subject.replace(/^Re:\s*/i, "").trim();
+  if (topic && topic !== company.name) {
+    return `In mijn eerdere mail over ${topic} ging het om de hiring-situatie bij ${company.name}.`;
+  }
+  return `In mijn eerdere bericht over de hiring-situatie bij ${company.name} wilde ik kort terugkomen.`;
+}
+
+function buildFallbackFollowUp(
+  company: Company,
+  recipient: DraftRecipient,
+  hiring: HiringIntelligenceProfile,
+  previous: PreviousOutreachDraft,
+): RecruiterFollowUpDraft {
+  const greeting = buildOutreachSalutation(
+    recipient.recipientName,
+    recipient.isGeneralMailbox,
+    recipient.email,
+  );
+
+  const reference = buildPreviousMailReference(company, previous);
+  const help = buildHireFlowFollowUpLine();
+
+  let contextLine: string | null = null;
+  if (hiring.vacancyCount >= 2) {
+    contextLine = "Met meerdere vacatures tegelijk merk ik dat dit vaak extra capaciteit vraagt.";
+  } else if (hiring.vacancyTitles[0]) {
+    contextLine = `Rond de vacature voor ${hiring.vacancyTitles[0]} zien wij regelmatig dat extra ondersteuning helpt.`;
+  }
+
+  const bodyText = truncateWords(
+    [
+      greeting,
+      "",
+      reference,
+      contextLine,
+      "",
+      help,
+      "",
+      "Staat u open voor een kort gesprek van 15 minuten?",
+      "",
+      "Met vriendelijke groet,",
+      "HireFlow Group",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    MAX_FOLLOW_UP_WORDS,
+  );
+
+  const subject = previous.subject.startsWith("Re:")
+    ? previous.subject
+    : `Re: ${previous.subject}`;
+
+  const warnings: string[] = [];
+  if (recipient.isGeneralMailbox) warnings.push("algemene mailbox — neutrale aanhef");
+
+  return {
+    subject,
+    bodyText,
+    warnings,
+    confidence: hiring.signals.length > 0 || hiring.vacancyCount > 0 ? 0.75 : 0.5,
+  };
 }
 
 function buildFactsPayload(
@@ -309,5 +419,96 @@ export async function generateRecruiterOutreachDraft(
     return { ...parsed.data, bodyText };
   } catch {
     return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
+  }
+}
+
+export async function generateRecruiterFollowUpDraft(
+  company: Company,
+  recipient: DraftRecipient | string | null,
+  hiring: HiringIntelligenceProfile,
+  previous: PreviousOutreachDraft,
+): Promise<RecruiterFollowUpDraft> {
+  const normalizedRecipient: DraftRecipient =
+    typeof recipient === "string" || recipient === null
+      ? {
+          recipientName: recipient,
+          email: company.hrEmail ?? company.email ?? "info@bedrijf.nl",
+          isGeneralMailbox: !recipient,
+        }
+      : recipient;
+
+  if (!isOpenAIConfigured()) {
+    return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
+  }
+
+  const salutation = buildOutreachSalutation(
+    normalizedRecipient.recipientName,
+    normalizedRecipient.isGeneralMailbox,
+    normalizedRecipient.email,
+  );
+
+  const facts = [
+    `Bedrijf: ${company.name}`,
+    company.sector ? `Branche: ${company.sector}` : null,
+    hiring.vacancyCount > 0 ? `Vacatures: ${hiring.vacancyCount}` : null,
+    hiring.vacancyTitles.length ? `Vacaturetitels: ${hiring.vacancyTitles.join(", ")}` : null,
+    `Eerdere mail onderwerp: ${previous.subject}`,
+    `Eerdere mail inhoud (samenvatting): ${previous.bodyText.slice(0, 400)}`,
+    `Aanhef (gebruik exact): ${salutation}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: FOLLOW_UP_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `CONTEXT:\n${facts}\n\nJSON: { subject, bodyText, warnings[], confidence:0-1 }`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.35,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
+    }
+
+    const parsed = JSON.parse(content) as Partial<RecruiterFollowUpDraft>;
+    let bodyText = parsed.bodyText ?? "";
+    let subject = parsed.subject ?? `Re: ${previous.subject}`;
+
+    for (const phrase of FOLLOW_UP_BANNED_PHRASES) {
+      if (bodyText.toLowerCase().includes(phrase)) {
+        return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
+      }
+    }
+
+    if (!bodyText.trim()) {
+      return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
+    }
+
+    if (countWords(bodyText) > MAX_FOLLOW_UP_WORDS) {
+      bodyText = truncateWords(bodyText, MAX_FOLLOW_UP_WORDS);
+    }
+
+    if (!subject.startsWith("Re:")) {
+      subject = `Re: ${subject}`;
+    }
+
+    return {
+      subject,
+      bodyText,
+      warnings: parsed.warnings ?? [],
+      confidence: parsed.confidence ?? 0.7,
+    };
+  } catch {
+    return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
   }
 }

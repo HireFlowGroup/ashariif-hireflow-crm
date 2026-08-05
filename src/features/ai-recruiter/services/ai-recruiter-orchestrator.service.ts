@@ -18,7 +18,7 @@ import {
   priorityFromTotalScore,
 } from "@/features/ai-recruiter/domain/types";
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
-import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services/draft-generator.service";
+import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeLeadScore, type ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
@@ -633,6 +633,20 @@ export class AiRecruiterOrchestrator {
             opportunity,
           );
 
+          const followUp = await generateRecruiterFollowUpDraft(
+            company,
+            {
+              recipientName: selected.recipientName,
+              email: selected.email,
+              isGeneralMailbox: selected.isGeneralMailbox,
+            },
+            hiring,
+            {
+              subject: draft.recommendedSubject,
+              bodyText: draft.bodyText,
+            },
+          );
+
           let outreachMessageId: string | null = null;
           try {
             const message = await this.outreachEngine.createDraft(context, {
@@ -659,7 +673,14 @@ export class AiRecruiterOrchestrator {
             stage: "draft_created",
             status: "completed",
             outreachMessageId,
-            warnings: draft.warnings,
+            warnings: [...draft.warnings, ...followUp.warnings],
+            externalCompanyData: {
+              followUpDraft: {
+                subject: followUp.subject,
+                bodyText: followUp.bodyText,
+                confidence: followUp.confidence,
+              },
+            },
           });
 
           yield { type: "item", item: updatedItem };

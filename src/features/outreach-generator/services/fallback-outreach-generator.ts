@@ -78,7 +78,7 @@ HireFlow`;
     },
     followUp1: {
       subject: `Re: ${primarySignal} — ${company}`,
-      body: `${greet}\n\nEven follow-up op mijn bericht over ${primarySignal}. Heeft u deze week 15 minuten?\n\nHireFlow`,
+      body: `${greet}\n\nIn mijn eerdere mail over ${primarySignal} wilde ik kort terugkomen. HireFlow helpt recruitment teams met flexibele ondersteuning bij invulling.\n\nHeeft u deze week 15 minuten voor een kort gesprek?\n\nHireFlow`,
       referencedSignals: [primarySignal],
     },
     followUp2: {

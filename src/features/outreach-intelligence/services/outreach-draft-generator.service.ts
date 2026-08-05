@@ -56,7 +56,7 @@ Antwoord ALLEEN als JSON:
   "draftSubject": "onderwerpregel NL",
   "draftBody": "e-mail/bericht NL, 120-180 woorden, professioneel, concreet, geen hype",
   "followUpSubject": "follow-up onderwerp NL",
-  "followUpBody": "korte follow-up NL, 60-90 woorden, vriendelijk"
+  "followUpBody": "follow-up NL, max 120 woorden, verwijs naar eerdere mail, herhaal kort HireFlow-waarde, één actie, nooit 'ik wilde even', niet opdringerig"
 }`;
 
     const response = await client.chat.completions.create({
@@ -110,7 +110,9 @@ HireFlow`,
     followUpSubject: `Re: ${context.companyName} — even checken`,
     followUpBody: `${greeting}
 
-Ik wilde even follow-up doen op mijn eerdere bericht over recruitment ondersteuning voor ${context.companyName}. Heeft u 15 minuten deze week voor een kort gesprek?
+In mijn eerdere mail over recruitment-ondersteuning voor ${context.companyName} wilde ik kort terugkomen. HireFlow helpt teams met gerichte invulling en flexibele capaciteit wanneer vacatures open blijven staan.
+
+Heeft u deze week 15 minuten voor een kort gesprek?
 
 Met vriendelijke groet,
 HireFlow`,

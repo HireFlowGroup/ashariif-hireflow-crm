@@ -5,7 +5,7 @@ import type { Company } from "@/features/companies/domain";
 import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeOpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
-import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services/draft-generator.service";
+import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 
 const plan = aiRecruiterSearchPlanSchema.parse({
   locations: ["Utrecht"],
@@ -92,5 +92,33 @@ describe("generateRecruiterOutreachDraft fallback", () => {
     expect(draft.bodyText.toLowerCase()).not.toContain("marktleider");
     expect(countWords(draft.bodyText)).toBeLessThanOrEqual(180);
     expect(draft.recommendedSubject.toLowerCase()).not.toContain("recruitment-ondersteuning");
+  });
+});
+
+describe("generateRecruiterFollowUpDraft fallback", () => {
+  it("references previous mail, restates value, one CTA, max 120 words", async () => {
+    const c = company();
+    const hiring = computeHiringIntelligenceProfile(c, plan);
+    const opportunity = computeOpportunityAssessment(c, plan);
+
+    const intro = await generateRecruiterOutreachDraft(
+      c,
+      { recipientName: "Sanne", email: "sanne@scaleup.nl", isGeneralMailbox: false },
+      hiring,
+      opportunity,
+    );
+
+    const followUp = await generateRecruiterFollowUpDraft(
+      c,
+      { recipientName: "Sanne", email: "sanne@scaleup.nl", isGeneralMailbox: false },
+      hiring,
+      { subject: intro.recommendedSubject, bodyText: intro.bodyText },
+    );
+
+    expect(followUp.subject).toMatch(/^Re:/i);
+    expect(followUp.bodyText.toLowerCase()).toMatch(/eerdere (mail|bericht)/);
+    expect(followUp.bodyText.toLowerCase()).toContain("hireflow");
+    expect(followUp.bodyText.toLowerCase()).not.toContain("ik wilde even");
+    expect(countWords(followUp.bodyText)).toBeLessThanOrEqual(120);
   });
 });
