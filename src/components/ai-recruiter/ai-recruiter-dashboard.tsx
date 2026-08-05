@@ -9,6 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recruiter/discovery-funnel-panel";
 import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
 import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
@@ -58,6 +59,22 @@ export function AiRecruiterDashboard() {
   const [streaming, setStreaming] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [discoveryPanel, setDiscoveryPanel] = useState<{
+    funnel: ReturnType<typeof buildFunnelSummary> | null;
+    results: Array<{
+      resultTitle: string;
+      resultUrl: string;
+      classifiedType: string;
+      extractedEmployer: string | null;
+      officialDomain: string | null;
+      vacancyTitle: string | null;
+      accepted: boolean;
+      rejectionReason: string | null;
+      classificationConfidence: number;
+      classificationReason: string;
+    }>;
+    providerId: string | null;
+  }>({ funnel: null, results: [], providerId: null });
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const reportError = useCallback((operation: string, cause: unknown) => {
@@ -93,6 +110,33 @@ export function AiRecruiterDashboard() {
       eventSourceRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const jobId = activeRun?.settings?.finderJobId;
+    if (!jobId) {
+      setDiscoveryPanel({ funnel: null, results: [], providerId: null });
+      return;
+    }
+
+    void (async () => {
+      try {
+        const { data } = await aiRecruiterFetchJson<{
+          discovery: {
+            providerId: string;
+            funnel?: Parameters<typeof buildFunnelSummary>[0];
+            resultLogs?: typeof discoveryPanel.results;
+          };
+        }>("loadDiscovery", `/api/ai-recruiter/discovery/${jobId}`);
+        setDiscoveryPanel({
+          funnel: data.discovery.funnel ? buildFunnelSummary(data.discovery.funnel) : null,
+          results: data.discovery.resultLogs ?? [],
+          providerId: data.discovery.providerId,
+        });
+      } catch {
+        setDiscoveryPanel({ funnel: null, results: [], providerId: null });
+      }
+    })();
+  }, [activeRun?.settings?.finderJobId, activeRun?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- discoveryPanel is output state only
 
   const reviewItems = useMemo(
     () =>
@@ -400,6 +444,12 @@ export function AiRecruiterDashboard() {
                   </div>
                 </CardContent>
               </Card>
+
+              <DiscoveryFunnelPanel
+                funnel={discoveryPanel.funnel}
+                results={discoveryPanel.results}
+                providerId={discoveryPanel.providerId}
+              />
 
               <div className="flex flex-col gap-4 xl:flex-row">
                 <div className="w-full shrink-0 divide-y rounded-xl border xl:w-72 xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto">

@@ -119,6 +119,7 @@ export class AiRecruiterOrchestrator {
     };
     let consecutiveFailures = 0;
     let runDiagnostics: RunDiagnostics | null = null;
+    let finderJobId: string | undefined = undefined;
 
     const pipeline = new RecruiterPipelineTracker(run.pipelineSteps, () => undefined);
 
@@ -170,7 +171,7 @@ export class AiRecruiterOrchestrator {
           pipelineSteps: pipeline.getSnapshot(),
           completedAt: new Date().toISOString(),
           errorMessage: uiMessage?.body ?? outcome.errorMessage,
-          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics, finderJobId),
         });
 
         yield { type: "counters", counters };
@@ -180,6 +181,7 @@ export class AiRecruiterOrchestrator {
       }
 
       const finderJob = await this.companyFinder.createJob(context, criteria);
+      finderJobId = finderJob.id;
 
       const savedCompanyIds: Array<{ companyId: string; itemId: string; name: string }> = [];
       let draftsCreated = 0;
@@ -285,7 +287,7 @@ export class AiRecruiterOrchestrator {
           pipelineSteps: pipeline.getSnapshot(),
           completedAt: new Date().toISOString(),
           errorMessage: uiMessage?.body ?? outcome.errorMessage,
-          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics, finderJobId),
         });
 
         yield { type: "counters", counters };
@@ -321,7 +323,7 @@ export class AiRecruiterOrchestrator {
           pipelineSteps: pipeline.getSnapshot(),
           completedAt: new Date().toISOString(),
           errorMessage: uiMessage?.body ?? outcome.errorMessage,
-          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics, finderJobId),
         });
 
         yield { type: "counters", counters };
@@ -906,7 +908,7 @@ export class AiRecruiterOrchestrator {
         completedAt: new Date().toISOString(),
         errorMessage: outcome.errorMessage ?? uiMessage?.body ?? null,
         settings: runDiagnostics
-          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics)
+          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics, finderJobId)
           : run.settings,
       });
 
@@ -925,7 +927,7 @@ export class AiRecruiterOrchestrator {
         completedAt: new Date().toISOString(),
         errorMessage: message,
         settings: runDiagnostics
-          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics)
+          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics, finderJobId)
           : run.settings,
       });
 

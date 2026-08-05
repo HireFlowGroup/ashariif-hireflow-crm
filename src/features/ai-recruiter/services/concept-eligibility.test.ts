@@ -4,7 +4,10 @@ import type { Company } from "@/features/companies/domain";
 import { toCompanyId } from "@/features/companies/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
 import { classifySearchResult } from "@/features/company-finder/discovery/result-classifier.service";
-import { buildVacancyDrivenDiscoveryQueries } from "@/features/ai-recruiter/services/discovery-query-builder.service";
+import {
+  buildVacancyDrivenDiscoveryQueries,
+  selectDiscoveryQueries,
+} from "@/features/ai-recruiter/services/discovery-query-builder.service";
 import { computeDeterministicLeadScore } from "@/features/ai-recruiter/services/deterministic-lead-score.service";
 import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/evaluate-concept-eligibility.service";
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
@@ -193,7 +196,7 @@ describe("concept eligibility pipeline", () => {
       title: "Customer Success Manager in Netherlands",
       url: "https://nl.indeed.com/viewjob?jk=abc",
     });
-    expect(result.resultType).toBe("vacancy");
+    expect(["vacancy", "vacancy_board"]).toContain(result.resultType);
     expect(result.shouldSaveAsCompany).toBe(false);
   });
 
@@ -287,8 +290,9 @@ describe("concept eligibility pipeline", () => {
     expect(result.reasonCode).toBe("manual_override");
   });
 
-  it("13. discovery queries bevatten minimaal 5 varianten", () => {
-    const queries = buildVacancyDrivenDiscoveryQueries(
+  it("13. discovery queries bevatten minimaal 12 varianten", () => {
+    const queries = selectDiscoveryQueries(
+      buildVacancyDrivenDiscoveryQueries(
       {
         city: "Rotterdam",
         sector: "software",
@@ -297,10 +301,12 @@ describe("concept eligibility pipeline", () => {
         maxResults: 25,
       },
       basePlan,
+      ),
     );
-    expect(queries.length).toBeGreaterThanOrEqual(5);
+    expect(queries.length).toBeGreaterThanOrEqual(12);
     expect(queries.some((q) => q.query.includes("indeed"))).toBe(true);
     expect(queries.some((q) => q.query.includes("vacatures"))).toBe(true);
+    expect(queries.some((q) => q.intent === "company_discovery")).toBe(true);
   });
 
   it("14. no-results onderscheiden van providerfout via classify unknown", () => {

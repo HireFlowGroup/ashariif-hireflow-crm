@@ -100,6 +100,8 @@ export const aiRecruiterRunSettingsSchema = z.object({
   dailySendLimit: z.number().int().default(10),
   companyCooldownDays: z.number().int().default(30),
   runDiagnostics: runDiagnosticsSchema.nullable().optional(),
+  /** Company finder job id for discovery diagnostics lookup */
+  finderJobId: z.string().uuid().optional(),
 });
 
 export type AiRecruiterRunSettings = z.infer<typeof aiRecruiterRunSettingsSchema>;

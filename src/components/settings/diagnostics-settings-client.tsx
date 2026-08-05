@@ -50,6 +50,30 @@ type DiscoveryQueryRun = {
   totalRawResults: number;
   classifiedCounts: Record<string, number>;
   queries: DiscoveryQueryRow[];
+  funnel?: {
+    queriesExecuted: number;
+    rawResults: number;
+    realCompanies: number;
+    withVacancyEvidence: number;
+    competitorsExcluded: number;
+    directories: number;
+    listArticles: number;
+    newsArticles: number;
+    saved: number;
+    rejected: number;
+  };
+  resultLogs?: Array<{
+    resultTitle: string;
+    resultUrl: string;
+    classifiedType: string;
+    extractedEmployer: string | null;
+    officialDomain: string | null;
+    vacancyTitle: string | null;
+    accepted: boolean;
+    rejectionReason: string | null;
+    classificationConfidence: number;
+    classificationReason: string;
+  }>;
   recordedAt: string;
 };
 
@@ -312,6 +336,27 @@ export function DiagnosticsSettingsClient() {
 
               {selectedDiscovery ? (
                 <>
+                  {selectedDiscovery.funnel ? (
+                    <div className="grid gap-2 sm:grid-cols-4 text-sm">
+                      <div className="rounded-lg border px-3 py-2">
+                        <p className="text-muted-foreground">Queries</p>
+                        <p className="font-medium">{selectedDiscovery.funnel.queriesExecuted}</p>
+                      </div>
+                      <div className="rounded-lg border px-3 py-2">
+                        <p className="text-muted-foreground">Ruwe resultaten</p>
+                        <p className="font-medium">{selectedDiscovery.funnel.rawResults}</p>
+                      </div>
+                      <div className="rounded-lg border px-3 py-2">
+                        <p className="text-muted-foreground">Echte bedrijven</p>
+                        <p className="font-medium">{selectedDiscovery.funnel.realCompanies}</p>
+                      </div>
+                      <div className="rounded-lg border px-3 py-2">
+                        <p className="text-muted-foreground">Concurrenten</p>
+                        <p className="font-medium">{selectedDiscovery.funnel.competitorsExcluded}</p>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="grid gap-2 sm:grid-cols-4 text-sm">
                     <div className="rounded-lg border px-3 py-2">
                       <p className="text-muted-foreground">Provider</p>

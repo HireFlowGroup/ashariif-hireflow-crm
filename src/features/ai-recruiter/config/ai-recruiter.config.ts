@@ -17,7 +17,17 @@ export function getAiRecruiterConfig() {
     conceptScoreThreshold: parseInt(process.env.AI_RECRUITER_CONCEPT_SCORE_THRESHOLD ?? "30", 10),
     /** Minimum queries per search plan (vacancy-driven discovery). */
     minDiscoveryQueries: parseInt(process.env.AI_RECRUITER_MIN_DISCOVERY_QUERIES ?? "5", 10),
+    /** Target number of discovery queries per run. */
+    discoveryQueryCount: parseInt(process.env.AI_RECRUITER_DISCOVERY_QUERY_COUNT ?? "12", 10),
     /** Max results per individual discovery query. */
-    maxResultsPerQuery: parseInt(process.env.AI_RECRUITER_MAX_RESULTS_PER_QUERY ?? "10", 10),
+    maxResultsPerQuery: parseInt(process.env.AI_RECRUITER_RESULTS_PER_QUERY ?? "10", 10),
+    /** @deprecated alias */
+    resultsPerQuery: parseInt(process.env.AI_RECRUITER_RESULTS_PER_QUERY ?? "10", 10),
+    /** Concurrent discovery queries. */
+    discoveryConcurrency: parseInt(process.env.AI_RECRUITER_DISCOVERY_CONCURRENCY ?? "4", 10),
+    /** Include vacancy board site: queries. */
+    includeVacancySources: process.env.AI_RECRUITER_INCLUDE_VACANCY_SOURCES !== "false",
+    /** Exclude recruitment/staffing agencies as competitors. */
+    excludeRecruitmentAgencies: process.env.AI_RECRUITER_EXCLUDE_RECRUITMENT_AGENCIES !== "false",
   };
 }

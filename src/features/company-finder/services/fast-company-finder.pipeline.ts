@@ -11,6 +11,7 @@ import { scheduleBackgroundCompanyEnrichment } from "@/features/company-finder/s
 import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
 import { runFastTavilySearch } from "@/features/company-finder/services/fast-discovery.service";
 import { recordDiscoveryQueryRun } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
+import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import { runDiscoveryQualityGate } from "@/features/company-finder/discovery/discovery-quality-gate";
 import type { DiscoveryQualityReport, QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
@@ -107,11 +108,14 @@ export async function* runFastCompanyFinderPipeline(input: {
 
   try {
     const discoveryStarted = Date.now();
+    const aiRecruiterConfig = getAiRecruiterConfig();
+    const discoveryMaxResults = Math.max(
+      input.searchCriteria.maxResults ?? aiRecruiterConfig.defaultMaximumCompanies,
+      aiRecruiterConfig.discoveryQueryCount * aiRecruiterConfig.resultsPerQuery,
+    );
+
     const tavily = await runFastTavilySearch(input.searchCriteria, {
-      maxResults: Math.min(
-        input.searchCriteria.maxResults ?? config.fastModeMaxResults,
-        config.fastModeMaxResults,
-      ),
+      maxResults: discoveryMaxResults,
       timeoutMs: config.tavilyTimeoutMs,
       searchPlan: {
         locations: input.job.criteria.locations ?? (input.job.criteria.city ? [input.job.criteria.city] : []),
@@ -143,6 +147,8 @@ export async function* runFastCompanyFinderPipeline(input: {
       totalRawResults: tavily.totalRawResults,
       classifiedCounts: tavily.classifiedCounts,
       queries: tavily.queries,
+      funnel: tavily.funnel,
+      resultLogs: tavily.resultLogs,
       recordedAt: new Date().toISOString(),
     });
 

@@ -1,3 +1,7 @@
+import type {
+  DiscoveryFunnelMetrics,
+  DiscoveryResultLogEntry,
+} from "@/features/company-finder/discovery/discovery-result.types";
 import type { DiscoveryQueryDiagnostic } from "@/features/company-finder/services/fast-discovery.service";
 
 export type StoredDiscoveryQueryRun = {
@@ -7,6 +11,8 @@ export type StoredDiscoveryQueryRun = {
   totalRawResults: number;
   classifiedCounts: Record<string, number>;
   queries: DiscoveryQueryDiagnostic[];
+  funnel?: DiscoveryFunnelMetrics;
+  resultLogs?: DiscoveryResultLogEntry[];
   recordedAt: string;
 };
 

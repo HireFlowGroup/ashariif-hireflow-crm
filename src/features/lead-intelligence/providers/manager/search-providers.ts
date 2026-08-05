@@ -32,7 +32,7 @@ export async function executeTavilySearch(
       body: JSON.stringify({
         query,
         max_results: Math.min(maxResults, 20),
-        search_depth: "basic",
+        search_depth: process.env.AI_RECRUITER_TAVILY_SEARCH_DEPTH === "basic" ? "basic" : "advanced",
       }),
     });
 

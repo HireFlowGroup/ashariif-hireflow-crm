@@ -82,10 +82,12 @@ export function skipEnrichmentAndDownstream(
 export function buildRunSettingsWithDiagnostics(
   settings: AiRecruiterRunSettings,
   diagnostics: RunDiagnostics,
+  finderJobId?: string,
 ): AiRecruiterRunSettings {
   return {
     ...settings,
     runDiagnostics: diagnostics,
+    ...(finderJobId ? { finderJobId } : {}),
   };
 }
 
