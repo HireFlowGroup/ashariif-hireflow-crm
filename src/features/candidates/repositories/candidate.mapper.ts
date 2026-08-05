@@ -3,7 +3,7 @@ import type { Candidate, CandidateId, CandidateStatus } from "@/features/candida
 import { toCandidateId } from "@/features/candidates/domain";
 
 type CandidateRow = Database["public"]["Tables"]["candidates"]["Row"] & {
-  current_role?: string | null;
+  candidate_current_role?: string | null;
   location?: string | null;
   summary?: string | null;
   skills?: unknown;
@@ -29,7 +29,7 @@ export function mapCandidateRowToDomain(row: CandidateRow): Candidate {
     phone: row.phone,
     source: row.source,
     status: row.status as CandidateStatus,
-    currentRole: row.current_role ?? null,
+    candidateCurrentRole: row.candidate_current_role ?? null,
     location: row.location ?? null,
     summary: row.summary ?? null,
     skills: parseSkills(row.skills),

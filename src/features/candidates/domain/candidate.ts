@@ -21,7 +21,7 @@ export type Candidate = {
   phone: string | null;
   source: string | null;
   status: CandidateStatus;
-  currentRole: string | null;
+  candidateCurrentRole: string | null;
   location: string | null;
   summary: string | null;
   skills: string[];

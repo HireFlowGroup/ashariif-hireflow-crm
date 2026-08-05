@@ -58,7 +58,7 @@ function buildFactsPayload(
     `Vacature: ${vacancy.title}`,
     vacancy.location ? `Locatie vacature: ${vacancy.location}` : null,
     `Kandidaat: ${candidate.firstName} ${candidate.lastName}`,
-    candidate.currentRole ? `Huidige rol: ${candidate.currentRole}` : null,
+    candidate.candidateCurrentRole ? `Huidige rol: ${candidate.candidateCurrentRole}` : null,
     candidate.location ? `Locatie kandidaat: ${candidate.location}` : null,
     candidate.experienceYears != null ? `Ervaring: ${candidate.experienceYears} jaar` : null,
     (candidate.skills ?? []).length ? `Skills: ${(candidate.skills ?? []).join(", ")}` : null,
@@ -80,7 +80,7 @@ function buildFallbackIntroduction(
   companyName: string | null,
 ): CandidateIntroduction {
   const name = `${candidate.firstName} ${candidate.lastName}`;
-  const role = candidate.currentRole ?? "recruitment professional";
+  const role = candidate.candidateCurrentRole ?? "recruitment professional";
   const client = companyName ?? "uw organisatie";
 
   const strength = match.strongPoints[0] ?? "Relevante achtergrond voor deze rol.";

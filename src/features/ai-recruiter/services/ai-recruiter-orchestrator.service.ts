@@ -34,6 +34,23 @@ import {
   type SalesIntelligenceAssessment,
 } from "@/features/ai-recruiter/services/sales-intelligence.service";
 import { RecruiterPipelineTracker } from "@/features/ai-recruiter/services/recruiter-pipeline-tracker";
+import type { RunDiagnostics } from "@/features/ai-recruiter/domain/run-diagnostics";
+import {
+  buildDiscoveryDiagnostics,
+  buildRunFailureUiMessage,
+  emptyDiscoverySummary,
+  resolveProviderAvailability,
+} from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
+import {
+  discoveryStepFailed,
+  resolveRunOutcome,
+} from "@/features/ai-recruiter/services/run-outcome.service";
+import {
+  buildRunSettingsWithDiagnostics,
+  mergeDiscoveryEvent,
+  skipEnrichmentAndDownstream,
+} from "@/features/ai-recruiter/services/run-session.helpers";
+import type { CompanySearchJob } from "@/features/company-finder/domain";
 import {
   parseAiRecruiterSearchPlan,
   searchPlanToCompanyFinderCriteria,
@@ -96,6 +113,7 @@ export class AiRecruiterOrchestrator {
       ...run.counters,
     };
     let consecutiveFailures = 0;
+    let runDiagnostics: RunDiagnostics | null = null;
 
     const pipeline = new RecruiterPipelineTracker(run.pipelineSteps, () => undefined);
 
@@ -118,15 +136,56 @@ export class AiRecruiterOrchestrator {
 
       const plan = run.searchCriteria;
       const criteria = searchPlanToCompanyFinderCriteria(plan, run.prompt);
+
+      if (!resolveProviderAvailability("tavily")) {
+        const discoveryDurationMs = 0;
+        const diagnostics = buildDiscoveryDiagnostics({
+          plan,
+          job: null,
+          summary: emptyDiscoverySummary(),
+          durationMs: discoveryDurationMs,
+          validatedCount: 0,
+        });
+        runDiagnostics = diagnostics;
+        pipeline.failStep("discovery", diagnostics.errorMessage ?? "Zoekprovider niet geconfigureerd", {
+          processed: 0,
+          errors: 1,
+        });
+        skipEnrichmentAndDownstream(pipeline, "Overgeslagen — provider niet geconfigureerd");
+        pipeline.finalizeTerminalRun();
+        yield emitPipeline();
+
+        const outcome = resolveRunOutcome({ counters, diagnostics, draftsCreated: 0 });
+        const uiMessage = buildRunFailureUiMessage(diagnostics, outcome.status);
+        const finalRun = await this.repository.updateRun(context.organizationId, runId, {
+          status: outcome.status,
+          counters,
+          pipelineSteps: pipeline.getSnapshot(),
+          completedAt: new Date().toISOString(),
+          errorMessage: uiMessage?.body ?? outcome.errorMessage,
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+        });
+
+        yield { type: "counters", counters };
+        yield { type: "error", message: uiMessage?.body ?? outcome.errorMessage ?? "Provider niet geconfigureerd", diagnostics };
+        yield { type: "complete", run: finalRun };
+        return;
+      }
+
       const finderJob = await this.companyFinder.createJob(context, criteria);
 
       const savedCompanyIds: Array<{ companyId: string; itemId: string; name: string }> = [];
       let draftsCreated = 0;
+      const discoveryStartedAt = Date.now();
+      let discoverySummary = emptyDiscoverySummary();
+      let completedFinderJob: CompanySearchJob | null = null;
 
       for await (const event of this.companyFinder.runJob(context, finderJob.id)) {
         if (Date.now() - startedAt > timeoutMs) {
           throw new AiRecruiterOrchestratorError("Run timeout bereikt.", "timeout");
         }
+
+        discoverySummary = mergeDiscoveryEvent(discoverySummary, event);
 
         if (event.type === "candidate") {
           counters.found += 1;
@@ -164,11 +223,105 @@ export class AiRecruiterOrchestrator {
 
         if (event.type === "error") {
           consecutiveFailures += 1;
+          console.error("[AI Recruiter] discovery provider error", {
+            runId,
+            message: event.message,
+            provider: discoverySummary.providerName,
+          });
+        }
+
+        if (event.type === "complete") {
+          completedFinderJob = event.job;
         }
       }
 
-      pipeline.completeStep("discovery", { processed: counters.found, succeeded: counters.validated, skipped: counters.skipped });
+      const discoveryDurationMs = Date.now() - discoveryStartedAt;
+      const diagnostics = buildDiscoveryDiagnostics({
+        plan,
+        job: completedFinderJob,
+        summary: discoverySummary,
+        durationMs: discoveryDurationMs,
+        validatedCount: counters.validated,
+      });
+      runDiagnostics = diagnostics;
+
+      console.info("[AI Recruiter] discovery diagnostics", {
+        runId,
+        errorCode: diagnostics.errorCode,
+        provider: diagnostics.providerName,
+        responseCount: diagnostics.responseCount,
+        normalizedCount: diagnostics.normalizedCount,
+        rejectedCount: diagnostics.rejectedCount,
+        validated: counters.validated,
+        durationMs: discoveryDurationMs,
+      });
+
+      const discoveryProcessed = diagnostics.responseCount || counters.found;
+      const discoveryRejected = diagnostics.rejectedCount || counters.skipped;
+
+      if (discoveryStepFailed(diagnostics.errorCode)) {
+        pipeline.failStep("discovery", diagnostics.errorMessage ?? "Discovery mislukt", {
+          processed: discoveryProcessed,
+          succeeded: 0,
+          skipped: discoveryRejected,
+          errors: 1,
+        });
+        skipEnrichmentAndDownstream(pipeline, "Overgeslagen — discovery mislukt");
+        pipeline.finalizeTerminalRun();
+        yield emitPipeline();
+
+        const outcome = resolveRunOutcome({ counters, diagnostics, draftsCreated: 0 });
+        const uiMessage = buildRunFailureUiMessage(diagnostics, outcome.status);
+        const finalRun = await this.repository.updateRun(context.organizationId, runId, {
+          status: outcome.status,
+          counters,
+          pipelineSteps: pipeline.getSnapshot(),
+          completedAt: new Date().toISOString(),
+          errorMessage: uiMessage?.body ?? outcome.errorMessage,
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+        });
+
+        yield { type: "counters", counters };
+        yield { type: "error", message: uiMessage?.body ?? outcome.errorMessage ?? "Discovery mislukt", diagnostics };
+        yield { type: "complete", run: finalRun };
+        return;
+      }
+
+      pipeline.completeStep("discovery", {
+        processed: discoveryProcessed,
+        succeeded: counters.validated,
+        skipped: discoveryRejected,
+        message:
+          counters.validated > 0
+            ? `${counters.validated} bedrijf(en) opgeslagen`
+            : diagnostics.errorCode === "no_results"
+              ? "Geen zoekresultaten"
+              : "Geen bedrijven opgeslagen na validatie",
+      });
+      pipeline.skipStep("crawler", "Niet gebruikt in AI Recruiter fast mode");
+      pipeline.skipStep("ai_analysis", "Niet gebruikt in AI Recruiter fast mode");
       yield emitPipeline();
+
+      if (counters.validated === 0) {
+        skipEnrichmentAndDownstream(pipeline, "Geen bedrijven om te verwerken");
+        pipeline.finalizeTerminalRun();
+        yield emitPipeline();
+
+        const outcome = resolveRunOutcome({ counters, diagnostics, draftsCreated: 0 });
+        const uiMessage = buildRunFailureUiMessage(diagnostics, outcome.status);
+        const finalRun = await this.repository.updateRun(context.organizationId, runId, {
+          status: outcome.status,
+          counters,
+          pipelineSteps: pipeline.getSnapshot(),
+          completedAt: new Date().toISOString(),
+          errorMessage: uiMessage?.body ?? outcome.errorMessage,
+          settings: buildRunSettingsWithDiagnostics(run.settings, diagnostics),
+        });
+
+        yield { type: "counters", counters };
+        yield { type: "complete", run: finalRun };
+        return;
+      }
 
       await this.repository.updateRun(context.organizationId, runId, { status: "enriching" });
       yield { type: "run_status", status: "enriching" };
@@ -680,6 +833,7 @@ export class AiRecruiterOrchestrator {
                 bodyText: followUp.bodyText,
                 confidence: followUp.confidence,
               },
+              bdAnalysis: draft.bdAnalysis ?? null,
             },
           });
 
@@ -689,42 +843,58 @@ export class AiRecruiterOrchestrator {
         }
       }
 
-      pipeline.completeStep("drafts", { succeeded: counters.draftsCreated });
+      pipeline.completeStep("drafts", { succeeded: counters.draftsCreated, processed: qualifiedItems.length });
       pipeline.skipStep("sending", "Handmatige goedkeuring vereist");
       pipeline.skipStep("follow_up", "Na verzending");
-      pipeline.completeStep("approval", { message: "Wacht op goedkeuring" });
+      if (counters.draftsCreated > 0) {
+        pipeline.completeStep("approval", { message: "Wacht op goedkeuring" });
+      } else {
+        pipeline.skipStep("approval", "Geen concepten om goed te keuren");
+      }
+      pipeline.finalizeTerminalRun();
       yield emitPipeline();
 
-      const finalStatus =
-        counters.failed > 0 && counters.draftsCreated > 0
-          ? "partially_completed"
-          : counters.draftsCreated > 0
-            ? "awaiting_approval"
-            : counters.validated > 0
-              ? "partially_completed"
-              : "failed";
+      const outcome = resolveRunOutcome({
+        counters,
+        diagnostics: runDiagnostics!,
+        draftsCreated: counters.draftsCreated,
+      });
+      const uiMessage =
+        outcome.errorMessage && runDiagnostics
+          ? buildRunFailureUiMessage(runDiagnostics, outcome.status)
+          : null;
 
       const finalRun = await this.repository.updateRun(context.organizationId, runId, {
-        status: finalStatus,
+        status: outcome.status,
         counters,
         pipelineSteps: pipeline.getSnapshot(),
         completedAt: new Date().toISOString(),
-        errorMessage: finalStatus === "failed" ? "Geen geschikte prospects gevonden." : null,
+        errorMessage: outcome.errorMessage ?? uiMessage?.body ?? null,
+        settings: runDiagnostics
+          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics)
+          : run.settings,
       });
 
       yield { type: "counters", counters };
+      if (outcome.errorMessage && outcome.status !== "awaiting_approval") {
+        yield { type: "error", message: outcome.errorMessage, diagnostics: runDiagnostics };
+      }
       yield { type: "complete", run: finalRun };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Run mislukt";
+      pipeline.finalizeTerminalRun("Afgebroken door fout");
       const failedRun = await this.repository.updateRun(context.organizationId, runId, {
         status: error instanceof AiRecruiterOrchestratorError && error.code === "timeout" ? "partially_completed" : "failed",
         counters,
         pipelineSteps: pipeline.getSnapshot(),
         completedAt: new Date().toISOString(),
         errorMessage: message,
+        settings: runDiagnostics
+          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics)
+          : run.settings,
       });
 
-      yield { type: "error", message };
+      yield { type: "error", message, diagnostics: runDiagnostics };
       yield { type: "complete", run: failedRun };
     }
   }

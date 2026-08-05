@@ -25,7 +25,7 @@ export function encodeRecruiterStreamEvent(event: AiRecruiterStreamEvent): strin
     case "complete":
       return encodeRecruiterSseEvent("complete", { run: event.run });
     case "error":
-      return encodeRecruiterSseEvent("error", { message: event.message });
+      return encodeRecruiterSseEvent("error", { message: event.message, diagnostics: event.diagnostics ?? null });
     default:
       return encodeRecruiterSseEvent("unknown", {});
   }

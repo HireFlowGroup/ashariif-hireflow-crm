@@ -79,7 +79,7 @@ function formatSalaryRange(min: number | null | undefined, max: number | null | 
 function scoreRoleFit(vacancy: Vacancy, candidate: CandidateMatchInput): number {
   const vacancyTokens = uniqueTokens([vacancy.title, vacancy.description ?? ""]);
   const candidateTokens = uniqueTokens([
-    candidate.currentRole ?? "",
+    candidate.candidateCurrentRole ?? "",
     candidate.summary ?? "",
   ]);
 
@@ -100,7 +100,7 @@ function scoreSkillsFit(vacancy: Vacancy, candidate: CandidateMatchInput): {
   const candidateTokens = uniqueTokens([
     ...candidateSkills,
     candidate.summary ?? "",
-    candidate.currentRole ?? "",
+    candidate.candidateCurrentRole ?? "",
   ]);
 
   const matched: string[] = [];
@@ -282,7 +282,7 @@ export function computeCandidateMatch(
 export function toCandidateMatchInput(profile: {
   firstName: string;
   lastName: string;
-  currentRole?: string | null;
+  candidateCurrentRole?: string | null;
   location?: string | null;
   summary?: string | null;
   skills?: string[];
@@ -294,7 +294,7 @@ export function toCandidateMatchInput(profile: {
   return {
     firstName: profile.firstName,
     lastName: profile.lastName,
-    currentRole: profile.currentRole ?? null,
+    candidateCurrentRole: profile.candidateCurrentRole ?? null,
     location: profile.location ?? null,
     summary: profile.summary ?? null,
     skills: profile.skills ?? [],

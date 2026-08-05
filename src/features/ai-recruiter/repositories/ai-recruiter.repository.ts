@@ -28,6 +28,7 @@ export interface AiRecruiterRepository {
       startedAt: string;
       completedAt: string;
       errorMessage: string | null;
+      settings: AiRecruiterRunSettings;
     }>,
   ): Promise<AiRecruiterRun>;
 

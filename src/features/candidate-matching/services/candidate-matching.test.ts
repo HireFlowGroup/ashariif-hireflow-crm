@@ -26,7 +26,7 @@ const vacancy: Vacancy = {
 const strongCandidate = {
   firstName: "Lisa",
   lastName: "Jansen",
-  currentRole: "Senior Frontend Developer",
+  candidateCurrentRole: "Senior Frontend Developer",
   location: "Utrecht",
   summary: "8 jaar ervaring met React en TypeScript in scale-ups.",
   skills: ["TypeScript", "React", "Node.js"],
@@ -56,7 +56,7 @@ describe("computeCandidateMatch", () => {
     const match = computeCandidateMatch(vacancy, {
       firstName: "Tom",
       lastName: "Bakker",
-      currentRole: "Accountmanager",
+      candidateCurrentRole: "Accountmanager",
       location: "Groningen",
       skills: ["Sales"],
       experienceYears: 2,

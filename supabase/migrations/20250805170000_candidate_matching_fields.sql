@@ -1,7 +1,7 @@
 -- Candidate matching fields for recruiter intelligence
 
 alter table public.candidates
-  add column if not exists current_role text,
+  add column if not exists candidate_current_role text,
   add column if not exists location text,
   add column if not exists summary text,
   add column if not exists skills jsonb not null default '[]'::jsonb,

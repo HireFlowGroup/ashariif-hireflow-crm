@@ -14,9 +14,13 @@ import {
   createInitialCounters,
   createInitialPipelineSteps,
 } from "@/features/ai-recruiter/domain/types";
+import type { RunDiagnostics } from "@/features/ai-recruiter/domain/run-diagnostics";
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
 
 function mapRun(row: Record<string, unknown>): AiRecruiterRun {
+  const settings = row.settings as AiRecruiterRunSettings;
+  const diagnostics = (settings?.runDiagnostics as RunDiagnostics | null | undefined) ?? null;
+
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
@@ -25,12 +29,13 @@ function mapRun(row: Record<string, unknown>): AiRecruiterRun {
     prompt: row.prompt as string,
     status: row.status as AiRecruiterRunStatus,
     searchCriteria: row.search_criteria as AiRecruiterRun["searchCriteria"],
-    settings: row.settings as AiRecruiterRunSettings,
+    settings,
     counters: (row.counters as AiRecruiterRun["counters"]) ?? createInitialCounters(),
     pipelineSteps: (row.pipeline_steps as AiRecruiterRun["pipelineSteps"]) ?? createInitialPipelineSteps(),
     startedAt: (row.started_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
     errorMessage: (row.error_message as string) ?? null,
+    diagnostics,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -168,6 +173,7 @@ export class SupabaseAiRecruiterRepository implements AiRecruiterRepository {
     if (updates.startedAt !== undefined) row.started_at = updates.startedAt;
     if (updates.completedAt !== undefined) row.completed_at = updates.completedAt;
     if (updates.errorMessage !== undefined) row.error_message = updates.errorMessage;
+    if (updates.settings !== undefined) row.settings = updates.settings;
 
     const { data, error } = await this.client
       .from("ai_recruiter_runs")

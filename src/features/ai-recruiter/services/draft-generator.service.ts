@@ -602,4 +602,77 @@ export async function generateRecruiterFollowUpDraft(
   }
 }
 
+export type DraftRewriteStyle = "rewrite" | "shorter" | "personal" | "formal" | "new_version";
+
+const REWRITE_INSTRUCTIONS: Record<Exclude<DraftRewriteStyle, "new_version">, string> = {
+  rewrite: "Herschrijf de mail volledig met dezelfde intentie maar andere formulering. Unieke opening.",
+  shorter: `Maak de mail korter (max ${MAX_WORDS - 30} woorden). Behoud de kern en CTA.`,
+  personal: "Maak de mail persoonlijker, warmer en menselijker — minder formeel, nog steeds professioneel.",
+  formal: "Maak de mail formeler en zakelijker. Behoud personalisatie op basis van feiten.",
+};
+
+export async function rewriteRecruiterDraft(
+  company: Company,
+  recipient: DraftRecipient,
+  hiring: HiringIntelligenceProfile,
+  opportunity: OpportunityAssessment,
+  current: { subject: string; bodyText: string },
+  style: DraftRewriteStyle,
+): Promise<{ subject: string; bodyText: string }> {
+  if (style === "new_version") {
+    const draft = await generateRecruiterOutreachDraft(company, recipient, hiring, opportunity);
+    return { subject: draft.recommendedSubject, bodyText: draft.bodyText };
+  }
+
+  if (!isOpenAIConfigured()) {
+    return { subject: current.subject, bodyText: current.bodyText };
+  }
+
+  const instruction = REWRITE_INSTRUCTIONS[style];
+  const salutation = buildOutreachSalutation(
+    recipient.recipientName,
+    recipient.isGeneralMailbox,
+    recipient.email,
+  );
+
+  try {
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: BD_CONSULTANT_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            `Bedrijf: ${company.name}`,
+            instruction,
+            `Aanhef (gebruik exact): ${salutation}`,
+            `Huidig onderwerp: ${current.subject}`,
+            `Huidige mail:\n${current.bodyText}`,
+            "JSON: { subject, bodyText }",
+          ].join("\n\n"),
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.6,
+      max_tokens: 800,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return { subject: current.subject, bodyText: current.bodyText };
+
+    const parsed = JSON.parse(content) as { subject?: string; bodyText?: string };
+    let bodyText = parsed.bodyText?.trim() || current.bodyText;
+    const subject = parsed.subject?.trim() || current.subject;
+
+    if (countWords(bodyText) > MAX_WORDS) {
+      bodyText = truncateWords(bodyText, MAX_WORDS);
+    }
+
+    return { subject, bodyText };
+  } catch {
+    return { subject: current.subject, bodyText: current.bodyText };
+  }
+}
+
 export { analyzeBdOutreachContext, pickVariantIndex } from "@/features/ai-recruiter/services/bd-outreach-analyzer.service";

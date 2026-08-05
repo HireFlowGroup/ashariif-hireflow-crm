@@ -330,6 +330,10 @@ export class OutreachEngine {
     return this.repository.listMessages(context.organizationId, { status, limit: 100 });
   }
 
+  async getMessage(context: OutreachEngineContext, messageId: string): Promise<OutreachMessage | null> {
+    return this.repository.getMessage(context.organizationId, messageId);
+  }
+
   private async requireMessage(context: OutreachEngineContext, messageId: string): Promise<OutreachMessage> {
     const message = await this.repository.getMessage(context.organizationId, messageId);
     if (!message) throw new OutreachEngineError("Outreach-bericht niet gevonden.", "not_found");

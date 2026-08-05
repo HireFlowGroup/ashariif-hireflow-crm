@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { runDiagnosticsSchema } from "@/features/ai-recruiter/domain/run-diagnostics";
+
 export const aiRecruiterRunStatusSchema = z.enum([
   "draft",
   "queued",
@@ -97,6 +99,7 @@ export const aiRecruiterRunSettingsSchema = z.object({
   sendEnabled: z.boolean().default(false),
   dailySendLimit: z.number().int().default(10),
   companyCooldownDays: z.number().int().default(30),
+  runDiagnostics: runDiagnosticsSchema.nullable().optional(),
 });
 
 export type AiRecruiterRunSettings = z.infer<typeof aiRecruiterRunSettingsSchema>;
@@ -243,6 +246,7 @@ export type AiRecruiterRun = {
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
+  diagnostics: import("@/features/ai-recruiter/domain/run-diagnostics").RunDiagnostics | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -317,7 +321,7 @@ export type AiRecruiterStreamEvent =
   | { type: "item"; item: AiRecruiterRunItem }
   | { type: "counters"; counters: AiRecruiterRunCounters }
   | { type: "complete"; run: AiRecruiterRun }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; diagnostics?: import("@/features/ai-recruiter/domain/run-diagnostics").RunDiagnostics | null };
 
 export function priorityFromTotalScore(score: number): "A" | "B" | "C" | "Reject" {
   if (score >= 80) return "A";

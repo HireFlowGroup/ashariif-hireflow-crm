@@ -3,15 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrainCircuit,
-  Check,
   Loader2,
   Play,
   RefreshCw,
-  Send,
   ShieldAlert,
 } from "lucide-react";
 
-import { ProspectContactReview } from "@/components/ai-recruiter/prospect-contact-review";
+import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
+import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,6 @@ import type {
 } from "@/features/ai-recruiter/domain/types";
 import {
   aiRecruiterFetchJson,
-  buildOutreachMessagePath,
   buildRunDetailPath,
   logAiRecruiterClientError,
   openRecruiterEventSource,
@@ -59,7 +57,6 @@ export function AiRecruiterDashboard() {
   const [streaming, setStreaming] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [testEmail, setTestEmail] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const reportError = useCallback((operation: string, cause: unknown) => {
@@ -96,8 +93,6 @@ export function AiRecruiterDashboard() {
     };
   }, []);
 
-  const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
-
   const reviewItems = useMemo(
     () =>
       items.filter(
@@ -110,6 +105,18 @@ export function AiRecruiterDashboard() {
       ),
     [items],
   );
+
+  useEffect(() => {
+    if (reviewItems.length === 0) {
+      setSelectedItemId(null);
+      return;
+    }
+    if (!selectedItemId || !reviewItems.some((i) => i.id === selectedItemId)) {
+      setSelectedItemId(reviewItems[0]!.id);
+    }
+  }, [reviewItems, selectedItemId]);
+
+  const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
 
   const parsePlan = useCallback(async (): Promise<AiRecruiterSearchPlan | null> => {
     setPlanLoading(true);
@@ -234,39 +241,6 @@ export function AiRecruiterDashboard() {
     }
   }
 
-  async function approveItem(messageId: string) {
-    try {
-      assertUuid("approveItem", "messageId", messageId);
-      await aiRecruiterFetchJson(
-        "approveItem",
-        buildOutreachMessagePath(messageId, "approve"),
-        { method: "POST", expectedStatuses: [200] },
-      );
-      if (activeRun) void loadRunDetails(activeRun.id);
-    } catch (cause) {
-      reportError("approveItem", cause);
-    }
-  }
-
-  async function sendTest(messageId: string) {
-    if (!testEmail.trim()) return;
-
-    try {
-      assertUuid("sendTest", "messageId", messageId);
-      await aiRecruiterFetchJson(
-        "sendTest",
-        buildOutreachMessagePath(messageId, "send"),
-        {
-          method: "POST",
-          body: { confirmed: true, testRecipientEmail: testEmail.trim() },
-          expectedStatuses: [200],
-        },
-      );
-    } catch (cause) {
-      reportError("sendTest", cause);
-    }
-  }
-
   const employeeRange = plan?.employee_range ?? { min: null, max: null };
 
   return (
@@ -287,6 +261,8 @@ export function AiRecruiterDashboard() {
           {error}
         </div>
       ) : null}
+
+      {activeRun ? <RunFailureBanner run={activeRun} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1 space-y-4">
@@ -398,149 +374,56 @@ export function AiRecruiterDashboard() {
                           <span>{step.label}</span>
                           <Badge variant="outline" className="text-[10px]">{step.status}</Badge>
                         </div>
-                        {step.durationMs ? (
-                          <p className="text-xs text-muted-foreground">{step.durationMs}ms · ✓{step.succeeded} / skip {step.skipped}</p>
+                        {step.message ? (
+                          <p className="text-xs text-muted-foreground mt-0.5">{step.message}</p>
                         ) : null}
+                        <PipelineStepStats step={step} />
                       </div>
                     ))}
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="divide-y rounded-xl border max-h-[400px] overflow-y-auto">
-                  <div className="px-4 py-2 text-sm font-medium bg-muted/30">Review queue ({reviewItems.length})</div>
+              <div className="flex flex-col gap-4 xl:flex-row">
+                <div className="w-full shrink-0 divide-y rounded-xl border xl:w-72 xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto">
+                  <div className="sticky top-0 z-10 border-b bg-muted/30 px-4 py-2 text-sm font-medium">
+                    Prospect review ({reviewItems.length})
+                  </div>
                   {reviewItems.length === 0 ? (
-                    <p className="px-4 py-8 text-sm text-muted-foreground">Nog geen concepten.</p>
+                    <p className="px-4 py-8 text-sm text-muted-foreground">Nog geen prospects om te reviewen.</p>
                   ) : (
                     reviewItems.map((item) => (
                       <button
                         key={item.id}
                         type="button"
-                        className={`w-full px-4 py-3 text-left hover:bg-muted/30 ${selectedItemId === item.id ? "bg-muted/50" : ""}`}
+                        className={`w-full px-4 py-3 text-left hover:bg-muted/30 ${selectedItemId === item.id ? "bg-muted/50 ring-1 ring-inset ring-primary/20" : ""}`}
                         onClick={() => setSelectedItemId(item.id)}
                       >
                         <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
                         <p className="text-xs text-muted-foreground">
-                          Opp. {item.scoreBreakdown?.opportunity ?? "—"} · Sales {item.scoreBreakdown?.salesScore ?? "—"} {item.scoreBreakdown?.salesTier ? `· ${item.scoreBreakdown.salesTier}` : ""} · Totaal {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
+                          Score {item.totalScore ?? "—"} · {item.scoreBreakdown?.salesTier ?? item.stage}
                         </p>
                       </button>
                     ))
                   )}
                 </div>
 
-                <Card>
-                  <CardHeader><CardTitle className="text-base">Prospect review</CardTitle></CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    {selectedItem ? (
-                      <>
-                        <p><span className="text-muted-foreground">Bedrijf:</span> {selectedItem.companyName}</p>
-                        <p><span className="text-muted-foreground">Locatie:</span> {selectedItem.companyCity ?? "—"}</p>
-                        <p><span className="text-muted-foreground">Sector:</span> {selectedItem.companySector ?? "—"}</p>
-                        <p><span className="text-muted-foreground">Opportunity score:</span> {selectedItem.scoreBreakdown?.opportunity ?? "—"}</p>
-                        {selectedItem.scoreBreakdown?.salesTier ? (
-                          <p>
-                            <span className="text-muted-foreground">Sales Intelligence:</span>{" "}
-                            <span className={
-                              selectedItem.scoreBreakdown.salesTier === "HOT LEAD"
-                                ? "font-semibold text-red-600"
-                                : selectedItem.scoreBreakdown.salesTier === "WARM LEAD"
-                                  ? "font-medium text-orange-600"
-                                  : selectedItem.scoreBreakdown.salesTier === "FOLLOW"
-                                    ? "font-medium text-amber-700"
-                                    : "text-muted-foreground"
-                            }>
-                              {selectedItem.scoreBreakdown.salesTier}
-                            </span>
-                            {selectedItem.scoreBreakdown.salesScore != null ? ` (${selectedItem.scoreBreakdown.salesScore}/100)` : ""}
-                          </p>
-                        ) : null}
-                        {(selectedItem.scoreBreakdown?.salesBreakdown) ? (
-                          <div className="text-xs text-muted-foreground grid grid-cols-2 gap-x-3 gap-y-0.5">
-                            <span>Vacatures: {selectedItem.scoreBreakdown.salesBreakdown.openVacancies}/25</span>
-                            <span>Groei: {selectedItem.scoreBreakdown.salesBreakdown.growth}/20</span>
-                            <span>Recruitment: {selectedItem.scoreBreakdown.salesBreakdown.recruitmentActivity}/20</span>
-                            <span>Omvang: {selectedItem.scoreBreakdown.salesBreakdown.companySize}/10</span>
-                            <span className="col-span-2">Externe recruiter: {selectedItem.scoreBreakdown.salesBreakdown.externalRecruiterChance}/25</span>
-                          </div>
-                        ) : null}
-                        {(selectedItem.scoreBreakdown?.salesWhy?.length ?? 0) > 0 ? (
-                          <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
-                            {selectedItem.scoreBreakdown!.salesWhy!.map((reason) => (
-                              <li key={reason}>{reason}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {selectedItem.scoreBreakdown?.recruitmentPotential ? (
-                          <p>
-                            <span className="text-muted-foreground">Recruitment Potential:</span>{" "}
-                            <span className={
-                              selectedItem.scoreBreakdown.recruitmentPotential === "HIGH"
-                                ? "font-medium text-emerald-700"
-                                : selectedItem.scoreBreakdown.recruitmentPotential === "MEDIUM"
-                                  ? "font-medium text-amber-700"
-                                  : "text-muted-foreground"
-                            }>
-                              {selectedItem.scoreBreakdown.recruitmentPotential}
-                            </span>
-                          </p>
-                        ) : null}
-                        {selectedItem.scoreBreakdown?.recruitmentPotentialMotivation ? (
-                          <p className="text-xs text-muted-foreground">{selectedItem.scoreBreakdown.recruitmentPotentialMotivation}</p>
-                        ) : null}
-                        <p><span className="text-muted-foreground">Totaal score:</span> {selectedItem.totalScore ?? "—"}</p>
-                        {(selectedItem.scoreBreakdown?.urgency) ? (
-                          <p><span className="text-muted-foreground">Urgentie:</span> {selectedItem.scoreBreakdown.urgency}</p>
-                        ) : null}
-                        {(selectedItem.scoreBreakdown?.rolesSought?.length ?? 0) > 0 ? (
-                          <p><span className="text-muted-foreground">Gezochte functies:</span> {selectedItem.scoreBreakdown!.rolesSought!.join(", ")}</p>
-                        ) : null}
-                        {selectedItem.scoreBreakdown?.bestApproach ? (
-                          <p className="text-xs"><span className="text-muted-foreground">Invalshoek:</span> {selectedItem.scoreBreakdown.bestApproach}</p>
-                        ) : null}
-                        {(selectedItem.scoreBreakdown?.opportunityWhy?.length ?? 0) > 0 ? (
-                          <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
-                            {selectedItem.scoreBreakdown!.opportunityWhy!.map((reason) => (
-                              <li key={reason}>{reason}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {activeRun ? (
-                          <ProspectContactReview
-                            runId={activeRun.id}
-                            item={selectedItem}
-                            onUpdated={(updated) => {
-                              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-                            }}
-                            onError={setError}
-                          />
-                        ) : null}
-                        <p><span className="text-muted-foreground">Onderwerp:</span> {selectedItem.draftSubject ?? "—"}</p>
-                        {(selectedItem.warnings?.length ?? 0) > 0 ? (
-                          <div className="text-amber-700 text-xs">{selectedItem.warnings.join(" · ")}</div>
-                        ) : null}
-                        {selectedItem.outreachMessageId ? (
-                          <div className="flex flex-wrap gap-2 pt-2">
-                            <Button type="button" size="sm" variant="outline" onClick={() => void approveItem(selectedItem.outreachMessageId!)}>
-                              <Check className="size-4" /> Goedkeuren
-                            </Button>
-                            <input
-                              type="text"
-                              inputMode="email"
-                              autoComplete="email"
-                              className="rounded-md border px-2 py-1 text-xs"
-                              placeholder="test@jouw.nl"
-                              value={testEmail}
-                              onChange={(e) => setTestEmail(e.target.value)}
-                            />
-                            <Button type="button" size="sm" variant="secondary" disabled={!testEmail.trim()} onClick={() => void sendTest(selectedItem.outreachMessageId!)}>
-                              <Send className="size-4" /> Testmail
-                            </Button>
-                          </div>
-                        ) : null}
-                      </>
+                <Card className="min-w-0 flex-1">
+                  <CardHeader>
+                    <CardTitle className="text-base">Bedrijfsdossier</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedItem && activeRun ? (
+                      <ProspectDossierPanel
+                        runId={activeRun.id}
+                        item={selectedItem}
+                        onItemUpdated={(updated) => {
+                          setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+                        }}
+                        onError={setError}
+                      />
                     ) : (
-                      <p className="text-muted-foreground">Selecteer een prospect.</p>
+                      <p className="text-sm text-muted-foreground">Selecteer een prospect uit de queue.</p>
                     )}
                   </CardContent>
                 </Card>

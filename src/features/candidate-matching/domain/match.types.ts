@@ -23,7 +23,7 @@ export type CandidateProfile = {
   phone: string | null;
   source: string | null;
   status: CandidateStatus;
-  currentRole: string | null;
+  candidateCurrentRole: string | null;
   location: string | null;
   summary: string | null;
   skills: string[];
@@ -45,7 +45,7 @@ export type CandidateMatchContext = {
 export type CandidateMatchInput = {
   firstName: string;
   lastName: string;
-  currentRole?: string | null;
+  candidateCurrentRole?: string | null;
   location?: string | null;
   summary?: string | null;
   skills?: string[];
@@ -58,7 +58,7 @@ export type CandidateMatchInput = {
 export const candidateMatchInputSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
-  currentRole: z.string().max(200).nullable().optional(),
+  candidateCurrentRole: z.string().max(200).nullable().optional(),
   location: z.string().max(200).nullable().optional(),
   summary: z.string().max(5000).nullable().optional(),
   skills: z.array(z.string().max(100)).max(50).optional(),
