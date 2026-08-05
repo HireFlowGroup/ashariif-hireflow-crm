@@ -67,6 +67,9 @@ export function computeLeadScoreFromAnalysis(
         personalization: 0,
         outreachReadiness: 0,
         explanations: [`Geblokkeerd: ${INSUFFICIENT_DATA}`],
+        opportunityWhy: [],
+        rolesSought: [],
+        salesWhy: [],
       },
     };
   }
@@ -96,6 +99,12 @@ export function computeLeadScoreFromAnalysis(
         personalization: 0,
         outreachReadiness: 0,
         explanations,
+        opportunityWhy: [],
+        rolesSought:
+          analysis.hard_to_fill_roles !== INSUFFICIENT_DATA
+            ? [analysis.hard_to_fill_roles]
+            : [],
+        salesWhy: [],
         recruitmentIntelligenceTier: analysis.opportunity_tier ?? undefined,
         recruitmentIntelligenceScore: opportunityScore,
       },
@@ -142,6 +151,13 @@ export function computeLeadScoreFromAnalysis(
     personalization: personalizationScore,
     outreachReadiness: outreachReadinessScore,
     explanations,
+    opportunityWhy:
+      analysis.why_agency !== INSUFFICIENT_DATA ? [analysis.why_agency] : [],
+    rolesSought:
+      analysis.hard_to_fill_roles !== INSUFFICIENT_DATA
+        ? [analysis.hard_to_fill_roles]
+        : [],
+    salesWhy: [],
     bestApproach: analysis.why_hireflow !== INSUFFICIENT_DATA ? analysis.why_hireflow : undefined,
     urgencyRationale:
       analysis.urgency_rationale !== INSUFFICIENT_DATA ? analysis.urgency_rationale : undefined,

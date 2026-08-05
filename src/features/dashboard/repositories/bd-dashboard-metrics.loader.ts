@@ -236,13 +236,4 @@ export async function loadBdDashboardMetrics(
   };
 }
 
-export function sumTrendField(points: BdDailyTrendPoint[], field: keyof TrendAccumulator): number {
-  return points.reduce((total, point) => total + point[field], 0);
-}
-
-export function periodConversionRate(points: BdDailyTrendPoint[]): number {
-  return computeConversionRate(
-    sumTrendField(points, "placements"),
-    sumTrendField(points, "companiesFound"),
-  );
-}
+import { periodConversionRate, sumTrendField } from "@/features/dashboard/repositories/bd-dashboard-metrics.helpers";

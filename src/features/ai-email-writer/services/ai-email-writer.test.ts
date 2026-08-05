@@ -6,8 +6,8 @@ import {
   buildEmailWriterContextPayload,
   buildFallbackEmailDraft,
   generateAiEmailDraft,
-  MAX_EMAIL_WORDS,
 } from "@/features/ai-email-writer/services/ai-email-writer.service";
+import { MAX_EMAIL_WORDS } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import { INSUFFICIENT_DATA } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 
 function baseInput(overrides: Partial<AiEmailWriterInput> = {}): AiEmailWriterInput {

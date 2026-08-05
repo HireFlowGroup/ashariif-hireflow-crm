@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Loader2, RefreshCw, Workflow } from "lucide-react";
 
 import { PipelineColumn } from "@/components/commercial-pipeline/pipeline-column";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type {
   CommercialPipelineBoard,
   CommercialPipelineStage,
@@ -145,9 +145,9 @@ export function CommercialPipelineBoardView({ initialBoard }: CommercialPipeline
             )}
             Importeer bedrijven
           </Button>
-          <Button variant="secondary" size="sm" asChild>
-            <Link href="/companies">Bedrijven bekijken</Link>
-          </Button>
+          <Link href="/companies" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+            Bedrijven bekijken
+          </Link>
         </div>
       </div>
 

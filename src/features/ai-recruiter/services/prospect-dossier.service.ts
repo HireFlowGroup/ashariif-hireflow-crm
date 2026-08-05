@@ -22,6 +22,7 @@ import type { ExternalCompanyCandidate } from "@/features/company-finder/domain"
 import { createOutreachEngineService } from "@/features/outreach-engine/create-outreach-engine-service";
 import type { OutreachMessage } from "@/features/outreach-engine/domain/types";
 import { parseAiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.schema";
+import { createRecruitmentIntelligenceEngine } from "@/features/recruitment-intelligence/create-recruitment-intelligence-engine";
 import { formatContactName } from "@/lib/contacts/format";
 
 const DEPT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [

@@ -22,48 +22,13 @@ import {
 import { loadBdDashboardMetrics } from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
 import { DashboardRepositoryError } from "@/features/dashboard/repositories/dashboard.repository";
 import type { DashboardRepository } from "@/features/dashboard/repositories/dashboard.repository";
+import {
+  OUTREACH_LABELS,
+  PIPELINE_LABELS,
+  PRIORITY_LABELS,
+} from "@/features/dashboard/domain/dashboard-labels";
 import type { Database } from "@/types/database";
 import type { CompanyIntelligence } from "@/types/hiring-intelligence";
-
-const PRIORITY_LABELS: Record<string, string> = {
-  A: "Priority A",
-  B: "Priority B",
-  C: "Priority C",
-  D: "Priority D",
-  unscored: "Niet gescoord",
-};
-
-const PIPELINE_LABELS: Record<string, string> = {
-  applied: "Applied",
-  screening: "Screening",
-  interview: "Interview",
-  offer: "Offer",
-  hired: "Hired",
-  rejected: "Rejected",
-};
-
-const OUTREACH_LABELS: Record<string, string> = {
-  none: "Geen outreach",
-  queued: "In queue",
-  draft: "Concept",
-  review: "Review",
-  sent: "Verzonden",
-  blocked: "Geblokkeerd",
-};
-
-const SIGNAL_TYPE_LABELS: Record<string, string> = {
-  vacancy: "Vacature",
-  indeed_vacancy: "Indeed vacature",
-  new_recruiter: "Nieuwe recruiter",
-  new_hr_manager: "HR manager",
-  new_location: "Nieuwe vestiging",
-  linkedin_hiring: "LinkedIn hiring",
-  ats_detected: "ATS",
-  careers_page: "Werken-bij",
-  news: "Nieuws",
-  website_change: "Website",
-  funding: "Funding",
-};
 
 export class SupabaseDashboardRepository implements DashboardRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -596,4 +561,9 @@ export class SupabaseDashboardRepository implements DashboardRepository {
   }
 }
 
-export { SIGNAL_TYPE_LABELS, PRIORITY_LABELS, PIPELINE_LABELS, OUTREACH_LABELS };
+export {
+  OUTREACH_LABELS,
+  PIPELINE_LABELS,
+  PRIORITY_LABELS,
+  SIGNAL_TYPE_LABELS,
+} from "@/features/dashboard/domain/dashboard-labels";

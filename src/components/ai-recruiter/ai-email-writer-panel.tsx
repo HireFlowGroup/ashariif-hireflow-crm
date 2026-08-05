@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AiEmailWriterDraft, AiEmailWriterStyle } from "@/features/ai-email-writer/domain/ai-email-writer.types";
-import { MAX_EMAIL_WORDS } from "@/features/ai-email-writer/services/ai-email-writer.service";
+import { MAX_EMAIL_WORDS } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import type { AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
 import type { RecruitmentIntelligenceAnalysis } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 import {

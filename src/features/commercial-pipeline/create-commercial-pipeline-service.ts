@@ -20,11 +20,11 @@ export async function createCommercialPipelineService(): Promise<CommercialPipel
     return {
       id: data.id,
       name: data.name,
-      sector: data.sector,
-      city: data.city,
+      sector: data.sector ?? null,
+      city: data.city ?? null,
       contactName: null,
       contactEmail: data.hr_email ?? data.general_email ?? null,
-      leadScore: data.lead_score,
+      leadScore: data.lead_score ?? null,
     };
   };
 

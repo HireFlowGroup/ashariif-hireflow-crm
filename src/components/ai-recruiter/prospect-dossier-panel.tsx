@@ -7,13 +7,13 @@ import {
   Calendar,
   ExternalLink,
   Loader2,
+  Mail,
   RefreshCw,
   Sparkles,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
 
-import { AiEmailWriterPanel } from "@/components/ai-recruiter/ai-email-writer-panel";
 import { AiEmailWriterPanel } from "@/components/ai-recruiter/ai-email-writer-panel";
 import { ProspectContactReview } from "@/components/ai-recruiter/prospect-contact-review";
 import { RecruitmentIntelligencePanel } from "@/components/ai-recruiter/recruitment-intelligence-panel";

@@ -17,7 +17,7 @@ import type {
   DashboardWarmLead,
 } from "@/features/dashboard/domain/dashboard.types";
 import { priorityColorClass } from "@/features/lead-scoring/domain/lead-score.types";
-import { SIGNAL_TYPE_LABELS } from "@/features/dashboard/repositories/supabase-dashboard.repository";
+import { SIGNAL_TYPE_LABELS } from "@/features/dashboard/domain/dashboard-labels";
 import { cn } from "@/lib/utils";
 import { DashboardBarChart, DashboardPieChart } from "@/components/dashboard/charts/dashboard-charts";
 

@@ -5,6 +5,7 @@ import type {
   AiEmailWriterInput,
   AiEmailWriterStyle,
 } from "@/features/ai-email-writer/domain/ai-email-writer.types";
+import { MAX_EMAIL_WORDS } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import {
   AI_EMAIL_WRITER_JSON_SCHEMA,
   AI_EMAIL_WRITER_SCHEMA_NAME,
@@ -12,8 +13,6 @@ import {
 import { INSUFFICIENT_DATA } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 import { getOpenAIClient } from "@/lib/ai/client";
 import { isOpenAIConfiguredForActiveOrg } from "@/lib/ai/client";
-
-export const MAX_EMAIL_WORDS = 170;
 
 const BANNED_PHRASES = [
   "baanbrekend",

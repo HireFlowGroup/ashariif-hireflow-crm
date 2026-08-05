@@ -6,7 +6,7 @@ import { ArrowRight, Workflow } from "lucide-react";
 import { CommercialPipelineCountsStrip } from "@/components/commercial-pipeline/commercial-pipeline-board";
 import { DashboardBarChart } from "@/components/dashboard/charts/dashboard-charts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import type { CommercialPipelineBoard } from "@/features/commercial-pipeline/domain/types";
 
 export function CommercialPipelineDashboardWidget({ board }: { board: CommercialPipelineBoard }) {
@@ -31,12 +31,10 @@ export function CommercialPipelineDashboardWidget({ board }: { board: Commercial
             AI Business Development — van prospect tot plaatsing ({activeDeals} actief)
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/pipeline">
-            Open Kanban
-            <ArrowRight className="ml-2 size-4" />
-          </Link>
-        </Button>
+        <Link href="/pipeline" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          Open Kanban
+          <ArrowRight className="ml-2 size-4" />
+        </Link>
       </CardHeader>
       <CardContent className="space-y-6">
         {board.totalCards === 0 ? (
@@ -44,9 +42,9 @@ export function CommercialPipelineDashboardWidget({ board }: { board: Commercial
             <p className="text-sm text-muted-foreground">
               Nog geen deals in de commerciële pipeline.
             </p>
-            <Button variant="link" asChild className="mt-2">
-              <Link href="/pipeline">Pipeline opstarten</Link>
-            </Button>
+            <Link href="/pipeline" className={buttonVariants({ variant: "link", className: "mt-2" })}>
+              Pipeline opstarten
+            </Link>
           </div>
         ) : (
           <>

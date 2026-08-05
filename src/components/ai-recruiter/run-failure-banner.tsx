@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { AiRecruiterRun } from "@/features/ai-recruiter/domain/types";
-import { buildRunFailureUiMessage } from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
+import { buildRunFailureUiMessage } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
 
 type RunFailureBannerProps = {
   run: AiRecruiterRun;
@@ -52,12 +52,13 @@ export function RunFailureBanner({ run }: RunFailureBannerProps) {
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {uiMessage?.showProviderSettings ? (
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link href="/settings/providers">
-              <Settings className="mr-1 size-3.5" />
-              Settings → Providers
-            </Link>
-          </Button>
+          <Link
+            href="/settings/providers"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Settings className="mr-1 size-3.5" />
+            Settings → Providers
+          </Link>
         ) : null}
         {diagnostics ? (
           <Button

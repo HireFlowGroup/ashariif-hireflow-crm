@@ -10,7 +10,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { BdChartPeriod, BdDailyTrendPoint } from "@/features/dashboard/domain/dashboard.types";
-import { periodConversionRate, sumTrendField } from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
+import { periodConversionRate, sumTrendField } from "@/features/dashboard/repositories/bd-dashboard-metrics.helpers";
 
 type BdDashboardChartsProps = {
   trends: Record<BdChartPeriod, BdDailyTrendPoint[]>;

@@ -1,5 +1,7 @@
 export type AiEmailWriterStyle = "new_version" | "shorter" | "formal" | "personal";
 
+export const MAX_EMAIL_WORDS = 170;
+
 export type AiEmailWriterDraft = {
   subject: string;
   personalIntroduction: string;

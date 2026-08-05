@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BdDailyTrendPoint } from "@/features/dashboard/domain/dashboard.types";
-import {
-  periodConversionRate,
-  sumTrendField,
-} from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
+import { periodConversionRate, sumTrendField } from "@/features/dashboard/repositories/bd-dashboard-metrics.helpers";
 
 function point(overrides: Partial<BdDailyTrendPoint> & Pick<BdDailyTrendPoint, "date">): BdDailyTrendPoint {
   return {
