@@ -27,12 +27,14 @@ create table if not exists public.outreach_suppressions (
   company_id uuid references public.companies (id) on delete set null,
   contact_id uuid references public.contacts (id) on delete set null,
   created_by uuid references auth.users (id) on delete set null,
-  created_at timestamptz not null default now(),
-  unique (organization_id, lower(email))
+  created_at timestamptz not null default now()
 );
 
-create index if not exists outreach_suppressions_org_email_idx
-  on public.outreach_suppressions (organization_id, lower(email));
+create unique index if not exists outreach_suppressions_org_email_unique
+  on public.outreach_suppressions (
+    organization_id,
+    lower(email)
+  );
 
 -- ---------------------------------------------------------------------------
 -- organization_email_connections — OAuth / SMTP sender config (no secrets in logs)

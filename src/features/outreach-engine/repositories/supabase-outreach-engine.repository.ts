@@ -298,16 +298,34 @@ export class SupabaseOutreachEngineRepository implements OutreachEngineRepositor
     companyId?: string | null,
     contactId?: string | null,
   ): Promise<void> {
-    await this.client.from("outreach_suppressions").upsert(
-      {
-        organization_id: organizationId,
-        email: email.toLowerCase(),
-        reason,
-        company_id: companyId ?? null,
-        contact_id: contactId ?? null,
-        created_by: userId,
-      },
-      { onConflict: "organization_id,lower(email)" },
-    );
+    const normalizedEmail = email.toLowerCase();
+    const row = {
+      organization_id: organizationId,
+      email: normalizedEmail,
+      reason,
+      company_id: companyId ?? null,
+      contact_id: contactId ?? null,
+      created_by: userId,
+    };
+
+    const { data: existing } = await this.client
+      .from("outreach_suppressions")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (existing?.id) {
+      const { error } = await this.client
+        .from("outreach_suppressions")
+        .update({ reason, company_id: row.company_id, contact_id: row.contact_id })
+        .eq("id", existing.id)
+        .eq("organization_id", organizationId);
+      if (error) throw new Error("Suppression kon niet worden bijgewerkt.");
+      return;
+    }
+
+    const { error } = await this.client.from("outreach_suppressions").insert(row);
+    if (error) throw new Error("Suppression kon niet worden toegevoegd.");
   }
 }
