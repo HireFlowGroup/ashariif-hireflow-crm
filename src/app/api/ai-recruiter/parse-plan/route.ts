@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
-import { createAiRecruiterOrchestrator } from "@/features/ai-recruiter/create-ai-recruiter-service";
 import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
+import { parseAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-parser.service";
 import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
-
-const bodySchema = z.object({ prompt: z.string().min(10).max(4000) });
+import { aiRecruiterParsePlanBodySchema } from "@/lib/validations/ai-recruiter-api";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const context = await getAuthenticatedServiceContext();
@@ -18,14 +16,24 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Ongeldige JSON" }, { status: 400 });
   }
 
-  const parsed = bodySchema.safeParse(body);
+  const parsed = aiRecruiterParsePlanBodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Ongeldige prompt" }, { status: 400 });
   }
 
-  const orchestrator = await createAiRecruiterOrchestrator();
-  const plan = await orchestrator.parsePlan(parsed.data.prompt);
-  const validated = aiRecruiterSearchPlanSchema.parse(plan);
+  try {
+    const plan = await parseAiRecruiterSearchPlan(parsed.data.prompt);
+    const validated = aiRecruiterSearchPlanSchema.safeParse(plan);
 
-  return NextResponse.json({ plan: validated, prompt: parsed.data.prompt });
+    if (!validated.success) {
+      console.error("[AI Recruiter] parse-plan schema mismatch", validated.error.flatten());
+      return NextResponse.json({ error: "Zoekplan validatie mislukt." }, { status: 500 });
+    }
+
+    return NextResponse.json({ plan: validated.data, prompt: parsed.data.prompt });
+  } catch (error) {
+    console.error("[AI Recruiter] parse-plan failed", error);
+    const message = error instanceof Error ? error.message : "Plan kon niet worden geparsed";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

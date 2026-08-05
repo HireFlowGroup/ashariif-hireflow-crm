@@ -17,6 +17,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { id: "goto-companies", label: "Ga naar Companies", keys: ["g", "c"], display: "G C", group: "navigation" },
   { id: "goto-signals", label: "Ga naar Signals", keys: ["g", "s"], display: "G S", group: "navigation" },
   { id: "goto-outreach", label: "Ga naar Outreach", keys: ["g", "o"], display: "G O", group: "navigation" },
+  { id: "goto-ai-recruiter", label: "Ga naar AI Recruiter", keys: ["g", "r"], display: "G R", group: "navigation" },
   { id: "goto-analytics", label: "Ga naar Analytics", keys: ["g", "a"], display: "G A", group: "navigation" },
   { id: "goto-settings", label: "Ga naar Settings", keys: ["g", ","], display: "G ,", group: "navigation" },
 ];
@@ -27,6 +28,7 @@ export const GOTO_ROUTES: Record<string, string> = {
   c: "/companies",
   s: "/signals",
   o: "/outreach",
+  r: "/ai-recruiter",
   a: "/analytics",
   ",": "/settings",
 };

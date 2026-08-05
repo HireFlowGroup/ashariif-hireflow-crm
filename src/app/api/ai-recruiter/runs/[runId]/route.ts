@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { createAiRecruiterOrchestrator } from "@/features/ai-recruiter/create-ai-recruiter-service";
+import {
+  createAiRecruiterRepository,
+} from "@/features/ai-recruiter/create-ai-recruiter-service";
 import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
+import { aiRecruiterRunIdParamSchema } from "@/lib/validations/ai-recruiter-api";
 
 type RouteContext = { params: Promise<{ runId: string }> };
 
@@ -9,14 +12,30 @@ export async function GET(_request: Request, routeContext: RouteContext): Promis
   const context = await getAuthenticatedServiceContext();
   if (!context) return NextResponse.json({ error: "Niet geautoriseerd" }, { status: 401 });
 
-  const { runId } = await routeContext.params;
-  const orchestrator = await createAiRecruiterOrchestrator();
-  const [run, items] = await Promise.all([
-    orchestrator.getRun(context, runId),
-    orchestrator.listItems(context, runId),
-  ]);
+  const { runId: rawRunId } = await routeContext.params;
+  const runIdResult = aiRecruiterRunIdParamSchema.safeParse(rawRunId);
 
-  if (!run) return NextResponse.json({ error: "Run niet gevonden" }, { status: 404 });
+  if (!runIdResult.success) {
+    return NextResponse.json(
+      { error: runIdResult.error.issues[0]?.message ?? "Ongeldige runId" },
+      { status: 400 },
+    );
+  }
 
-  return NextResponse.json({ run, items });
+  try {
+    const repository = await createAiRecruiterRepository();
+    const runId = runIdResult.data;
+    const [run, items] = await Promise.all([
+      repository.getRun(context.organizationId, runId),
+      repository.listRunItems(context.organizationId, runId),
+    ]);
+
+    if (!run) return NextResponse.json({ error: "Run niet gevonden" }, { status: 404 });
+
+    return NextResponse.json({ run, items });
+  } catch (error) {
+    console.error("[AI Recruiter] GET /runs/[runId] failed", { runId: rawRunId, error });
+    const message = error instanceof Error ? error.message : "Run laden mislukt";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

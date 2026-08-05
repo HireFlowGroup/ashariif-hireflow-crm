@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrainCircuit,
   Check,
@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Send,
   ShieldAlert,
-  X,
 } from "lucide-react";
 
 import { WorkspacePage } from "@/components/layout/workspace-page";
@@ -22,9 +21,29 @@ import type {
   AiRecruiterRunItem,
   AiRecruiterSearchPlan,
 } from "@/features/ai-recruiter/domain/types";
+import {
+  aiRecruiterFetchJson,
+  buildOutreachMessagePath,
+  buildRunDetailPath,
+  logAiRecruiterClientError,
+  openRecruiterEventSource,
+  toAiRecruiterClientError,
+} from "@/lib/ai-recruiter/client-api";
+import { assertUuid } from "@/lib/ai-recruiter/client-errors";
 
 const EXAMPLE_PROMPT =
   "Zoek 25 softwarebedrijven in Rotterdam en Den Haag met 20 tot 200 medewerkers die recruiters, accountmanagers of customer success managers zoeken. Geef prioriteit aan bedrijven met meerdere vacatures en maak voor de beste 10 een persoonlijke introductiemail.";
+
+function normalizeSearchPlan(plan: AiRecruiterSearchPlan): AiRecruiterSearchPlan {
+  return {
+    ...plan,
+    employee_range: plan.employee_range ?? { min: null, max: null },
+    locations: plan.locations ?? [],
+    sectors: plan.sectors ?? [],
+    desired_roles: plan.desired_roles ?? [],
+    uncertainties: plan.uncertainties ?? [],
+  };
+}
 
 export function AiRecruiterDashboard() {
   const [prompt, setPrompt] = useState(EXAMPLE_PROMPT);
@@ -32,6 +51,7 @@ export function AiRecruiterDashboard() {
   const [plan, setPlan] = useState<AiRecruiterSearchPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [runs, setRuns] = useState<AiRecruiterRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(true);
   const [activeRun, setActiveRun] = useState<AiRecruiterRun | null>(null);
   const [items, setItems] = useState<AiRecruiterRunItem[]>([]);
   const [pipelineSteps, setPipelineSteps] = useState<AiRecruiterPipelineStep[]>([]);
@@ -39,18 +59,41 @@ export function AiRecruiterDashboard() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testEmail, setTestEmail] = useState("");
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const reportError = useCallback((operation: string, cause: unknown) => {
+    const clientError = toAiRecruiterClientError(cause, operation);
+    logAiRecruiterClientError(clientError, operation);
+    setError(clientError.message);
+    return clientError;
+  }, []);
 
   const loadRuns = useCallback(async () => {
-    const res = await fetch("/api/ai-recruiter/runs");
-    if (res.ok) {
-      const data = (await res.json()) as { runs: AiRecruiterRun[] };
+    setRunsLoading(true);
+
+    try {
+      const { data } = await aiRecruiterFetchJson<{ runs: AiRecruiterRun[] }>(
+        "loadRuns",
+        "/api/ai-recruiter/runs",
+      );
       setRuns(data.runs);
+    } catch (cause) {
+      reportError("loadRuns", cause);
+    } finally {
+      setRunsLoading(false);
     }
-  }, []);
+  }, [reportError]);
 
   useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
+
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+    };
+  }, []);
 
   const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
 
@@ -59,114 +102,163 @@ export function AiRecruiterDashboard() {
     [items],
   );
 
-  async function parsePlan() {
+  const parsePlan = useCallback(async (): Promise<AiRecruiterSearchPlan | null> => {
     setPlanLoading(true);
     setError(null);
+
     try {
-      const res = await fetch("/api/ai-recruiter/parse-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = (await res.json()) as { plan?: AiRecruiterSearchPlan; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Plan kon niet worden geparsed");
-      setPlan(data.plan ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Parse mislukt");
+      const { data } = await aiRecruiterFetchJson<{ plan: AiRecruiterSearchPlan }>(
+        "parsePlan",
+        "/api/ai-recruiter/parse-plan",
+        {
+          method: "POST",
+          body: { prompt },
+          expectedStatuses: [200],
+        },
+      );
+
+      const normalized = normalizeSearchPlan(data.plan);
+      setPlan(normalized);
+      return normalized;
+    } catch (cause) {
+      reportError("parsePlan", cause);
+      return null;
     } finally {
       setPlanLoading(false);
     }
-  }
+  }, [prompt, reportError]);
+
+  const loadRunDetails = useCallback(
+    async (runId: string) => {
+      try {
+        assertUuid("loadRunDetails", "runId", runId);
+        const { data } = await aiRecruiterFetchJson<{ run: AiRecruiterRun; items: AiRecruiterRunItem[] }>(
+          "loadRunDetails",
+          buildRunDetailPath(runId),
+        );
+        setActiveRun(data.run);
+        setItems(data.items);
+        setPipelineSteps(data.run.pipelineSteps ?? []);
+      } catch (cause) {
+        reportError("loadRunDetails", cause);
+      }
+    },
+    [reportError],
+  );
+
+  const connectRunStream = useCallback(
+    (runId: string) => {
+      eventSourceRef.current?.close();
+
+      const eventSource = openRecruiterEventSource("startRun", runId, {
+        onRunStatus: (data) => {
+          setActiveRun((prev) =>
+            prev ? { ...prev, status: data.status as AiRecruiterRun["status"] } : prev,
+          );
+        },
+        onPipeline: (data) => {
+          setPipelineSteps(data.steps as AiRecruiterPipelineStep[]);
+        },
+        onItem: (data) => {
+          const item = data.item as AiRecruiterRunItem;
+          setItems((prev) => {
+            const exists = prev.find((i) => i.id === item.id);
+            if (exists) return prev.map((i) => (i.id === item.id ? item : i));
+            return [item, ...prev];
+          });
+        },
+        onCounters: (data) => {
+          setActiveRun((prev) =>
+            prev ? { ...prev, counters: data.counters as AiRecruiterRun["counters"] } : prev,
+          );
+        },
+        onComplete: (data) => {
+          const run = data.run as AiRecruiterRun;
+          setActiveRun(run);
+          setStreaming(false);
+          eventSource.close();
+          eventSourceRef.current = null;
+          void loadRuns();
+          void loadRunDetails(runId);
+        },
+        onError: (message) => {
+          setStreaming(false);
+          setError(message);
+          eventSource.close();
+          eventSourceRef.current = null;
+        },
+      });
+
+      eventSourceRef.current = eventSource;
+    },
+    [loadRunDetails, loadRuns],
+  );
 
   async function startRun() {
-    if (!plan) {
-      await parsePlan();
-      return;
+    setError(null);
+
+    let activePlan = plan;
+    if (!activePlan) {
+      activePlan = await parsePlan();
+      if (!activePlan) return;
     }
 
-    setError(null);
     setStreaming(true);
 
     try {
-      const createRes = await fetch("/api/ai-recruiter/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: runName, prompt, searchPlan: plan }),
-      });
-      const createData = (await createRes.json()) as { run?: AiRecruiterRun; error?: string };
-      if (!createRes.ok || !createData.run) throw new Error(createData.error ?? "Run aanmaken mislukt");
+      const { data } = await aiRecruiterFetchJson<{ run: AiRecruiterRun }>(
+        "createRun",
+        "/api/ai-recruiter/runs",
+        {
+          method: "POST",
+          body: { name: runName, prompt, searchPlan: activePlan },
+          expectedStatuses: [201],
+        },
+      );
 
-      const runId = createData.run.id;
-      setActiveRun(createData.run);
-
-      const eventSource = new EventSource(`/api/ai-recruiter/runs/${runId}/stream`);
-
-      eventSource.addEventListener("run_status", (e) => {
-        const data = JSON.parse(e.data) as { status: AiRecruiterRun["status"]; message?: string };
-        setActiveRun((prev) => (prev ? { ...prev, status: data.status } : prev));
-      });
-
-      eventSource.addEventListener("pipeline", (e) => {
-        const data = JSON.parse(e.data) as { steps: AiRecruiterPipelineStep[] };
-        setPipelineSteps(data.steps);
-      });
-
-      eventSource.addEventListener("item", (e) => {
-        const data = JSON.parse(e.data) as { item: AiRecruiterRunItem };
-        setItems((prev) => {
-          const exists = prev.find((i) => i.id === data.item.id);
-          if (exists) return prev.map((i) => (i.id === data.item.id ? data.item : i));
-          return [data.item, ...prev];
-        });
-      });
-
-      eventSource.addEventListener("counters", (e) => {
-        const data = JSON.parse(e.data) as { counters: AiRecruiterRun["counters"] };
-        setActiveRun((prev) => (prev ? { ...prev, counters: data.counters } : prev));
-      });
-
-      eventSource.addEventListener("complete", (e) => {
-        const data = JSON.parse(e.data) as { run: AiRecruiterRun };
-        setActiveRun(data.run);
-        setStreaming(false);
-        eventSource.close();
-        void loadRuns();
-        void loadRunDetails(runId);
-      });
-
-      eventSource.addEventListener("error", () => {
-        setStreaming(false);
-        eventSource.close();
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Run starten mislukt");
+      assertUuid("startRun", "run.id", data.run.id);
+      setActiveRun(data.run);
+      connectRunStream(data.run.id);
+    } catch (cause) {
+      reportError("startRun", cause);
       setStreaming(false);
     }
   }
 
-  async function loadRunDetails(runId: string) {
-    const res = await fetch(`/api/ai-recruiter/runs/${runId}`);
-    if (res.ok) {
-      const data = (await res.json()) as { run: AiRecruiterRun; items: AiRecruiterRunItem[] };
-      setActiveRun(data.run);
-      setItems(data.items);
-      setPipelineSteps(data.run.pipelineSteps);
+  async function approveItem(messageId: string) {
+    try {
+      assertUuid("approveItem", "messageId", messageId);
+      await aiRecruiterFetchJson(
+        "approveItem",
+        buildOutreachMessagePath(messageId, "approve"),
+        { method: "POST", expectedStatuses: [200] },
+      );
+      if (activeRun) void loadRunDetails(activeRun.id);
+    } catch (cause) {
+      reportError("approveItem", cause);
     }
   }
 
-  async function approveItem(messageId: string) {
-    await fetch(`/api/outreach/messages/${messageId}/approve`, { method: "POST" });
-    if (activeRun) void loadRunDetails(activeRun.id);
+  async function sendTest(messageId: string) {
+    if (!testEmail.trim()) return;
+
+    try {
+      assertUuid("sendTest", "messageId", messageId);
+      await aiRecruiterFetchJson(
+        "sendTest",
+        buildOutreachMessagePath(messageId, "send"),
+        {
+          method: "POST",
+          body: { confirmed: true, testRecipientEmail: testEmail.trim() },
+          expectedStatuses: [200],
+        },
+      );
+    } catch (cause) {
+      reportError("sendTest", cause);
+    }
   }
 
-  async function sendTest(messageId: string) {
-    if (!testEmail) return;
-    await fetch(`/api/outreach/messages/${messageId}/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirmed: true, testRecipientEmail: testEmail }),
-    });
-  }
+  const employeeRange = plan?.employee_range ?? { min: null, max: null };
 
   return (
     <WorkspacePage
@@ -175,8 +267,8 @@ export function AiRecruiterDashboard() {
       actions={
         <div className="flex items-center gap-2">
           <Badge variant="outline">MANUAL · SEND_DISABLED</Badge>
-          <Button type="button" variant="outline" size="sm" onClick={() => void loadRuns()}>
-            <RefreshCw className="size-4" />
+          <Button type="button" variant="outline" size="sm" onClick={() => void loadRuns()} disabled={runsLoading}>
+            <RefreshCw className={`size-4 ${runsLoading ? "animate-spin" : ""}`} />
           </Button>
         </div>
       }
@@ -213,7 +305,7 @@ export function AiRecruiterDashboard() {
                   {planLoading ? <Loader2 className="size-4 animate-spin" /> : null}
                   Plan genereren
                 </Button>
-                <Button type="button" size="sm" disabled={streaming} onClick={() => void startRun()}>
+                <Button type="button" size="sm" disabled={streaming || planLoading} onClick={() => void startRun()}>
                   <Play className="size-4" />
                   {streaming ? "Run actief…" : "Run starten"}
                 </Button>
@@ -229,7 +321,7 @@ export function AiRecruiterDashboard() {
               <CardContent className="space-y-2 text-sm">
                 <p><span className="text-muted-foreground">Locaties:</span> {plan.locations.join(", ") || "—"}</p>
                 <p><span className="text-muted-foreground">Sectoren:</span> {plan.sectors.join(", ") || "—"}</p>
-                <p><span className="text-muted-foreground">Medewerkers:</span> {plan.employee_range.min ?? "?"}–{plan.employee_range.max ?? "?"}</p>
+                <p><span className="text-muted-foreground">Medewerkers:</span> {employeeRange.min ?? "?"}–{employeeRange.max ?? "?"}</p>
                 <p><span className="text-muted-foreground">Functies:</span> {plan.desired_roles.join(", ") || "—"}</p>
                 <p><span className="text-muted-foreground">Max bedrijven:</span> {plan.maximum_companies}</p>
                 <p><span className="text-muted-foreground">Max concepten:</span> {plan.maximum_drafts}</p>
@@ -247,7 +339,15 @@ export function AiRecruiterDashboard() {
           <Card>
             <CardHeader><CardTitle className="text-base">Recente runs</CardTitle></CardHeader>
             <CardContent className="divide-y max-h-48 overflow-y-auto">
-              {runs.length === 0 ? <p className="text-sm text-muted-foreground">Nog geen runs.</p> : null}
+              {runsLoading ? (
+                <p className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Runs laden…
+                </p>
+              ) : null}
+              {!runsLoading && runs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nog geen runs.</p>
+              ) : null}
               {runs.map((run) => (
                 <button
                   key={run.id}
@@ -256,7 +356,9 @@ export function AiRecruiterDashboard() {
                   onClick={() => void loadRunDetails(run.id)}
                 >
                   <p className="font-medium">{run.name}</p>
-                  <p className="text-xs text-muted-foreground">{run.status} · {run.counters.draftsCreated} concepten</p>
+                  <p className="text-xs text-muted-foreground">
+                    {run.status} · {run.counters?.draftsCreated ?? 0} concepten
+                  </p>
                 </button>
               ))}
             </CardContent>
@@ -273,13 +375,13 @@ export function AiRecruiterDashboard() {
                 <CardContent>
                   <div className="mb-3 flex flex-wrap gap-2 text-xs">
                     <Badge>{activeRun.status}</Badge>
-                    <span>Gevonden: {activeRun.counters.found}</span>
-                    <span>Gevalideerd: {activeRun.counters.validated}</span>
-                    <span>Contact: {activeRun.counters.contactFound}</span>
-                    <span>Concepten: {activeRun.counters.draftsCreated}</span>
+                    <span>Gevonden: {activeRun.counters?.found ?? 0}</span>
+                    <span>Gevalideerd: {activeRun.counters?.validated ?? 0}</span>
+                    <span>Contact: {activeRun.counters?.contactFound ?? 0}</span>
+                    <span>Concepten: {activeRun.counters?.draftsCreated ?? 0}</span>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {(pipelineSteps.length ? pipelineSteps : activeRun.pipelineSteps).map((step) => (
+                    {(pipelineSteps.length ? pipelineSteps : activeRun.pipelineSteps ?? []).map((step) => (
                       <div key={step.id} className="rounded-md border px-3 py-2 text-sm">
                         <div className="flex items-center justify-between">
                           <span>{step.label}</span>
@@ -335,12 +437,15 @@ export function AiRecruiterDashboard() {
                               <Check className="size-4" /> Goedkeuren
                             </Button>
                             <input
+                              type="text"
+                              inputMode="email"
+                              autoComplete="email"
                               className="rounded-md border px-2 py-1 text-xs"
                               placeholder="test@jouw.nl"
                               value={testEmail}
                               onChange={(e) => setTestEmail(e.target.value)}
                             />
-                            <Button type="button" size="sm" variant="secondary" disabled={!testEmail} onClick={() => void sendTest(selectedItem.outreachMessageId!)}>
+                            <Button type="button" size="sm" variant="secondary" disabled={!testEmail.trim()} onClick={() => void sendTest(selectedItem.outreachMessageId!)}>
                               <Send className="size-4" /> Testmail
                             </Button>
                           </div>

@@ -5,6 +5,7 @@ import {
   RECRUITER_STREAM_FORMAT_HEADER,
   RECRUITER_STREAM_FORMAT_SSE,
 } from "@/lib/ai-recruiter/stream-sse";
+import { aiRecruiterRunIdParamSchema } from "@/lib/validations/ai-recruiter-api";
 
 type RouteContext = { params: Promise<{ runId: string }> };
 
@@ -18,7 +19,17 @@ export async function GET(_request: Request, routeContext: RouteContext): Promis
     });
   }
 
-  const { runId } = await routeContext.params;
+  const { runId: rawRunId } = await routeContext.params;
+  const runIdResult = aiRecruiterRunIdParamSchema.safeParse(rawRunId);
+
+  if (!runIdResult.success) {
+    return new Response(JSON.stringify({ error: runIdResult.error.issues[0]?.message ?? "Ongeldige runId" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const runId = runIdResult.data;
 
   const stream = new ReadableStream({
     async start(controller) {
