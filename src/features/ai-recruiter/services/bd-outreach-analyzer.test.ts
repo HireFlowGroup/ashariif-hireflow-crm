@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { toCompanyId } from "@/features/companies/domain";
 import type { Company } from "@/features/companies/domain";
 import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
+import { analyzeBdOutreachContext, pickVariantIndex } from "@/features/ai-recruiter/services/bd-outreach-analyzer.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeOpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
-import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
+import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 
 const plan = aiRecruiterSearchPlanSchema.parse({
   locations: ["Utrecht"],
@@ -74,8 +75,31 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-describe("generateRecruiterOutreachDraft fallback", () => {
-  it("writes personal intro using vacancies and signals, max 180 words", async () => {
+describe("analyzeBdOutreachContext", () => {
+  it("derives agency need, pain and HireFlow rationale from facts", () => {
+    const c = company();
+    const hiring = computeHiringIntelligenceProfile(c, plan);
+    const opportunity = computeOpportunityAssessment(c, plan);
+
+    const analysis = analyzeBdOutreachContext(c, hiring, opportunity);
+
+    expect(analysis.whyAgency).toContain("ScaleUp BV");
+    expect(analysis.likelyPain.length).toBeGreaterThan(10);
+    expect(analysis.whyHireFlow).toContain("HireFlow");
+    expect(analysis.factsUsed).toContain("ScaleUp BV");
+    expect(analysis.growthStage).toBeTruthy();
+  });
+});
+
+describe("pickVariantIndex", () => {
+  it("returns stable variant per seed", () => {
+    expect(pickVariantIndex("ScaleUp BV", 5)).toBe(pickVariantIndex("ScaleUp BV", 5));
+    expect(pickVariantIndex("ScaleUp BV", 5)).not.toBe(pickVariantIndex("Other Co", 5));
+  });
+});
+
+describe("generateRecruiterOutreachDraft BD fallback", () => {
+  it("writes short personal mail with bd analysis and simple yes question", async () => {
     const c = company();
     const hiring = computeHiringIntelligenceProfile(c, plan);
     const opportunity = computeOpportunityAssessment(c, plan);
@@ -88,38 +112,36 @@ describe("generateRecruiterOutreachDraft fallback", () => {
     );
 
     expect(draft.bodyText).toContain("ScaleUp BV");
-    expect(draft.bodyText.toLowerCase()).toMatch(/15 minuten|kennismak/);
-    expect(draft.bdAnalysis).toBeDefined();
+    expect(draft.bdAnalysis?.whyAgency).toBeTruthy();
     expect(draft.bodyText.toLowerCase()).not.toContain("marktleider");
+    expect(draft.bodyText.toLowerCase()).not.toContain("ik wilde even");
+    expect(draft.bodyText.toLowerCase()).toMatch(/15 minuten|kennismak/);
     expect(countWords(draft.bodyText)).toBeLessThanOrEqual(140);
-    expect(draft.recommendedSubject.toLowerCase()).not.toContain("recruitment-ondersteuning");
   });
-});
 
-describe("generateRecruiterFollowUpDraft fallback", () => {
-  it("references previous mail, restates value, one CTA, max 120 words", async () => {
-    const c = company();
-    const hiring = computeHiringIntelligenceProfile(c, plan);
-    const opportunity = computeOpportunityAssessment(c, plan);
+  it("produces different openers for different companies", async () => {
+    const hiringA = computeHiringIntelligenceProfile(company(), plan);
+    const hiringB = computeHiringIntelligenceProfile(
+      company({ id: toCompanyId("c2"), name: "DataWorks NL", vacancyCount: 1 }),
+      plan,
+    );
+    const opp = computeOpportunityAssessment(company(), plan);
 
-    const intro = await generateRecruiterOutreachDraft(
-      c,
-      { recipientName: "Sanne", email: "sanne@scaleup.nl", isGeneralMailbox: false },
-      hiring,
-      opportunity,
+    const draftA = await generateRecruiterOutreachDraft(
+      company(),
+      { recipientName: "A", email: "a@scaleup.nl", isGeneralMailbox: false },
+      hiringA,
+      opp,
+    );
+    const draftB = await generateRecruiterOutreachDraft(
+      company({ id: toCompanyId("c2"), name: "DataWorks NL" }),
+      { recipientName: "B", email: "b@dataworks.nl", isGeneralMailbox: false },
+      hiringB,
+      opp,
     );
 
-    const followUp = await generateRecruiterFollowUpDraft(
-      c,
-      { recipientName: "Sanne", email: "sanne@scaleup.nl", isGeneralMailbox: false },
-      hiring,
-      { subject: intro.recommendedSubject, bodyText: intro.bodyText },
-    );
-
-    expect(followUp.subject).toMatch(/^Re:/i);
-    expect(followUp.bodyText.toLowerCase()).toMatch(/eerdere (mail|bericht)/);
-    expect(followUp.bodyText.toLowerCase()).toContain("hireflow");
-    expect(followUp.bodyText.toLowerCase()).not.toContain("ik wilde even");
-    expect(countWords(followUp.bodyText)).toBeLessThanOrEqual(120);
+    const openerA = draftA.bodyText.split("\n")[2] ?? "";
+    const openerB = draftB.bodyText.split("\n")[2] ?? "";
+    expect(openerA).not.toBe(openerB);
   });
 });

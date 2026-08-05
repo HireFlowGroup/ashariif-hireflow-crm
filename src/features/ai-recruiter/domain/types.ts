@@ -175,6 +175,16 @@ export const suggestedReplySchema = z.object({
 
 export type SuggestedReply = z.infer<typeof suggestedReplySchema>;
 
+export const bdOutreachAnalysisSchema = z.object({
+  whyAgency: z.string(),
+  likelyPain: z.string(),
+  whyHireFlow: z.string(),
+  growthStage: z.string().nullable(),
+  factsUsed: z.array(z.string()),
+});
+
+export type BdOutreachAnalysis = z.infer<typeof bdOutreachAnalysisSchema>;
+
 export const outreachDraftContentSchema = z.object({
   subjectOptions: z.array(z.string()).length(3),
   recommendedSubject: z.string(),
@@ -184,6 +194,7 @@ export const outreachDraftContentSchema = z.object({
   factualClaims: z.array(z.string()),
   warnings: z.array(z.string()),
   confidence: z.number().min(0).max(1),
+  bdAnalysis: bdOutreachAnalysisSchema.optional(),
 });
 
 export type OutreachDraftContent = z.infer<typeof outreachDraftContentSchema>;

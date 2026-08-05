@@ -3,13 +3,17 @@ import "server-only";
 import type { Company } from "@/features/companies/domain";
 import type { OutreachDraftContent } from "@/features/ai-recruiter/domain/types";
 import { outreachDraftContentSchema } from "@/features/ai-recruiter/domain/types";
+import {
+  analyzeBdOutreachContext,
+  pickVariantIndex,
+} from "@/features/ai-recruiter/services/bd-outreach-analyzer.service";
 import type { OpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { buildOutreachSalutation } from "@/features/contact-finder/services/contact-validation.service";
 import { isOpenAIConfigured } from "@/platform/config/env";
 import { getOpenAIClient } from "@/lib/ai/client";
 
-const MAX_WORDS = 180;
+const MAX_WORDS = 140;
 const MAX_FOLLOW_UP_WORDS = 120;
 
 const BANNED_PHRASES = [
@@ -27,29 +31,57 @@ const BANNED_PHRASES = [
   "oplossing voor al uw",
   "wij bieden een compleet pakket",
   "mis deze kans niet",
+  "ik wilde even",
+  "leading",
+  "innovative",
+  "cutting-edge",
+  "state-of-the-art",
+  "passionate",
+  "dynamic",
+  "wereld van morgen",
+  "partner in success",
+  "totale oplossing",
+  "one-stop-shop",
+  "game changing",
+  "next level",
+  "full service",
+  "kwalitatief hoogwaardig",
+  "uitgebreid netwerk",
+  "jarenlange ervaring in het vakgebied",
 ];
 
-const COPYWRITER_SYSTEM_PROMPT = `Je bent de beste B2B copywriter gespecialiseerd in recruitment, en schrijft alsof een ervaren recruiter de mail zelf heeft getypt.
+const GENERIC_OPENERS = [
+  "ik wilde even contact opnemen",
+  "ik neem contact op over",
+  "ik hoop dat alles goed gaat",
+  "hopelijk bereikt deze mail u",
+  "even een korte vraag",
+];
 
-Schrijf GEEN standaard acquisitiemail. Schrijf een persoonlijke introductie in het Nederlands.
+const BD_CONSULTANT_SYSTEM_PROMPT = `Je bent Senior Business Development Consultant bij HireFlow Group.
+Jouw enige KPI: nieuwe recruitmentopdrachten binnenhalen.
 
-Gebruik ALLEEN feiten uit de context (vacatures, bedrijf, branche, groei, hiring signalen). Verzin niets.
+VOORDAT je schrijft, doorloop je intern (niet in de mail tonen):
+1. Waarom zou dit bedrijf een recruitmentbureau inschakelen?
+2. Welke pijn ervaren zij waarschijnlijk?
+3. Waarom zouden ze HireFlow kiezen?
 
-STRUCTUUR (in vloeiende proza, geen bullets):
-1. Open met iets specifieks over dit bedrijf
-2. Toon begrip voor hun situatie (hiringdruk, groei, parallelle vacatures)
-3. Leg kort uit hoe HireFlow Group helpt — praktisch, nuchter, geen verkooppraat
-4. Vraag om een vrijblijvende kennismaking
+Gebruik uitsluitend relevante feiten uit de context. Verzin niets.
 
-REGELS:
-- Maximaal ${MAX_WORDS} woorden in bodyText
-- Geen hype, geen superlatieven, geen druk
+Schrijf de mail alsof je al jaren recruitment doet:
+- Geen marketingtaal, buzzwords of clichés
+- Kort, persoonlijk, menselijk, professioneel
+- Gebruik de bedrijfsnaam, vacatures, hiring signalen, groeifase en branche
+- Elke mail uniek — NOOIT twee dezelfde openingszinnen
+- NOOIT generieke teksten
+- Doel: kennismakingsgesprek van 15 minuten — NIET direct een opdracht verkopen
+- Sluit af met één eenvoudige vraag waarop makkelijk 'ja' kan worden gezegd
 - Geen kandidaten aanbieden zonder toestemming
 - Gebruik exact de opgegeven aanhef
-- Bij algemene mailbox: neutrale HR/recruitment-toon
-- Vermijd: ${BANNED_PHRASES.join(", ")}
+- Maximaal ${MAX_WORDS} woorden in bodyText
 - Ondertekening: "Met vriendelijke groet,\\nHireFlow Group"
-- subjectOptions: 3 korte, menselijke onderwerpregels (geen sales)`;
+- subjectOptions: 3 korte, menselijke onderwerpregels (geen sales)
+- Vermijd: ${BANNED_PHRASES.join(", ")}`;
 
 export type DraftRecipient = {
   recipientName: string | null;
@@ -71,7 +103,6 @@ export type RecruiterFollowUpDraft = {
 
 const FOLLOW_UP_BANNED_PHRASES = [
   ...BANNED_PHRASES,
-  "ik wilde even",
   "even follow-up",
   "laatste kans",
   "mis niet",
@@ -82,7 +113,7 @@ const FOLLOW_UP_BANNED_PHRASES = [
   "hopelijk leest u",
 ];
 
-const FOLLOW_UP_SYSTEM_PROMPT = `Je bent een Senior Sales Consultant bij HireFlow Group.
+const FOLLOW_UP_SYSTEM_PROMPT = `Je bent Senior Business Development Consultant bij HireFlow Group.
 Schrijf een follow-up e-mail in het Nederlands — vriendelijk professioneel, nooit opdringerig.
 
 STRUCTUUR:
@@ -92,8 +123,8 @@ STRUCTUUR:
 
 REGELS:
 - Maximaal ${MAX_FOLLOW_UP_WORDS} woorden in bodyText
-- NOOIT: "ik wilde even", druk uitoefenen, meerdere CTAs, schuldgevoel opwekken
-- Geen hype of superlatieven
+- NOOIT: "ik wilde even", druk uitoefenen, meerdere CTAs
+- Geen hype, marketingtaal of buzzwords
 - Gebruik exact de opgegeven aanhef
 - Ondertekening: "Met vriendelijke groet,\\nHireFlow Group"
 - subject: kort, met referentie naar eerdere mail (bijv. "Re: ...")`;
@@ -112,73 +143,103 @@ function isGrowthSignal(description: string): boolean {
   return /groei|uitbreid|scale-up|funding|investering|nieuw kantoor|headcount/i.test(description);
 }
 
-function buildSpecificOpener(
+function buildVariedOpener(
   company: Company,
   hiring: HiringIntelligenceProfile,
   opportunity: OpportunityAssessment,
 ): string {
+  const seed = company.id ?? company.name;
   const roles = opportunity.rolesSought.slice(0, 2);
-  if (roles.length > 0 && hiring.vacancyCount > 0) {
-    return `Ik zag dat ${company.name} momenteel onder andere zoekt naar ${roles.join(" en ")}.`;
-  }
-
-  if (hiring.vacancyCount >= 2) {
-    return `Ik zag dat ${company.name} meerdere vacatures open heeft staan${company.city ? ` (${company.city})` : ""}.`;
-  }
-
-  if (hiring.vacancyCount === 1 && hiring.vacancyTitles[0]) {
-    return `Ik zag de vacature voor ${hiring.vacancyTitles[0]} bij ${company.name}.`;
-  }
-
+  const role = hiring.vacancyTitles[0] ?? roles[0];
   const growthSignal = hiring.signals.find(
     (s) => isGrowthSignal(s.description ?? "") || isGrowthSignal(s.type),
   );
+  const sector = company.sector;
+  const city = company.city;
+
+  const vacancyOpeners: string[] = [];
+  if (roles.length >= 2) {
+    vacancyOpeners.push(
+      `${company.name} zoekt momenteel onder andere ${roles.join(" en ")} — dat viel me op.`,
+      `Op de careers-pagina van ${company.name} staan ${roles.join(" en ")} open.`,
+      `Tussen de vacatures bij ${company.name} vielen ${roles.join(" en ")} me op.`,
+    );
+  } else if (role) {
+    vacancyOpeners.push(
+      `De vacature ${role} bij ${company.name} trok mijn aandacht.`,
+      `${company.name} heeft ${role} open staan${city ? ` in ${city}` : ""}.`,
+      `Ik keek mee op de hiring-pagina van ${company.name} — ${role} staat open.`,
+    );
+  }
+
+  if (hiring.vacancyCount >= 2 && !roles.length) {
+    vacancyOpeners.push(
+      `${company.name} heeft op dit moment ${hiring.vacancyCount} vacatures open staan.`,
+      `Bij ${company.name} lopen meerdere rollen tegelijk — ${hiring.vacancyCount} vacatures.`,
+    );
+  }
+
+  const signalOpeners: string[] = [];
   if (growthSignal?.description) {
-    return `Ik las recent over ${company.name}: ${growthSignal.description.charAt(0).toLowerCase()}${growthSignal.description.slice(1).replace(/\.$/, "")}.`;
+    const desc = growthSignal.description.replace(/\.$/, "");
+    signalOpeners.push(
+      `Recent zag ik dat ${company.name} ${desc.charAt(0).toLowerCase()}${desc.slice(1)}.`,
+      `In ${company.sector ?? "de markt"} viel ${company.name} me op: ${desc}.`,
+    );
   }
 
   const topSignal = hiring.signals[0]?.description;
-  if (topSignal) {
-    return `Ik kwam ${company.name} tegen naar aanleiding van ${topSignal.charAt(0).toLowerCase()}${topSignal.slice(1).replace(/\.$/, "")}.`;
+  if (topSignal && topSignal !== growthSignal?.description) {
+    signalOpeners.push(
+      `${company.name} kwam op mijn radar door ${topSignal.charAt(0).toLowerCase()}${topSignal.slice(1).replace(/\.$/, "")}.`,
+    );
   }
 
-  if (company.sector) {
-    return `Ik nam ${company.name} door — een organisatie in ${company.sector}${company.city ? ` (${company.city})` : ""}.`;
+  const sectorOpeners: string[] = [];
+  if (sector) {
+    sectorOpeners.push(
+      `${company.name} opereert in ${sector}${city ? ` (${city})` : ""} — een markt waar hiring vaak voelbaar is.`,
+      `In ${sector} zie ik ${company.name}${city ? ` (${city})` : ""} actief werven.`,
+    );
   }
 
-  return `Ik wilde even contact opnemen over de hiring-situatie bij ${company.name}.`;
+  const allOpeners = [...vacancyOpeners, ...signalOpeners, ...sectorOpeners];
+  if (allOpeners.length === 0) {
+    allOpeners.push(
+      `${company.name} lijkt actief bezig met hiring — daarom schrijf ik u.`,
+    );
+  }
+
+  return allOpeners[pickVariantIndex(seed, allOpeners.length)]!;
 }
 
-function buildUnderstandingParagraph(
+function buildPainLine(
   company: Company,
   hiring: HiringIntelligenceProfile,
-  opportunity: OpportunityAssessment,
+  analysis: ReturnType<typeof analyzeBdOutreachContext>,
 ): string {
-  const parts: string[] = [];
-
-  if (company.sector) {
-    parts.push(`In ${company.sector} zie je vaak dat werving meeloopt met groei`);
-  } else {
-    parts.push("Bij groeiende teams merk ik dat werving erbij komt");
-  }
-
   if (hiring.vacancyCount >= 2) {
-    parts.push("zeker wanneer meerdere rollen tegelijk openstaan");
-  } else if (opportunity.urgency === "high") {
-    parts.push("vooral wanneer vacatures langer open blijven staan");
+    return `Met ${hiring.vacancyCount} vacatures tegelijk merk ik dat dit vaak druk geeft op interne recruitment${company.sector ? ` — zeker in ${company.sector}` : ""}.`;
   }
-
-  parts.push("terwijl interne capaciteit niet altijd meeschaalt");
-
-  return `${parts.join(", ").replace(/, ([^,]*)$/, " en $1")}. Dat herken ik.`;
+  if (analysis.growthStage?.includes("scale-up") || analysis.growthStage?.includes("groei")) {
+    return `${analysis.growthStage} betekent meestal dat hiring sneller gaat dan interne capaciteit kan bijbenen.`;
+  }
+  return analysis.likelyPain.replace(/^Waarschijnlijke pijn:\s*/i, "Ik hoor vaker dat ");
 }
 
-function buildHireFlowParagraph(): string {
-  return "Bij HireFlow Group helpen we organisaties met flexibele recruitment-ondersteuning: meedenken over werving, schalen wanneer het druk wordt — zonder vaste FTE of ingewikkelde trajecten.";
+function buildHireFlowLine(analysis: ReturnType<typeof analyzeBdOutreachContext>): string {
+  return analysis.whyHireFlow.replace(/\.$/, "") + ".";
 }
 
-function buildHireFlowFollowUpLine(): string {
-  return "HireFlow Group ondersteunt teams met flexibele recruitment-capaciteit — meedenken en opschalen wanneer interne werving krap wordt.";
+function buildSimpleYesQuestion(company: Company): string {
+  const questions = [
+    "Hebben jullie volgende week 15 minuten voor een kort kennismakingsgesprek?",
+    "Zou een belletje van 15 minuten volgende week passen?",
+    "Staat u open voor 15 minuten kennismaken — zonder verplichtingen?",
+    "Is een kort gesprek van 15 minuten iets voor u?",
+    "Kunnen we volgende week 15 minuten sparren over jullie hiring?",
+  ];
+  return questions[pickVariantIndex(company.id ?? company.name, questions.length)]!;
 }
 
 function buildPreviousMailReference(company: Company, previous: PreviousOutreachDraft): string {
@@ -187,6 +248,10 @@ function buildPreviousMailReference(company: Company, previous: PreviousOutreach
     return `In mijn eerdere mail over ${topic} ging het om de hiring-situatie bij ${company.name}.`;
   }
   return `In mijn eerdere bericht over de hiring-situatie bij ${company.name} wilde ik kort terugkomen.`;
+}
+
+function buildHireFlowFollowUpLine(): string {
+  return "HireFlow Group ondersteunt teams met flexibele recruitment-capaciteit — meedenken en opschalen wanneer interne werving krap wordt.";
 }
 
 function buildFallbackFollowUp(
@@ -220,7 +285,7 @@ function buildFallbackFollowUp(
       "",
       help,
       "",
-      "Staat u open voor een kort gesprek van 15 minuten?",
+      buildSimpleYesQuestion(company),
       "",
       "Met vriendelijke groet,",
       "HireFlow Group",
@@ -251,6 +316,7 @@ function buildFactsPayload(
   opportunity: OpportunityAssessment,
   recipient: DraftRecipient,
   salutation: string,
+  analysis: ReturnType<typeof analyzeBdOutreachContext>,
 ): string {
   const growthSignals = hiring.signals
     .filter((s) => isGrowthSignal(s.description ?? "") || isGrowthSignal(s.type))
@@ -262,6 +328,7 @@ function buildFactsPayload(
     company.sector ? `Branche: ${company.sector}` : null,
     company.city ? `Locatie: ${company.city}` : null,
     company.employeeCount ? `Omvang: ~${company.employeeCount} medewerkers` : null,
+    analysis.growthStage ? `Groeifase: ${analysis.growthStage}` : null,
     hiring.vacancyCount > 0 ? `Vacatures: ${hiring.vacancyCount}` : "Geen vacatures in data",
     hiring.vacancyTitles.length ? `Vacaturetitels: ${hiring.vacancyTitles.join(", ")}` : null,
     opportunity.rolesSought.length ? `Gezochte functies: ${opportunity.rolesSought.join(", ")}` : null,
@@ -270,6 +337,9 @@ function buildFactsPayload(
       ? `Hiring signalen:\n${hiring.signals.slice(0, 5).map((s) => `- ${s.description ?? s.title}`).join("\n")}`
       : null,
     opportunity.why.length ? `Context: ${opportunity.why.slice(0, 3).join("; ")}` : null,
+    `Analyse — waarom bureau: ${analysis.whyAgency}`,
+    `Analyse — pijn: ${analysis.likelyPain}`,
+    `Analyse — waarom HireFlow: ${analysis.whyHireFlow}`,
     recipient.recipientName ? `Contact: ${recipient.recipientName}` : "Algemene mailbox",
     `Aanhef (gebruik exact): ${salutation}`,
   ]
@@ -281,16 +351,21 @@ function buildSubjectOptions(company: Company, hiring: HiringIntelligenceProfile
   const role = hiring.vacancyTitles[0] ?? hiring.signals[0]?.description?.slice(0, 40);
   if (role) {
     return [
-      `Kennismaking — ${company.name}`,
       `${company.name} · hiring`,
+      `Kort bellen — ${company.name}`,
       `Even sparren over werving`,
     ];
   }
   return [
     `Kennismaking — ${company.name}`,
-    `Even bellen over recruitment`,
-    `${company.name} · hiring`,
+    `${company.name} · recruitment`,
+    `15 minuten — ${company.name}`,
   ];
+}
+
+function isGenericOpener(bodyText: string): boolean {
+  const lower = bodyText.toLowerCase();
+  return GENERIC_OPENERS.some((phrase) => lower.includes(phrase));
 }
 
 function buildFallbackDraft(
@@ -299,15 +374,17 @@ function buildFallbackDraft(
   hiring: HiringIntelligenceProfile,
   opportunity: OpportunityAssessment,
 ): OutreachDraftContent {
+  const analysis = analyzeBdOutreachContext(company, hiring, opportunity);
   const greeting = buildOutreachSalutation(
     recipient.recipientName,
     recipient.isGeneralMailbox,
     recipient.email,
   );
 
-  const opener = buildSpecificOpener(company, hiring, opportunity);
-  const understanding = buildUnderstandingParagraph(company, hiring, opportunity);
-  const help = buildHireFlowParagraph();
+  const opener = buildVariedOpener(company, hiring, opportunity);
+  const pain = buildPainLine(company, hiring, analysis);
+  const hireFlow = buildHireFlowLine(analysis);
+  const question = buildSimpleYesQuestion(company);
 
   const bodyText = truncateWords(
     [
@@ -315,11 +392,11 @@ function buildFallbackDraft(
       "",
       opener,
       "",
-      understanding,
+      pain,
       "",
-      help,
+      hireFlow,
       "",
-      "Staat u open voor een vrijblijvende kennismaking? Dan hoor ik graag hoe u het nu aanpakt.",
+      question,
       "",
       "Met vriendelijke groet,",
       "HireFlow Group",
@@ -340,19 +417,15 @@ function buildFallbackDraft(
     recommendedSubject: subjects[0],
     bodyText,
     bodyHtml: null,
-    personalizationSources: [
-      company.name,
-      company.sector,
-      company.city,
-      ...hiring.signals.slice(0, 2).map((s) => s.description ?? s.title),
-      ...opportunity.rolesSought.slice(0, 2),
-    ].filter(Boolean) as string[],
+    personalizationSources: analysis.factsUsed,
     factualClaims: [
-      ...hiring.explanations.slice(0, 2),
-      ...opportunity.why.slice(0, 2),
+      analysis.whyAgency,
+      analysis.likelyPain,
+      ...hiring.explanations.slice(0, 1),
     ],
     warnings,
     confidence: hiring.signals.length > 0 || hiring.vacancyCount > 0 ? 0.78 : 0.45,
+    bdAnalysis: analysis,
   });
 }
 
@@ -371,6 +444,8 @@ export async function generateRecruiterOutreachDraft(
         }
       : recipient;
 
+  const analysis = analyzeBdOutreachContext(company, hiring, opportunity);
+
   if (!isOpenAIConfigured()) {
     return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
   }
@@ -381,28 +456,38 @@ export async function generateRecruiterOutreachDraft(
     normalizedRecipient.email,
   );
 
-  const facts = buildFactsPayload(company, hiring, opportunity, normalizedRecipient, salutation);
+  const facts = buildFactsPayload(
+    company,
+    hiring,
+    opportunity,
+    normalizedRecipient,
+    salutation,
+    analysis,
+  );
 
   try {
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: COPYWRITER_SYSTEM_PROMPT },
+        { role: "system", content: BD_CONSULTANT_SYSTEM_PROMPT },
         {
           role: "user",
           content: `CONTEXT:\n${facts}\n\nJSON: { subjectOptions:[3 strings], recommendedSubject, bodyText, bodyHtml|null, personalizationSources[], factualClaims[], warnings[], confidence:0-1 }`,
         },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.35,
+      temperature: 0.55,
       max_tokens: 900,
     });
 
     const content = response.choices[0]?.message?.content;
     if (!content) return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
 
-    const parsed = outreachDraftContentSchema.safeParse(JSON.parse(content));
+    const parsed = outreachDraftContentSchema.safeParse({
+      ...JSON.parse(content),
+      bdAnalysis: analysis,
+    });
     if (!parsed.success) return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
 
     let bodyText = parsed.data.bodyText;
@@ -412,11 +497,15 @@ export async function generateRecruiterOutreachDraft(
       }
     }
 
+    if (isGenericOpener(bodyText)) {
+      return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
+    }
+
     if (countWords(bodyText) > MAX_WORDS) {
       bodyText = truncateWords(bodyText, MAX_WORDS);
     }
 
-    return { ...parsed.data, bodyText };
+    return { ...parsed.data, bodyText, bdAnalysis: analysis };
   } catch {
     return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
   }
@@ -512,3 +601,5 @@ export async function generateRecruiterFollowUpDraft(
     return buildFallbackFollowUp(company, normalizedRecipient, hiring, previous);
   }
 }
+
+export { analyzeBdOutreachContext, pickVariantIndex } from "@/features/ai-recruiter/services/bd-outreach-analyzer.service";
