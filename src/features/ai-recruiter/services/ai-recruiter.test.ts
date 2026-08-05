@@ -5,6 +5,7 @@ import type { Company } from "@/features/companies/domain";
 import { aiRecruiterSearchPlanSchema } from "@/features/ai-recruiter/domain/types";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeLeadScore } from "@/features/ai-recruiter/services/lead-scoring.service";
+import { computeOpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
 import {
   classifyReply,
   getReplyFollowUpAction,
@@ -54,7 +55,9 @@ function company(overrides: Partial<Company> = {}): Company {
     scoreReason: null,
     scoreBreakdown: null,
     vacancyCount: 3,
-    hiringSignals: [{ type: "vacancy", description: "3 recruiter vacatures", source: "web", confidence: 0.9 }],
+    hiringSignals: [
+      { type: "growth", description: "Scale-up met 3 recruiter vacatures", source: "web", confidence: 0.9 },
+    ],
     careersUrl: "https://techco.nl/werken-bij",
     vacancyPageUrl: null,
     generalEmail: null,
@@ -119,9 +122,11 @@ describe("AI Recruiter hiring intelligence", () => {
 describe("AI Recruiter lead scoring", () => {
   it("assigns transparent score with explanations", () => {
     const hiring = computeHiringIntelligenceProfile(company(), basePlan);
+    const opportunity = computeOpportunityAssessment(company(), basePlan);
     const result = computeLeadScore(
       company(),
       hiring,
+      opportunity,
       {
         hasContact: true,
         contactName: "Jan Jansen",
@@ -133,21 +138,45 @@ describe("AI Recruiter lead scoring", () => {
     );
     expect(result.totalScore).toBeGreaterThan(40);
     expect(result.breakdown.explanations.length).toBeGreaterThan(0);
+    expect(result.breakdown.opportunity).toBeGreaterThan(0);
     expect(["A", "B", "C"]).toContain(result.priority);
   });
 
   it("rejects low score companies", () => {
-    const hiring = computeHiringIntelligenceProfile(
-      company({ vacancyCount: 0, hiringSignals: [], sector: null, city: null }),
-      basePlan,
-    );
+    const lowCompany = company({ vacancyCount: 0, hiringSignals: [], sector: null, city: null });
+    const hiring = computeHiringIntelligenceProfile(lowCompany, basePlan);
+    const opportunity = computeOpportunityAssessment(lowCompany, basePlan);
     const result = computeLeadScore(
-      company({ vacancyCount: 0, hiringSignals: [], sector: null, city: null }),
+      lowCompany,
       hiring,
+      opportunity,
       { hasContact: false, contactName: null, contactEmail: null, verificationStatus: "unknown", confidence: null },
       basePlan,
     );
     expect(result.priority).toBe("Reject");
+  });
+
+  it("rejects when opportunity score below minimum", () => {
+    const hiring = computeHiringIntelligenceProfile(company(), basePlan);
+    const opportunity = computeOpportunityAssessment(
+      company({ vacancyCount: 0, hiringSignals: [] }),
+      basePlan,
+    );
+    const result = computeLeadScore(
+      company({ vacancyCount: 0, hiringSignals: [] }),
+      hiring,
+      opportunity,
+      {
+        hasContact: true,
+        contactName: "Jan",
+        contactEmail: "jan@techco.nl",
+        verificationStatus: "verified",
+        confidence: 0.9,
+      },
+      { ...basePlan, minimum_opportunity_score: 70 },
+    );
+    expect(result.priority).toBe("Reject");
+    expect(result.breakdown.explanations.some((e) => e.includes("Opportunity score onder"))).toBe(true);
   });
 });
 

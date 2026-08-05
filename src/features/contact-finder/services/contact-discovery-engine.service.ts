@@ -89,7 +89,7 @@ export class ContactDiscoveryEngine {
       );
 
       if (Date.now() - startedAt > COMPANY_TIMEOUT_MS) {
-        return this.finalize(allCandidates, company, traces, suppressed, bounced, "contact_lookup_failed", "Timeout tijdens CRM-zoekopdracht");
+        return this.finalize(allCandidates, company, traces, suppressed, bounced, "contact_lookup_failed", "Timeout tijdens CRM-zoekopdracht", existingContacts, context, input.targetRoles);
       }
 
       // B. Company website
@@ -199,7 +199,7 @@ export class ContactDiscoveryEngine {
         );
       }
 
-      return this.finalize(allCandidates, company, traces, suppressed, bounced, null, null, existingContacts, context);
+      return this.finalize(allCandidates, company, traces, suppressed, bounced, null, null, existingContacts, context, input.targetRoles);
     } catch (error) {
       console.error("[ContactFinder] END company (engine) — error", {
         companyId: input.companyId,
@@ -225,6 +225,7 @@ export class ContactDiscoveryEngine {
     forcedMessage: string | null,
     existingContacts: Contact[] = [],
     context?: ContactDiscoveryContext,
+    targetRoles: string[] = [],
   ): Promise<ContactDiscoveryResult> {
     const deduped = dedupeCandidates(rawCandidates);
     const validated: Array<DiscoveredContactCandidate & { relevanceScore: number }> = [];
@@ -250,9 +251,9 @@ export class ContactDiscoveryEngine {
       });
     }
 
-    const ranked = rankDiscoveredContacts(validated, company);
-    const selected = selectBestDiscoveredContact(ranked);
-    const alternatives = toSelectedAlternatives(ranked, selected?.email ?? null);
+    const ranked = rankDiscoveredContacts(validated, company, targetRoles);
+    const selected = selectBestDiscoveredContact(ranked, company);
+    const alternatives = toSelectedAlternatives(ranked, company, selected?.email ?? null);
 
     if (forcedStage) {
       return {

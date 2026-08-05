@@ -1,4 +1,9 @@
 import type { Company } from "@/features/companies/domain";
+import {
+  MAILBOX_FALLBACK_PREFIXES,
+  matchContactRole,
+  pickBestMailboxEmail,
+} from "@/features/contact-finder/domain/contact-role-priority";
 import type { RecipientSelectionResult } from "@/features/outreach-engine/domain/types";
 
 export type OutreachContactRecord = {
@@ -11,16 +16,6 @@ export type OutreachContactRecord = {
   outreachOptOut: boolean;
 };
 
-const ROLE_PRIORITY: Array<{ keywords: string[]; label: string }> = [
-  { keywords: ["hr manager", "hr-manager", "head of hr"], label: "HR Manager" },
-  { keywords: ["recruitment manager", "recruiter", "talent acquisition", "recruitment lead"], label: "Recruitment Manager" },
-  { keywords: ["talent acquisition", "ta manager", "talent manager"], label: "Talent Acquisition" },
-  { keywords: ["hr business partner", "hrbp"], label: "HR Business Partner" },
-  { keywords: ["directeur", "director", "ceo", "founder", "eigenaar", "owner", "managing director"], label: "Directeur/Eigenaar" },
-];
-
-const GENERIC_MAILBOX_PREFIXES = ["hr@", "recruitment@", "vacatures@", "werkenbij@", "jobs@", "careers@", "info@"];
-
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isValidEmail(email: string): boolean {
@@ -28,21 +23,14 @@ export function isValidEmail(email: string): boolean {
 }
 
 function scoreContact(contact: OutreachContactRecord, company: Company): number {
-  const title = (contact.jobTitle ?? "").toLowerCase();
-  let score = 0;
-
-  for (let index = 0; index < ROLE_PRIORITY.length; index += 1) {
-    const role = ROLE_PRIORITY[index]!;
-    if (role.keywords.some((kw) => title.includes(kw))) {
-      score += 100 - index * 10;
-      break;
-    }
-  }
+  const matched = matchContactRole(contact.jobTitle);
+  let score = matched?.score ?? 0;
 
   if (contact.email) score += 20;
   if (contact.confidence !== null && contact.confidence >= 0.7) score += 10;
 
   if (company.employeeCountMax !== null && company.employeeCountMax <= 50) {
+    const title = (contact.jobTitle ?? "").toLowerCase();
     if (title.includes("directeur") || title.includes("owner") || title.includes("eigenaar")) {
       score += 15;
     }
@@ -52,24 +40,19 @@ function scoreContact(contact: OutreachContactRecord, company: Company): number 
 }
 
 function isGenericMailbox(email: string): boolean {
-  const lower = email.toLowerCase();
-  return GENERIC_MAILBOX_PREFIXES.some((prefix) => lower.startsWith(prefix));
+  const local = email.toLowerCase().split("@")[0] ?? "";
+  return MAILBOX_FALLBACK_PREFIXES.some((p) => local.startsWith(p));
 }
 
 function pickGenericCompanyEmail(company: Company): string | null {
-  const candidates = [
-    company.hrEmail,
-    company.generalEmail,
-    company.email,
-  ].filter(Boolean) as string[];
-
-  for (const email of candidates) {
-    if (isValidEmail(email)) return email.trim().toLowerCase();
-  }
+  const published = pickBestMailboxEmail(
+    [company.hrEmail, company.generalEmail, company.email].filter(Boolean) as string[],
+  );
+  if (published && isValidEmail(published)) return published.trim().toLowerCase();
 
   if (company.domain) {
-    for (const prefix of GENERIC_MAILBOX_PREFIXES) {
-      const mailbox = `${prefix.replace("@", "")}@${company.domain}`;
+    for (const prefix of MAILBOX_FALLBACK_PREFIXES) {
+      const mailbox = `${prefix}@${company.domain}`;
       if (isValidEmail(mailbox)) return mailbox;
     }
   }
@@ -120,13 +103,15 @@ export function selectRecipient(context: RecipientSelectionContext): RecipientSe
       continue;
     }
 
+    const role = matchContactRole(contact.jobTitle);
+
     return {
       ok: true,
       recipientEmail: email,
       recipientName: `${contact.firstName} ${contact.lastName}`.trim(),
       contactId: contact.id,
       source: "contact",
-      roleLabel: contact.jobTitle,
+      roleLabel: role?.label ?? contact.jobTitle,
     };
   }
 
@@ -139,9 +124,10 @@ export function selectRecipient(context: RecipientSelectionContext): RecipientSe
       return { ok: false, code: "bounced", reason: "E-mailadres heeft eerder gebounced." };
     }
 
-    const source = genericEmail.startsWith("hr@")
+    const local = genericEmail.split("@")[0] ?? "";
+    const source = local.startsWith("recruitment") || local.startsWith("hr")
       ? "company_hr"
-      : genericEmail.startsWith("info@")
+      : local.startsWith("info")
         ? "company_email"
         : "generic_mailbox";
 
@@ -151,7 +137,7 @@ export function selectRecipient(context: RecipientSelectionContext): RecipientSe
       recipientName: null,
       contactId: null,
       source,
-      roleLabel: source === "company_hr" ? "HR afdeling" : "Algemeen zakelijk",
+      roleLabel: source === "company_hr" ? "HR/recruitment mailbox" : "Algemeen zakelijk",
     };
   }
 

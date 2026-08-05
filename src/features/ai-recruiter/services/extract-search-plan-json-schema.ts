@@ -48,7 +48,13 @@ export const AI_RECRUITER_SEARCH_PLAN_JSON_SCHEMA = {
       type: "integer",
       minimum: 0,
       maximum: 100,
-      description: "Minimum hiring score drempel. Default 40.",
+      description: "Minimum hiring score drempel. Default 70 voor commerciële opdrachtgever-acquisitie.",
+    },
+    minimum_opportunity_score: {
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+      description: "Minimum Opportunity Score (0-100) voor outreach. Default 70 — alleen sterke opdrachtgevers.",
     },
     maximum_companies: {
       type: "integer",
@@ -65,7 +71,7 @@ export const AI_RECRUITER_SEARCH_PLAN_JSON_SCHEMA = {
     contact_roles: {
       type: "array",
       items: { type: "string" },
-      description: "Doel-contactrollen voor outreach.",
+      description: "Doel-contactrollen in prioriteit: HR Manager, Recruiter, TA, HRBP, Teamlead Recruitment, Directeur.",
     },
     outreach_mode: {
       type: "string",
@@ -100,6 +106,7 @@ export const AI_RECRUITER_SEARCH_PLAN_JSON_SCHEMA = {
     "desired_roles",
     "vacancy_required",
     "minimum_hiring_score",
+    "minimum_opportunity_score",
     "maximum_companies",
     "maximum_drafts",
     "contact_roles",

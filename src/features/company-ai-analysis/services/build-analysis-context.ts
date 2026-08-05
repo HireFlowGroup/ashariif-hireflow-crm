@@ -1,6 +1,9 @@
 import type { CompanyAnalysisContext } from "@/features/company-ai-analysis/domain/analysis.types";
+import { assessRecruitmentPotentialFromContext } from "@/features/company-intelligence/services/recruitment-potential.service";
 
 export function buildAnalysisContextPayload(context: CompanyAnalysisContext): string {
+  const intelligence = assessRecruitmentPotentialFromContext(context);
+
   const lines: string[] = [
     "=== BEDRIJF ===",
     `Naam: ${context.companyName}`,
@@ -22,6 +25,11 @@ export function buildAnalysisContextPayload(context: CompanyAnalysisContext): st
     `Laatste signal: ${context.lastSignalAt ?? "onbekend"}`,
     `ATS gedetecteerd: ${context.atsDetected ? "ja" : "nee"}`,
     `ATS providers: ${context.atsProviders.length > 0 ? context.atsProviders.join(", ") : "geen"}`,
+    "",
+    "=== COMPANY INTELLIGENCE (deterministisch) ===",
+    `Recruitment Potential: ${intelligence.recruitmentPotential}`,
+    `Motivatie: ${intelligence.motivation}`,
+    ...intelligence.findings.map((f) => `- ${f.dimension}: ${f.detected ? "ja" : "nee"} — ${f.summary}`),
     "",
     "=== HIRING SIGNALS ===",
   ];

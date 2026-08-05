@@ -1,5 +1,8 @@
 import type { Company } from "@/features/companies/domain";
 import type { EmailVerificationResult } from "@/features/contact-finder/email-verification";
+import type { ContactReliability } from "@/features/contact-finder/services/contact-reliability.service";
+
+export type { ContactReliability };
 
 export type ContactSourceType =
   | "existing_crm"
@@ -64,10 +67,14 @@ export type SelectedDiscoveredContact = {
   email: string;
   recipientName: string | null;
   jobTitle: string | null;
+  linkedinUrl: string | null;
   sourceType: ContactSourceType;
   verificationStatus: EmailVerificationResult["status"];
   relevanceScore: number;
+  confidence: number;
   isGeneralMailbox: boolean;
+  roleLabel: string | null;
+  reliability: ContactReliability;
   selectionReason: string;
 };
 

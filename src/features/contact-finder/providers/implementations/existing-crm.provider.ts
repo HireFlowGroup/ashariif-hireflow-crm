@@ -1,34 +1,17 @@
-import type { Company } from "@/features/companies/domain";
 import type { Contact } from "@/features/contacts/domain";
+import { matchContactRole } from "@/features/contact-finder/domain/contact-role-priority";
 import type { DiscoveredContactCandidate } from "@/features/contact-finder/services/contact-validation.service";
 
-const ROLE_RANK: Array<{ keywords: string[]; score: number }> = [
-  { keywords: ["recruitment manager"], score: 100 },
-  { keywords: ["talent acquisition"], score: 95 },
-  { keywords: ["recruiter"], score: 90 },
-  { keywords: ["hr manager", "head of hr"], score: 85 },
-  { keywords: ["hr business partner", "hrbp"], score: 80 },
-  { keywords: ["people", "culture"], score: 80 },
-  { keywords: ["directeur", "director", "ceo", "owner", "eigenaar"], score: 70 },
-];
-
 export function rankExistingContact(contact: Contact): number {
-  return rankJobTitle(contact.jobTitle);
-}
-
-function rankJobTitle(jobTitle: string | null | undefined): number {
-  const title = (jobTitle ?? "").toLowerCase();
-  for (const role of ROLE_RANK) {
-    if (role.keywords.some((kw) => title.includes(kw))) return role.score;
-  }
-  return 10;
+  return matchContactRole(contact.jobTitle)?.score ?? 10;
 }
 
 export function mapExistingContactToCandidate(contact: Contact): DiscoveredContactCandidate | null {
   if (!contact.email?.trim()) return null;
 
   const email = contact.email.trim().toLowerCase();
-  const isGeneral = /^(hr|recruitment|recruiter|werkenbij|vacatures|careers|jobs|info)@/i.test(email);
+  const isGeneral = /^(recruitment|recruiter|hr|jobs|info)@/i.test(email);
+  const role = matchContactRole(contact.jobTitle);
 
   return {
     firstName: contact.firstName,
@@ -43,7 +26,7 @@ export function mapExistingContactToCandidate(contact: Contact): DiscoveredConta
     sourceType: "existing_crm",
     emailOrigin: "existing",
     isGeneralMailbox: isGeneral,
-    isDecisionMaker: rankExistingContact(contact) >= 85,
+    isDecisionMaker: (role?.score ?? 0) >= 85,
     confidence: contact.confidence ?? 0.9,
     externalId: contact.id as string,
     existingContactId: contact.id as string,
@@ -63,11 +46,14 @@ export function mapExistingContactToCandidate(contact: Contact): DiscoveredConta
 
 export function searchExistingCrmContacts(
   contacts: Contact[],
-  company: Company,
+  _company?: unknown,
 ): DiscoveredContactCandidate[] {
   return contacts
     .filter((c) => c.email && !c.email.includes(" "))
     .map(mapExistingContactToCandidate)
     .filter((c): c is DiscoveredContactCandidate => c !== null)
-    .sort((a, b) => rankJobTitle(b.jobTitle) - rankJobTitle(a.jobTitle));
+    .sort(
+      (a, b) =>
+        (matchContactRole(b.jobTitle)?.score ?? 0) - (matchContactRole(a.jobTitle)?.score ?? 0),
+    );
 }

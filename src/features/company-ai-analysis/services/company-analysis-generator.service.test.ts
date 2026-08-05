@@ -89,6 +89,8 @@ describe("buildFallbackAnalysis", () => {
     expect(sections.competitors).toContain("Beta BV");
     expect(sections.likelyDecisionMaker).toContain("Jane Doe");
     expect(sections.topHiringSignal).toContain("Senior Developer");
+    expect(["LOW", "MEDIUM", "HIGH"]).toContain(sections.recruitmentPotential);
+    expect(sections.recruitmentPotentialMotivation.length).toBeGreaterThan(10);
   });
 
   it("returns unavailable message when data is missing", () => {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RefreshCw, UserPlus, Ban, XCircle } from "lucide-react";
+import { Loader2, RefreshCw, UserPlus, Ban, XCircle, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
 import { aiRecruiterFetchJson } from "@/lib/ai-recruiter/client-api";
+import { cn } from "@/lib/utils";
 
 type Props = {
   runId: string;
@@ -14,6 +15,17 @@ type Props = {
   onUpdated: (item: AiRecruiterRunItem) => void;
   onError: (message: string) => void;
 };
+
+function reliabilityBadgeClass(level: string | null | undefined): string {
+  switch (level) {
+    case "high":
+      return "border-emerald-500/40 text-emerald-700 bg-emerald-500/5";
+    case "medium":
+      return "border-amber-500/40 text-amber-800 bg-amber-500/5";
+    default:
+      return "border-muted-foreground/30 text-muted-foreground";
+  }
+}
 
 export function ProspectContactReview({ runId, item, onUpdated, onError }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
@@ -41,10 +53,43 @@ export function ProspectContactReview({ runId, item, onUpdated, onError }: Props
 
   return (
     <div className="space-y-4 text-sm">
-      <div className="rounded-md border bg-muted/20 p-3 space-y-1">
-        <p><span className="text-muted-foreground">Contact:</span> {item.contactName ?? "—"}</p>
-        <p><span className="text-muted-foreground">Functie:</span> {item.contactJobTitle ?? "—"}</p>
+      <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact Intelligence</p>
+        <p><span className="text-muted-foreground">Naam:</span> {item.contactName ?? "—"}</p>
+        <p><span className="text-muted-foreground">Functie:</span> {item.contactJobTitle ?? item.contactRoleLabel ?? "—"}</p>
         <p><span className="text-muted-foreground">E-mail:</span> {item.recipientEmail ?? "—"}</p>
+        {item.contactLinkedinUrl ? (
+          <p className="flex items-center gap-1">
+            <span className="text-muted-foreground">LinkedIn:</span>
+            <a
+              href={item.contactLinkedinUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              Profiel <ExternalLink className="size-3" />
+            </a>
+          </p>
+        ) : (
+          <p><span className="text-muted-foreground">LinkedIn:</span> —</p>
+        )}
+
+        <div className="rounded border px-2 py-1.5 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Betrouwbaarheid:</span>
+            <Badge
+              variant="outline"
+              className={cn("text-[10px]", reliabilityBadgeClass(item.contactReliabilityLevel))}
+            >
+              {item.contactReliabilityLevel ?? "onbekend"}
+              {item.contactReliabilityScore != null ? ` · ${item.contactReliabilityScore}/100` : ""}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {item.contactReliabilitySummary ?? "Geen betrouwbaarheidsrapport — contact opnieuw zoeken of handmatig toevoegen."}
+          </p>
+        </div>
+
         <div className="flex flex-wrap gap-2 pt-1">
           {item.contactVerificationStatus ? (
             <Badge variant="outline">{item.contactVerificationStatus}</Badge>
@@ -53,7 +98,10 @@ export function ProspectContactReview({ runId, item, onUpdated, onError }: Props
             <Badge variant="outline">{item.contactSourceType}</Badge>
           ) : null}
           {item.contactRelevanceScore != null ? (
-            <Badge variant="outline">score {item.contactRelevanceScore}</Badge>
+            <Badge variant="outline">match {item.contactRelevanceScore}</Badge>
+          ) : null}
+          {item.contactRoleLabel ? (
+            <Badge variant="outline">{item.contactRoleLabel}</Badge>
           ) : null}
         </div>
         {item.contactSelectionReason ? (
@@ -75,8 +123,11 @@ export function ProspectContactReview({ runId, item, onUpdated, onError }: Props
               <div>
                 <p className="font-medium">{alt.recipientName ?? alt.email}</p>
                 <p className="text-xs text-muted-foreground">
-                  {alt.jobTitle ?? "—"} · {alt.sourceType} · {alt.relevanceScore}
+                  {alt.roleLabel ?? alt.jobTitle ?? "—"} · {alt.sourceType} · {alt.relevanceScore}
                 </p>
+                {alt.reliabilitySummary ? (
+                  <p className="text-[10px] text-muted-foreground">{alt.reliabilitySummary}</p>
+                ) : null}
               </div>
               <Button
                 type="button"
@@ -131,7 +182,7 @@ export function ProspectContactReview({ runId, item, onUpdated, onError }: Props
       {!hasContact ? (
         <div className="space-y-2 rounded-md border border-dashed p-3">
           <p className="text-xs text-muted-foreground">
-            Geen bruikbaar recruitment- of HR-contact gevonden. Controleer de website of voeg handmatig een ontvanger toe.
+            Geen beslisser gevonden. Contact Intelligence zoekt eerst HR Manager / Recruiter / TA, daarna fallback recruitment@ → hr@ → jobs@ → info@.
           </p>
           <input
             className="w-full rounded-md border bg-background px-2 py-1 text-xs"

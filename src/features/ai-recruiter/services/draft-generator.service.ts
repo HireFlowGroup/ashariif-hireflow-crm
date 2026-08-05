@@ -3,6 +3,7 @@ import "server-only";
 import type { Company } from "@/features/companies/domain";
 import type { OutreachDraftContent } from "@/features/ai-recruiter/domain/types";
 import { outreachDraftContentSchema } from "@/features/ai-recruiter/domain/types";
+import type { OpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { buildOutreachSalutation } from "@/features/contact-finder/services/contact-validation.service";
 import { isOpenAIConfigured } from "@/platform/config/env";
@@ -37,6 +38,7 @@ function buildFallbackDraft(
   company: Company,
   recipient: DraftRecipient,
   hiring: HiringIntelligenceProfile,
+  opportunity: OpportunityAssessment,
 ): OutreachDraftContent {
   const greeting = buildOutreachSalutation(
     recipient.recipientName,
@@ -52,13 +54,19 @@ function buildFallbackDraft(
       ? ` Met betrekking tot uw openstaande vacature(s) bij ${company.name}`
       : "";
 
+  const rolesLine =
+    opportunity.rolesSought.length > 0
+      ? ` Ik zie dat u onder andere zoekt naar: ${opportunity.rolesSought.slice(0, 2).join(", ")}.`
+      : "";
+  const approachLine = opportunity.bestApproach ? ` ${opportunity.bestApproach}` : "";
+
   const bodyText = truncateWords(
     [
       greeting,
       "",
-      `Ik neem contact op namens HireFlow Group.${vacancyLine} Wij ondersteunen organisaties${sector}${city} bij het invullen van vacatures en het vinden van geschikte kandidaten.${signalLine}`,
+      `Ik neem contact op namens HireFlow Group.${vacancyLine}${rolesLine} Wij helpen groeiende organisaties${sector}${city} met externe recruitment-ondersteuning — flexibel, zonder vaste FTE.${signalLine}`,
       "",
-      "Mag ik u kandidaten voorstellen voor uw huidige of aankomende vacatures? Graag hoor ik of u openstaat voor een korte kennismaking.",
+      `Zou het passen om kort te bespreken of wij u kunnen ondersteunen bij het invullen van openstaande rollen?${approachLine}`,
       "",
       "Met vriendelijke groet,",
       "HireFlow Group",
@@ -71,9 +79,9 @@ function buildFallbackDraft(
   if (recipient.isGeneralMailbox) warnings.push("algemene mailbox — neutrale aanhef");
 
   const subjects = [
-    `Kandidaten voorstellen — ${company.name}`,
-    `${company.name}: ondersteuning bij werving`,
-    `Recruitment — ${company.name}`,
+    `Recruitment-ondersteuning — ${company.name}`,
+    `${company.name}: schaalbare hiring-ondersteuning`,
+    `Externe recruitment — ${company.name}`,
   ];
 
   return outreachDraftContentSchema.parse({
@@ -97,6 +105,7 @@ export async function generateRecruiterOutreachDraft(
   company: Company,
   recipient: DraftRecipient | string | null,
   hiring: HiringIntelligenceProfile,
+  opportunity: OpportunityAssessment,
 ): Promise<OutreachDraftContent> {
   const normalizedRecipient: DraftRecipient =
     typeof recipient === "string" || recipient === null
@@ -108,7 +117,7 @@ export async function generateRecruiterOutreachDraft(
       : recipient;
 
   if (!isOpenAIConfigured()) {
-    return buildFallbackDraft(company, normalizedRecipient, hiring);
+    return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
   }
 
   const salutation = buildOutreachSalutation(
@@ -125,7 +134,10 @@ export async function generateRecruiterOutreachDraft(
     hiring.signals[0] ? `Signaal: ${hiring.signals[0].description}` : null,
     normalizedRecipient.recipientName ? `Contact: ${normalizedRecipient.recipientName}` : null,
     `Aanhef: ${salutation}`,
-    normalizedRecipient.isGeneralMailbox ? "Algemene HR/recruitment mailbox" : null,
+    opportunity.rolesSought.length ? `Gezochte functies: ${opportunity.rolesSought.join(", ")}` : null,
+    `Opportunity score: ${opportunity.opportunityScore}`,
+    `Invalshoek: ${opportunity.bestApproach}`,
+    `Urgentie: ${opportunity.urgency}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -137,8 +149,8 @@ export async function generateRecruiterOutreachDraft(
       messages: [
         {
           role: "system",
-          content: `Schrijf een Nederlandse B2B introductiemail namens HireFlow Group (recruitment/W&S).
-Doel: toestemming vragen om kandidaten te mogen zoeken/voorstellen voor concrete vacatures.
+          content: `Schrijf een Nederlandse B2B commerciële acquisition-mail namens HireFlow Group.
+Doel: NIEUWE OPDRACHTGEVER — vraag of het bedrijf openstaat voor externe recruitment-ondersteuning (W&S-opdracht), NIET kandidaten aanbieden zonder toestemming.
 Max ${MAX_WORDS} woorden. Professioneel, menselijk, kort. Geen clichés. Geen verzonnen feiten.
 Gebruik exact de opgegeven aanhef. Bij algemene mailbox: neutrale HR/recruitment-toon.
 Vermijd: ${BANNED_PHRASES.join(", ")}.
@@ -155,15 +167,15 @@ Eén call-to-action. Bij weinig feiten: korte algemene mail + waarschuwing.`,
     });
 
     const content = response.choices[0]?.message?.content;
-    if (!content) return buildFallbackDraft(company, normalizedRecipient, hiring);
+    if (!content) return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
 
     const parsed = outreachDraftContentSchema.safeParse(JSON.parse(content));
-    if (!parsed.success) return buildFallbackDraft(company, normalizedRecipient, hiring);
+    if (!parsed.success) return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
 
     let bodyText = parsed.data.bodyText;
     for (const phrase of BANNED_PHRASES) {
       if (bodyText.toLowerCase().includes(phrase)) {
-        return buildFallbackDraft(company, normalizedRecipient, hiring);
+        return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
       }
     }
 
@@ -173,6 +185,6 @@ Eén call-to-action. Bij weinig feiten: korte algemene mail + waarschuwing.`,
 
     return { ...parsed.data, bodyText };
   } catch {
-    return buildFallbackDraft(company, normalizedRecipient, hiring);
+    return buildFallbackDraft(company, normalizedRecipient, hiring, opportunity);
   }
 }

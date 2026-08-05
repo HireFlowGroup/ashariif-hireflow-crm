@@ -22,6 +22,11 @@ import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeLeadScore, type ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
+import {
+  computeOpportunityAssessment,
+  isOutreachEligible,
+  type OpportunityAssessment,
+} from "@/features/ai-recruiter/services/opportunity-scorer.service";
 import { RecruiterPipelineTracker } from "@/features/ai-recruiter/services/recruiter-pipeline-tracker";
 import {
   parseAiRecruiterSearchPlan,
@@ -170,6 +175,7 @@ export class AiRecruiterOrchestrator {
         itemId: string;
         companyId: string;
         totalScore: number;
+        opportunity: OpportunityAssessment;
         selected: SelectedDiscoveredContact;
       }> = [];
 
@@ -179,8 +185,9 @@ export class AiRecruiterOrchestrator {
         name: string;
         company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
         hiring: HiringIntelligenceProfile;
-        hiringQualified: boolean;
-        hiringRejectionReason: string | null;
+        opportunity: OpportunityAssessment;
+        outreachEligible: boolean;
+        outreachRejectionReason: string | null;
       };
 
       const companyContactContexts: CompanyContactContext[] = [];
@@ -191,20 +198,33 @@ export class AiRecruiterOrchestrator {
         try {
           const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
           const hiring = computeHiringIntelligenceProfile(company, plan);
+          const opportunity = computeOpportunityAssessment(company, plan);
 
           if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
-          let hiringQualified = true;
-          let hiringRejectionReason: string | null = null;
+          let outreachEligible = isOutreachEligible(opportunity.opportunityScore, plan);
+          let outreachRejectionReason: string | null = null;
 
-          if (plan.vacancy_required && hiring.vacancyCount === 0) {
-            hiringQualified = false;
-            hiringRejectionReason = "Vacature vereist maar niet gevonden";
+          if (!outreachEligible) {
+            outreachRejectionReason = `Opportunity score ${opportunity.opportunityScore} onder drempel ${plan.minimum_opportunity_score} — geen outreach`;
+          } else if (plan.vacancy_required && hiring.vacancyCount === 0) {
+            outreachEligible = false;
+            outreachRejectionReason = "Vacature vereist maar niet gevonden";
           } else if (hiring.hiringScore < plan.minimum_hiring_score) {
-            hiringQualified = false;
-            hiringRejectionReason = `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`;
+            outreachEligible = false;
+            outreachRejectionReason = `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`;
           }
+
+          console.info("[Opportunity] assessment", {
+            companyId,
+            companyName: name,
+            opportunityScore: opportunity.opportunityScore,
+            urgency: opportunity.urgency,
+            rolesSought: opportunity.rolesSought,
+            outreachEligible,
+            why: opportunity.why.slice(0, 3),
+          });
 
           companyContactContexts.push({
             companyId,
@@ -212,8 +232,9 @@ export class AiRecruiterOrchestrator {
             name,
             company,
             hiring,
-            hiringQualified,
-            hiringRejectionReason,
+            opportunity,
+            outreachEligible,
+            outreachRejectionReason,
           });
         } catch (error) {
           consecutiveFailures += 1;
@@ -277,8 +298,8 @@ export class AiRecruiterOrchestrator {
         itemId: string;
         companyId: string;
         hiring: HiringIntelligenceProfile;
-        hiringQualified: boolean;
-        hiringRejectionReason: string | null;
+        outreachEligible: boolean;
+        outreachRejectionReason: string | null;
         result: Awaited<ReturnType<ContactDiscoveryEngine["discoverForCompany"]>>;
       };
 
@@ -353,8 +374,8 @@ export class AiRecruiterOrchestrator {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
-            hiringQualified: entry.hiringQualified,
-            hiringRejectionReason: entry.hiringRejectionReason,
+            outreachEligible: entry.outreachEligible,
+            outreachRejectionReason: entry.outreachRejectionReason,
             result,
           });
         } catch (error) {
@@ -372,8 +393,8 @@ export class AiRecruiterOrchestrator {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
-            hiringQualified: entry.hiringQualified,
-            hiringRejectionReason: entry.hiringRejectionReason,
+            outreachEligible: entry.outreachEligible,
+            outreachRejectionReason: entry.outreachRejectionReason,
             result: {
               stage: "contact_lookup_failed",
               selected: null,
@@ -409,7 +430,8 @@ export class AiRecruiterOrchestrator {
           continue;
         }
 
-        const { result, hiring, hiringQualified, hiringRejectionReason } = discovery;
+        const { result, hiring, outreachEligible, outreachRejectionReason } = discovery;
+        const { opportunity, company } = entry;
         const contactDiscoveryPayload = {
           contactDiscovery: {
             stage: result.stage,
@@ -428,7 +450,23 @@ export class AiRecruiterOrchestrator {
             stage: result.stage,
             status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
             hiringScore: hiring.hiringScore,
-            rejectionReason: result.errorMessage,
+            totalScore: opportunity.opportunityScore,
+            scoreBreakdown: {
+              companyFit: 0,
+              hiring: hiring.hiringScore,
+              opportunity: opportunity.opportunityScore,
+              contact: 0,
+              personalization: 0,
+              outreachReadiness: 0,
+              explanations: opportunity.why,
+              opportunityWhy: opportunity.why,
+              rolesSought: opportunity.rolesSought,
+              urgency: opportunity.urgency,
+              bestApproach: opportunity.bestApproach,
+              recruitmentPotential: opportunity.recruitmentPotential,
+              recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+            },
+            rejectionReason: result.errorMessage ?? outreachRejectionReason,
             warnings: hiring.warnings,
             externalCompanyData: contactDiscoveryPayload,
           });
@@ -447,12 +485,29 @@ export class AiRecruiterOrchestrator {
           counters.generalMailboxFound += 1;
         }
 
-        if (!hiringQualified) {
+        if (!outreachEligible) {
           const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
             stage: result.stage,
             status: "skipped",
             hiringScore: hiring.hiringScore,
-            rejectionReason: hiringRejectionReason,
+            contactScore: 50,
+            totalScore: opportunity.opportunityScore,
+            scoreBreakdown: {
+              companyFit: 0,
+              hiring: hiring.hiringScore,
+              opportunity: opportunity.opportunityScore,
+              contact: 50,
+              personalization: 0,
+              outreachReadiness: 0,
+              explanations: opportunity.why,
+              opportunityWhy: opportunity.why,
+              rolesSought: opportunity.rolesSought,
+              urgency: opportunity.urgency,
+              bestApproach: opportunity.bestApproach,
+              recruitmentPotential: opportunity.recruitmentPotential,
+              recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+            },
+            rejectionReason: outreachRejectionReason,
             warnings: hiring.warnings,
             selectedContactId: result.selected.contactId,
             externalCompanyData: contactDiscoveryPayload,
@@ -470,7 +525,7 @@ export class AiRecruiterOrchestrator {
           confidence: result.selected.relevanceScore / 100,
         };
 
-        const leadScore = computeLeadScore(entry.company, hiring, contactInput, plan);
+        const leadScore = computeLeadScore(company, hiring, opportunity, contactInput, plan);
 
         const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
           stage: result.stage,
@@ -497,6 +552,7 @@ export class AiRecruiterOrchestrator {
           itemId: entry.itemId,
           companyId: entry.companyId,
           totalScore: leadScore.totalScore,
+          opportunity,
           selected: result.selected,
         });
       }
@@ -533,7 +589,7 @@ export class AiRecruiterOrchestrator {
       qualifiedItems.sort((a, b) => b.totalScore - a.totalScore);
       const topItems = qualifiedItems.slice(0, plan.maximum_drafts);
 
-      for (const { itemId, companyId, selected } of topItems) {
+      for (const { itemId, companyId, opportunity, selected } of topItems) {
         if (draftsCreated >= plan.maximum_drafts) break;
 
         try {
@@ -550,6 +606,7 @@ export class AiRecruiterOrchestrator {
               isGeneralMailbox: selected.isGeneralMailbox,
             },
             hiring,
+            opportunity,
           );
 
           let outreachMessageId: string | null = null;

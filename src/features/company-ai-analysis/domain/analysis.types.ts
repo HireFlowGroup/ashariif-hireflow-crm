@@ -1,6 +1,8 @@
 export type CompanyAnalysisSections = {
   summary: string;
   recruitmentSituation: string;
+  recruitmentPotential: string;
+  recruitmentPotentialMotivation: string;
   growth: string;
   challenges: string;
   outreachAdvice: string;
@@ -16,6 +18,8 @@ export type CompanyAnalysisSectionKey = keyof CompanyAnalysisSections;
 export const COMPANY_ANALYSIS_SECTION_LABELS: Record<CompanyAnalysisSectionKey, string> = {
   summary: "Samenvatting",
   recruitmentSituation: "Recruitment situatie",
+  recruitmentPotential: "Recruitment Potential",
+  recruitmentPotentialMotivation: "Motivatie",
   growth: "Groei",
   challenges: "Mogelijke uitdagingen",
   outreachAdvice: "Outreach advies",

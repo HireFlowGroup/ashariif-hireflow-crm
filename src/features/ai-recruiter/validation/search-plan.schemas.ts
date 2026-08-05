@@ -64,6 +64,7 @@ export const aiRecruiterSearchPlanRawSchema = z.object({
   desired_roles: z.array(z.string()).optional(),
   vacancy_required: z.union([z.boolean(), z.string()]).optional(),
   minimum_hiring_score: z.union([z.number(), z.string()]).optional(),
+  minimum_opportunity_score: z.union([z.number(), z.string()]).optional(),
   maximum_companies: z.union([z.number(), z.string(), z.null()]).optional(),
   maximum_drafts: z.union([z.number(), z.string(), z.null()]).optional(),
   contact_roles: z.array(z.string()).optional(),
@@ -90,7 +91,8 @@ export function sanitizeAiRecruiterSearchPlan(raw: AiRecruiterSearchPlanRaw): Ai
     },
     desired_roles: coerceStringArray(raw.desired_roles),
     vacancy_required: coerceBoolean(raw.vacancy_required),
-    minimum_hiring_score: Math.min(100, Math.max(0, coerceInt(raw.minimum_hiring_score, 40))),
+    minimum_hiring_score: Math.min(100, Math.max(0, coerceInt(raw.minimum_hiring_score, 70))),
+    minimum_opportunity_score: Math.min(100, Math.max(0, coerceInt(raw.minimum_opportunity_score, 70))),
     maximum_companies: Math.min(100, Math.max(1, coerceInt(raw.maximum_companies, 25))),
     maximum_drafts: Math.min(50, Math.max(0, coerceInt(raw.maximum_drafts, 10))),
     contact_roles:

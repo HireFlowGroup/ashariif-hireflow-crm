@@ -12,10 +12,8 @@ export const DEFAULT_TARGET_ROLES = [
   "Recruiter",
   "Talent Acquisition",
   "HR Business Partner",
-  "Office Manager",
+  "Teamlead Recruitment",
   "Directeur",
-  "Eigenaar",
-  "Managing Director",
 ] as const;
 
 export type ContactFinderCriteria = {

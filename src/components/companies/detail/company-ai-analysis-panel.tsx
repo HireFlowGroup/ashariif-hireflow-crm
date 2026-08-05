@@ -35,6 +35,8 @@ type CompanyAiAnalysisPanelProps = {
 const SECTION_ICONS: Record<CompanyAnalysisSectionKey, typeof Sparkles> = {
   summary: Sparkles,
   recruitmentSituation: Briefcase,
+  recruitmentPotential: Target,
+  recruitmentPotentialMotivation: Megaphone,
   growth: TrendingUp,
   challenges: AlertTriangle,
   outreachAdvice: Megaphone,
@@ -47,6 +49,8 @@ const SECTION_ICONS: Record<CompanyAnalysisSectionKey, typeof Sparkles> = {
 
 const SECTION_ORDER: CompanyAnalysisSectionKey[] = [
   "summary",
+  "recruitmentPotential",
+  "recruitmentPotentialMotivation",
   "recruitmentSituation",
   "growth",
   "challenges",
@@ -75,7 +79,9 @@ function formatRelative(iso: string): string {
 export function CompanyAiAnalysisPanel({ companyId, className }: CompanyAiAnalysisPanelProps) {
   const [expanded, setExpanded] = useState<Record<CompanyAnalysisSectionKey, boolean>>({
     summary: true,
-    recruitmentSituation: true,
+    recruitmentSituation: false,
+    recruitmentPotential: true,
+    recruitmentPotentialMotivation: true,
     growth: false,
     challenges: false,
     outreachAdvice: true,
@@ -203,6 +209,20 @@ export function CompanyAiAnalysisPanel({ companyId, className }: CompanyAiAnalys
                   </button>
                   {isOpen ? (
                     <div className="border-t px-4 py-3">
+                      {key === "recruitmentPotential" ? (
+                        <Badge
+                          variant={
+                            content === "HIGH"
+                              ? "default"
+                              : content === "MEDIUM"
+                                ? "secondary"
+                                : "outline"
+                          }
+                          className="mb-2"
+                        >
+                          {content}
+                        </Badge>
+                      ) : null}
                       <p className="text-sm leading-relaxed text-muted-foreground">{content}</p>
                     </div>
                   ) : null}

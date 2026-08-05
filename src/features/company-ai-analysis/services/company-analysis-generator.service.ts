@@ -7,6 +7,9 @@ import type {
   CompanyAnalysisSections,
 } from "@/features/company-ai-analysis/domain/analysis.types";
 import { buildAnalysisContextPayload } from "@/features/company-ai-analysis/services/build-analysis-context";
+import {
+  assessRecruitmentPotentialFromContext,
+} from "@/features/company-intelligence/services/recruitment-potential.service";
 import { pipelineDebug, pipelineWarn } from "@/features/lead-intelligence/debug/pipeline-debug";
 import { getOpenAIClient } from "@/lib/ai/client";
 import { isOpenAIConfiguredForActiveOrg } from "@/lib/ai/client";
@@ -41,7 +44,7 @@ export async function generateCompanyAnalysis(
       messages: [
         {
           role: "system",
-          content: `Je bent HireFlow AI Company Analyst. Schrijf een recruitment intelligence analyse UITSLUITEND op basis van de meegeleverde HireFlow-data.
+          content: `Je bent HireFlow Company Intelligence AI. Analyseer elk bedrijf alsof je accountmanager bent.
 
 STRICTE REGELS — GEEN HALLUCINATIES:
 - Gebruik ALLEEN feiten uit de context. Verzin NOOIT namen, bedrijven, vacatures, contacten, ATS of concurrenten.
@@ -50,12 +53,16 @@ STRICTE REGELS — GEEN HALLUCINATIES:
 - Bij besluitvormer: gebruik contacten of outreach intelligence uit de data.
 - Bij ATS: gebruik ATS providers uit de data of hiring signals.
 - Bij geschikte functies: gebruik vacaturetitels en hiring signals.
-- Schrijf in het Nederlands, concreet en professioneel (2-4 zinnen per veld).
+- recruitmentPotential: exact LOW, MEDIUM of HIGH op basis van vacatures, groei, nieuws, LinkedIn hiring, investeringen, uitbreiding, vestigingen, reorganisaties, employer branding, ATS en recruitmentpartners.
+- recruitmentPotentialMotivation: maximaal 120 woorden, Nederlands, commerciële accountmanager-toon.
+- Schrijf in het Nederlands, concreet en professioneel (2-4 zinnen per veld, behalve motivatie).
 
 Antwoord ALLEEN als JSON met exact deze keys:
 {
   "summary": "...",
   "recruitmentSituation": "...",
+  "recruitmentPotential": "LOW|MEDIUM|HIGH",
+  "recruitmentPotentialMotivation": "...",
   "growth": "...",
   "challenges": "...",
   "outreachAdvice": "...",
@@ -110,6 +117,8 @@ export function buildFallbackAnalysis(context: CompanyAnalysisContext): CompanyA
     /hr|recruit|talent|people|human resources/i.test(contact.jobTitle ?? ""),
   );
 
+  const potential = assessRecruitmentPotentialFromContext(context);
+
   const decisionMaker =
     context.outreachRecommendedContact ??
     (hrContacts[0]
@@ -140,6 +149,8 @@ export function buildFallbackAnalysis(context: CompanyAnalysisContext): CompanyA
       context.vacancies.length > 0
         ? `${context.vacancies.length} vacature(s) actief in HireFlow. Hiring intensity: ${context.hiringIntensity}.`
         : `Geen vacatures in HireFlow. Hiring intensity: ${context.hiringIntensity}.`,
+    recruitmentPotential: potential.recruitmentPotential,
+    recruitmentPotentialMotivation: potential.motivation,
     growth:
       growthSignals.length > 0
         ? growthSignals

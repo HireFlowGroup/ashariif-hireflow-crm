@@ -68,14 +68,16 @@ export const aiRecruiterSearchPlanSchema = z.object({
     .default({ min: null, max: null }),
   desired_roles: z.array(z.string()).default([]),
   vacancy_required: z.boolean().default(false),
-  minimum_hiring_score: z.number().min(0).max(100).default(40),
+  minimum_hiring_score: z.number().min(0).max(100).default(70),
+  minimum_opportunity_score: z.number().min(0).max(100).default(70),
   maximum_companies: z.number().int().min(1).max(100).default(25),
   maximum_drafts: z.number().int().min(0).max(50).default(10),
   contact_roles: z.array(z.string()).default([
-    "Recruitment Manager",
-    "Talent Acquisition",
     "HR Manager",
+    "Recruiter",
+    "Talent Acquisition",
     "HR Business Partner",
+    "Teamlead Recruitment",
     "Directeur",
   ]),
   outreach_mode: outreachModeSchema.default("draft_only"),
@@ -102,10 +104,17 @@ export type AiRecruiterRunSettings = z.infer<typeof aiRecruiterRunSettingsSchema
 export const scoreBreakdownSchema = z.object({
   companyFit: z.number().default(0),
   hiring: z.number().default(0),
+  opportunity: z.number().default(0),
   contact: z.number().default(0),
   personalization: z.number().default(0),
   outreachReadiness: z.number().default(0),
   explanations: z.array(z.string()).default([]),
+  opportunityWhy: z.array(z.string()).default([]),
+  rolesSought: z.array(z.string()).default([]),
+  urgency: z.enum(["high", "medium", "low"]).optional(),
+  bestApproach: z.string().optional(),
+  recruitmentPotential: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+  recruitmentPotentialMotivation: z.string().optional(),
 });
 
 export type AiRecruiterScoreBreakdown = z.infer<typeof scoreBreakdownSchema>;
@@ -215,6 +224,11 @@ export type AiRecruiterRunItem = {
   contactSourceType?: string | null;
   contactRelevanceScore?: number | null;
   contactSelectionReason?: string | null;
+  contactLinkedinUrl?: string | null;
+  contactReliabilityLevel?: "high" | "medium" | "low" | null;
+  contactReliabilityScore?: number | null;
+  contactReliabilitySummary?: string | null;
+  contactRoleLabel?: string | null;
   contactAlternatives?: Array<{
     email: string;
     recipientName: string | null;
@@ -223,6 +237,10 @@ export type AiRecruiterRunItem = {
     sourceType: string;
     verificationStatus: string;
     isGeneralMailbox: boolean;
+    linkedinUrl?: string | null;
+    reliabilityLevel?: "high" | "medium" | "low";
+    reliabilitySummary?: string;
+    roleLabel?: string | null;
   }>;
   contactDiscoveryError?: string | null;
 };

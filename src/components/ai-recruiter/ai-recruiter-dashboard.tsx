@@ -422,7 +422,7 @@ export function AiRecruiterDashboard() {
                       >
                         <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
                         <p className="text-xs text-muted-foreground">
-                          Score {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
+                          Opp. {item.scoreBreakdown?.opportunity ?? "—"} · Totaal {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
                         </p>
                       </button>
                     ))
@@ -437,7 +437,41 @@ export function AiRecruiterDashboard() {
                         <p><span className="text-muted-foreground">Bedrijf:</span> {selectedItem.companyName}</p>
                         <p><span className="text-muted-foreground">Locatie:</span> {selectedItem.companyCity ?? "—"}</p>
                         <p><span className="text-muted-foreground">Sector:</span> {selectedItem.companySector ?? "—"}</p>
-                        <p><span className="text-muted-foreground">Score:</span> {selectedItem.totalScore ?? "—"}</p>
+                        <p><span className="text-muted-foreground">Opportunity score:</span> {selectedItem.scoreBreakdown?.opportunity ?? "—"}</p>
+                        {selectedItem.scoreBreakdown?.recruitmentPotential ? (
+                          <p>
+                            <span className="text-muted-foreground">Recruitment Potential:</span>{" "}
+                            <span className={
+                              selectedItem.scoreBreakdown.recruitmentPotential === "HIGH"
+                                ? "font-medium text-emerald-700"
+                                : selectedItem.scoreBreakdown.recruitmentPotential === "MEDIUM"
+                                  ? "font-medium text-amber-700"
+                                  : "text-muted-foreground"
+                            }>
+                              {selectedItem.scoreBreakdown.recruitmentPotential}
+                            </span>
+                          </p>
+                        ) : null}
+                        {selectedItem.scoreBreakdown?.recruitmentPotentialMotivation ? (
+                          <p className="text-xs text-muted-foreground">{selectedItem.scoreBreakdown.recruitmentPotentialMotivation}</p>
+                        ) : null}
+                        <p><span className="text-muted-foreground">Totaal score:</span> {selectedItem.totalScore ?? "—"}</p>
+                        {(selectedItem.scoreBreakdown?.urgency) ? (
+                          <p><span className="text-muted-foreground">Urgentie:</span> {selectedItem.scoreBreakdown.urgency}</p>
+                        ) : null}
+                        {(selectedItem.scoreBreakdown?.rolesSought?.length ?? 0) > 0 ? (
+                          <p><span className="text-muted-foreground">Gezochte functies:</span> {selectedItem.scoreBreakdown!.rolesSought!.join(", ")}</p>
+                        ) : null}
+                        {selectedItem.scoreBreakdown?.bestApproach ? (
+                          <p className="text-xs"><span className="text-muted-foreground">Invalshoek:</span> {selectedItem.scoreBreakdown.bestApproach}</p>
+                        ) : null}
+                        {(selectedItem.scoreBreakdown?.opportunityWhy?.length ?? 0) > 0 ? (
+                          <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                            {selectedItem.scoreBreakdown!.opportunityWhy!.map((reason) => (
+                              <li key={reason}>{reason}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                         {activeRun ? (
                           <ProspectContactReview
                             runId={activeRun.id}

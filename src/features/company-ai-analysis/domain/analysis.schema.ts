@@ -5,6 +5,8 @@ import type { CompanyAnalysisSections } from "@/features/company-ai-analysis/dom
 export const companyAnalysisSectionsSchema = z.object({
   summary: z.string(),
   recruitmentSituation: z.string(),
+  recruitmentPotential: z.string().default("LOW"),
+  recruitmentPotentialMotivation: z.string().default("Geen data beschikbaar in HireFlow."),
   growth: z.string(),
   challenges: z.string(),
   outreachAdvice: z.string(),
@@ -39,6 +41,8 @@ export function emptyAnalysisSections(reason: string): CompanyAnalysisSections {
   return {
     summary: unavailable,
     recruitmentSituation: unavailable,
+    recruitmentPotential: unavailable,
+    recruitmentPotentialMotivation: unavailable,
     growth: unavailable,
     challenges: unavailable,
     outreachAdvice: unavailable,

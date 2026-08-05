@@ -1,18 +1,10 @@
 import type { Company } from "@/features/companies/domain";
 import type { EmailVerificationProvider } from "@/features/contact-finder/email-verification";
+import {
+  MAILBOX_FALLBACK_PREFIXES,
+  pickBestMailboxEmail,
+} from "@/features/contact-finder/domain/contact-role-priority";
 import type { DiscoveredContactCandidate } from "@/features/contact-finder/services/contact-validation.service";
-
-const MAILBOX_PRIORITY = [
-  "recruitment",
-  "recruiter",
-  "hr",
-  "werkenbij",
-  "vacatures",
-  "careers",
-  "jobs",
-  "personeel",
-  "info",
-] as const;
 
 function resolveDomain(company: Company): string | null {
   if (company.domain) return company.domain.toLowerCase().replace(/^www\./, "");
@@ -23,6 +15,35 @@ function resolveDomain(company: Company): string | null {
   } catch {
     return null;
   }
+}
+
+function mailboxCandidate(
+  company: Company,
+  email: string,
+  verification: Awaited<ReturnType<EmailVerificationProvider["verify"]>>,
+  emailOrigin: DiscoveredContactCandidate["emailOrigin"],
+  sourceType: DiscoveredContactCandidate["sourceType"],
+  confidence: number,
+): DiscoveredContactCandidate {
+  const local = email.split("@")[0] ?? "";
+  return {
+    firstName: "Team",
+    lastName: company.name,
+    fullName: null,
+    email,
+    phone: null,
+    jobTitle: `${local}@ mailbox`,
+    department: null,
+    linkedinUrl: null,
+    sourceUrl: company.website,
+    sourceType,
+    emailOrigin,
+    isGeneralMailbox: true,
+    isDecisionMaker: false,
+    confidence,
+    externalId: `${emailOrigin}:${email}`,
+    verification,
+  };
 }
 
 export async function searchVerifiedGeneralMailboxes(
@@ -36,59 +57,23 @@ export async function searchVerifiedGeneralMailboxes(
     .filter(Boolean)
     .map((e) => e!.trim().toLowerCase());
 
-  const candidates: DiscoveredContactCandidate[] = [];
-
-  for (const email of published) {
-    const verification = await verifier.verify(email, domain);
-    if (verification.status === "invalid") continue;
-
-    const local = email.split("@")[0] ?? "";
-    candidates.push({
-      firstName: "Team",
-      lastName: company.name,
-      fullName: null,
-      email,
-      phone: null,
-      jobTitle: "Gepubliceerde bedrijfsmailbox",
-      department: null,
-      linkedinUrl: null,
-      sourceUrl: company.website,
-      sourceType: "company_website",
-      emailOrigin: "published",
-      isGeneralMailbox: true,
-      isDecisionMaker: false,
-      confidence: 0.9,
-      externalId: `published:${email}`,
-      verification,
-    });
-    return candidates;
+  const bestPublished = pickBestMailboxEmail(published);
+  if (bestPublished) {
+    const verification = await verifier.verify(bestPublished, domain);
+    if (verification.status !== "invalid") {
+      return [
+        mailboxCandidate(company, bestPublished, verification, "published", "company_website", 0.9),
+      ];
+    }
   }
 
-  for (const prefix of MAILBOX_PRIORITY) {
+  for (const prefix of MAILBOX_FALLBACK_PREFIXES) {
     const email = `${prefix}@${domain}`;
     const verification = await verifier.verify(email, domain);
     if (verification.status === "invalid" || !verification.mxValid) continue;
 
-    candidates.push({
-      firstName: "Team",
-      lastName: company.name,
-      fullName: null,
-      email,
-      phone: null,
-      jobTitle: `${prefix}@ mailbox (geverifieerd MX)`,
-      department: null,
-      linkedinUrl: null,
-      sourceUrl: company.website,
-      sourceType: "inferred",
-      emailOrigin: "inferred",
-      isGeneralMailbox: true,
-      isDecisionMaker: false,
-      confidence: 0.35,
-      externalId: `inferred:${email}`,
-      verification,
-    });
-    break;
+    return [mailboxCandidate(company, email, verification, "inferred", "inferred", 0.35)];
   }
 
-  return candidates;
+  return [];
 }

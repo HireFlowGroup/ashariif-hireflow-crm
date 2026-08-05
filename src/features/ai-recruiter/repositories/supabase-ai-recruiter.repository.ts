@@ -43,6 +43,7 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
     last_name: string;
     email: string | null;
     job_title: string | null;
+    linkedin_url: string | null;
     verification_status: string | null;
     source_type: string | null;
     relevance_score: number | null;
@@ -77,10 +78,13 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
     scoreBreakdown: (row.score_breakdown as AiRecruiterScoreBreakdown) ?? {
       companyFit: 0,
       hiring: 0,
+      opportunity: 0,
       contact: 0,
       personalization: 0,
       outreachReadiness: 0,
       explanations: [],
+      opportunityWhy: [],
+      rolesSought: [],
     },
     rejectionReason: (row.rejection_reason as string) ?? null,
     warnings: (row.warnings as string[]) ?? [],
@@ -101,6 +105,11 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
     contactSourceType: selected?.sourceType ?? contacts?.source_type ?? undefined,
     contactRelevanceScore: selected?.relevanceScore ?? contacts?.relevance_score ?? undefined,
     contactSelectionReason: selected?.selectionReason,
+    contactLinkedinUrl: selected?.linkedinUrl ?? contacts?.linkedin_url ?? undefined,
+    contactReliabilityLevel: selected?.reliability?.level ?? undefined,
+    contactReliabilityScore: selected?.reliability?.score ?? undefined,
+    contactReliabilitySummary: selected?.reliability?.summary ?? undefined,
+    contactRoleLabel: selected?.roleLabel ?? undefined,
     contactAlternatives: contactDiscovery?.alternatives?.map((alt) => ({
       email: alt.email,
       recipientName: alt.recipientName,
@@ -109,6 +118,10 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
       sourceType: alt.sourceType,
       verificationStatus: alt.verificationStatus,
       isGeneralMailbox: alt.isGeneralMailbox,
+      linkedinUrl: alt.linkedinUrl,
+      reliabilityLevel: alt.reliability?.level,
+      reliabilitySummary: alt.reliability?.summary,
+      roleLabel: alt.roleLabel,
     })),
     contactDiscoveryError: contactDiscovery?.errorMessage ?? undefined,
   };

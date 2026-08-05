@@ -52,6 +52,7 @@ function baseCompany(): Company {
     outreachStatus: "none",
     status: "active",
     notes: null,
+    outreachOptOut: false,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };
@@ -64,7 +65,7 @@ function candidate(partial: Partial<DiscoveredContactCandidate>): DiscoveredCont
     fullName: "Jan Jansen",
     email: "jan@acme.nl",
     phone: null,
-    jobTitle: "Recruitment Manager",
+    jobTitle: "HR Manager",
     department: null,
     linkedinUrl: null,
     sourceUrl: null,
@@ -90,22 +91,34 @@ function candidate(partial: Partial<DiscoveredContactCandidate>): DiscoveredCont
 }
 
 describe("selectBestDiscoveredContact", () => {
-  it("prefers Recruitment Manager over info@", () => {
+  it("prefers HR Manager over Recruiter and info@", () => {
+    const company = baseCompany();
     const ranked = rankDiscoveredContacts(
       [
         candidate({ email: "info@acme.nl", jobTitle: null, isGeneralMailbox: true, sourceType: "inferred" }),
-        candidate({ email: "jan@acme.nl", jobTitle: "Recruitment Manager" }),
+        candidate({ email: "rec@acme.nl", jobTitle: "Recruiter", fullName: "Rec Recruiter" }),
+        candidate({ email: "hr.mgr@acme.nl", jobTitle: "HR Manager", fullName: "Hanne Manager" }),
       ],
-      baseCompany(),
+      company,
     );
 
-    const selected = selectBestDiscoveredContact(ranked);
-    expect(selected?.email).toBe("jan@acme.nl");
+    const selected = selectBestDiscoveredContact(ranked, company);
+    expect(selected?.email).toBe("hr.mgr@acme.nl");
+    expect(selected?.roleLabel).toBe("HR Manager");
+    expect(selected?.reliability.level).toBeDefined();
   });
 
-  it("selects HR mailbox when no personal contact exists", () => {
+  it("prefers recruitment@ over hr@ when no personal contact exists", () => {
+    const company = baseCompany();
     const ranked = rankDiscoveredContacts(
       [
+        candidate({
+          email: "info@acme.nl",
+          jobTitle: null,
+          isGeneralMailbox: true,
+          sourceType: "inferred",
+          emailOrigin: "inferred",
+        }),
         candidate({
           email: "hr@acme.nl",
           jobTitle: null,
@@ -114,22 +127,24 @@ describe("selectBestDiscoveredContact", () => {
           emailOrigin: "published",
         }),
         candidate({
-          email: "info@acme.nl",
+          email: "recruitment@acme.nl",
           jobTitle: null,
           isGeneralMailbox: true,
           sourceType: "inferred",
           emailOrigin: "inferred",
         }),
       ],
-      baseCompany(),
+      company,
     );
 
-    const selected = selectBestDiscoveredContact(ranked);
-    expect(selected?.email).toBe("hr@acme.nl");
+    const selected = selectBestDiscoveredContact(ranked, company);
+    expect(selected?.email).toBe("recruitment@acme.nl");
     expect(selected?.isGeneralMailbox).toBe(true);
+    expect(selected?.reliability.summary).toContain("Betrouwbaarheid");
   });
 
   it("returns null when no candidate meets minimum score", () => {
+    const company = baseCompany();
     const ranked = rankDiscoveredContacts(
       [
         candidate({
@@ -151,9 +166,9 @@ describe("selectBestDiscoveredContact", () => {
           },
         }),
       ],
-      baseCompany(),
+      company,
     );
 
-    expect(selectBestDiscoveredContact(ranked)).toBeNull();
+    expect(selectBestDiscoveredContact(ranked, company)).toBeNull();
   });
 });

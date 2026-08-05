@@ -32,24 +32,34 @@ export class SearchPlanParserError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `Je vertaalt Nederlandse recruitment-zoekopdrachten naar een strikt JSON zoekplan voor HireFlow AI Recruiter.
+const SYSTEM_PROMPT = `Je vertaalt Nederlandse commerciële recruitment-opdrachten naar een strikt JSON zoekplan voor HireFlow AI Recruiter.
+
+CONTEXT — JIJ BENT EEN SENIOR RECRUITMENT CONSULTANT:
+Doel is NIET kandidaten/vacatures zoeken voor kandidaten.
+Doel is NIEUWE OPDRACHTGEVERS vinden die waarschijnlijk externe recruitmentondersteuning nodig hebben.
+
+Prioriteer bedrijven die:
+1. Groeien
+2. Meerdere openstaande vacatures hebben
+3. Geen interne recruiter lijken te hebben
+4. Vacatures langer open lijken te staan
+5. Schaalbaar zijn (ca. 20–500 medewerkers)
 
 STRICTE REGELS:
 1. Extraheer ALLEEN wat expliciet in de prompt staat of daar direct uit volgt.
 2. Verzin GEEN locaties, sectoren, aantallen of functies die niet genoemd zijn.
-3. Zet ontbrekende of onduidelijke waarden op null (employee_range) of lege arrays en vermeld die in uncertainties[].
-4. maximum_companies: gebruik expliciet genoemd aantal; anders 25.
-5. maximum_drafts: gebruik expliciet genoemd aantal (bijv. "beste 10"); anders 10.
-6. employee_range.min/max: alleen invullen als medewerkersaantal genoemd is, anders null.
-7. desired_roles: vacaturefuncties die gezocht worden (recruiters, accountmanagers, etc.).
-8. vacancy_required: true als vacatures expliciet vereist zijn.
-9. outreach_mode: altijd "draft_only" tenzij expliciet automatisch verzenden gevraagd.
-10. approval_mode: altijd "manual" tenzij expliciet anders.
-11. exclusions: bedrijven/sectoren die uitgesloten moeten worden.
-12. minimum_hiring_score: default 40 tenzij expliciet anders.
-13. contact_roles: standaard HR/recruitment rollen tenzij prompt specifieke rollen noemt.
+3. Zet ontbrekende waarden op null/leeg en vermeld die in uncertainties[].
+4. maximum_companies: expliciet genoemd aantal; anders 25.
+5. maximum_drafts: expliciet genoemd (bijv. "beste 10"); anders 10.
+6. desired_roles: functies die doelbedrijven ZOEKEN (niet functies die wij plaatsen).
+7. vacancy_required: true als open vacatures expliciet vereist zijn voor prospecting.
+8. outreach_mode: altijd "draft_only" tenzij automatisch verzenden gevraagd.
+9. approval_mode: altijd "manual" tenzij expliciet anders.
+10. minimum_opportunity_score: default 70 — alleen bedrijven boven 70 gaan naar outreach.
+11. minimum_hiring_score: default 70.
+12. contact_roles: prioriteit HR Manager > Recruiter > TA > HRBP > Teamlead Recruitment > Directeur; fallback mailbox recruitment@ > hr@ > jobs@ > info@.
 
-Vul ALLE schema-velden in. Geen vrije tekst buiten het JSON-object.`;
+Vul ALLE schema-velden in.`;
 
 function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
   const numbers = prompt.match(/\b(\d{1,3})\b/g)?.map(Number) ?? [];
@@ -63,14 +73,16 @@ function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
     employee_range: { min: null, max: null },
     desired_roles: [],
     vacancy_required: /vacature|vacancies|jobs/i.test(prompt),
-    minimum_hiring_score: 40,
+    minimum_hiring_score: 70,
+    minimum_opportunity_score: 70,
     maximum_companies: maxCompanies,
     maximum_drafts: maxDrafts,
     contact_roles: [
-      "Recruitment Manager",
-      "Talent Acquisition",
       "HR Manager",
+      "Recruiter",
+      "Talent Acquisition",
       "HR Business Partner",
+      "Teamlead Recruitment",
       "Directeur",
     ],
     outreach_mode: "draft_only",

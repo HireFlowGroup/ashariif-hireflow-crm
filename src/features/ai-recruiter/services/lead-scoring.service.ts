@@ -5,6 +5,7 @@ import type {
 } from "@/features/ai-recruiter/domain/types";
 import { priorityFromTotalScore } from "@/features/ai-recruiter/domain/types";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
+import type { OpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
 
 export type ContactScoreInput = {
   hasContact: boolean;
@@ -17,6 +18,7 @@ export type ContactScoreInput = {
 export type LeadScoreResult = {
   companyFitScore: number;
   hiringScore: number;
+  opportunityScore: number;
   contactScore: number;
   personalizationScore: number;
   outreachReadinessScore: number;
@@ -28,10 +30,46 @@ export type LeadScoreResult = {
 export function computeLeadScore(
   company: Company,
   hiring: HiringIntelligenceProfile,
+  opportunity: OpportunityAssessment,
   contact: ContactScoreInput,
   plan: AiRecruiterSearchPlan,
 ): LeadScoreResult {
-  const explanations: string[] = [...hiring.explanations];
+  const explanations: string[] = [
+    ...hiring.explanations,
+    `Opportunity score: ${opportunity.opportunityScore}/100 (${opportunity.agencyNeedLikelihood}).`,
+    ...opportunity.why,
+  ];
+
+  if (opportunity.opportunityScore < plan.minimum_opportunity_score) {
+    return {
+      companyFitScore: 0,
+      hiringScore: hiring.hiringScore,
+      opportunityScore: opportunity.opportunityScore,
+      contactScore: 0,
+      personalizationScore: 0,
+      outreachReadinessScore: 0,
+      totalScore: opportunity.opportunityScore,
+      priority: "Reject",
+      breakdown: {
+        companyFit: 0,
+        hiring: hiring.hiringScore,
+        opportunity: opportunity.opportunityScore,
+        contact: 0,
+        personalization: 0,
+        outreachReadiness: 0,
+        explanations: [
+          ...explanations,
+          `Geblokkeerd voor outreach: Opportunity score onder ${plan.minimum_opportunity_score}.`,
+        ],
+        opportunityWhy: opportunity.why,
+        rolesSought: opportunity.rolesSought,
+        urgency: opportunity.urgency,
+        bestApproach: opportunity.bestApproach,
+        recruitmentPotential: opportunity.recruitmentPotential,
+        recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
+      },
+    };
+  }
 
   let companyFitScore = 0;
   if (company.sector) {
@@ -49,6 +87,7 @@ export function computeLeadScore(
   companyFitScore = Math.min(40, companyFitScore);
 
   const hiringScore = hiring.hiringScore;
+  const opportunityScore = opportunity.opportunityScore;
 
   let contactScore = 0;
   if (contact.hasContact) {
@@ -62,7 +101,7 @@ export function computeLeadScore(
   }
 
   let personalizationScore = 0;
-  if (hiring.vacancyCount > 0) personalizationScore += 15;
+  if (opportunity.rolesSought.length > 0) personalizationScore += 15;
   if (hiring.signals.length > 0) personalizationScore += 10;
   if (contact.contactName) personalizationScore += 5;
   personalizationScore = Math.min(30, personalizationScore);
@@ -70,34 +109,49 @@ export function computeLeadScore(
   let outreachReadinessScore = 0;
   if (contact.hasContact && contact.verificationStatus !== "invalid") outreachReadinessScore += 20;
   if (!company.outreachOptOut) outreachReadinessScore += 10;
-  if (hiringScore >= plan.minimum_hiring_score) outreachReadinessScore += 10;
+  if (opportunity.urgency === "high") outreachReadinessScore += 10;
 
   const totalScore = Math.min(
     100,
     Math.round(
-      companyFitScore * 0.2 +
-        hiringScore * 0.35 +
+      opportunityScore * 0.4 +
         contactScore * 0.25 +
-        personalizationScore * 0.1 +
-        outreachReadinessScore * 0.1,
+        companyFitScore * 0.15 +
+        hiringScore * 0.1 +
+        personalizationScore * 0.05 +
+        outreachReadinessScore * 0.05,
     ),
   );
+
+  let priority = priorityFromTotalScore(totalScore);
+  if (hiring.hiringScore < plan.minimum_hiring_score) {
+    priority = "Reject";
+    explanations.push(`Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}.`);
+  }
 
   return {
     companyFitScore,
     hiringScore,
+    opportunityScore,
     contactScore,
     personalizationScore,
     outreachReadinessScore,
     totalScore,
-    priority: priorityFromTotalScore(totalScore),
+    priority,
     breakdown: {
       companyFit: companyFitScore,
       hiring: hiringScore,
+      opportunity: opportunityScore,
       contact: contactScore,
       personalization: personalizationScore,
       outreachReadiness: outreachReadinessScore,
       explanations,
+      opportunityWhy: opportunity.why,
+      rolesSought: opportunity.rolesSought,
+      urgency: opportunity.urgency,
+      bestApproach: opportunity.bestApproach,
+      recruitmentPotential: opportunity.recruitmentPotential,
+      recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
     },
   };
 }
