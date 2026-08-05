@@ -19,6 +19,7 @@ import {
   periodToStartDate,
   todayStartIso,
 } from "@/features/dashboard/domain/dashboard.types";
+import { loadBdDashboardMetrics } from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
 import { DashboardRepositoryError } from "@/features/dashboard/repositories/dashboard.repository";
 import type { DashboardRepository } from "@/features/dashboard/repositories/dashboard.repository";
 import type { Database } from "@/types/database";
@@ -98,6 +99,7 @@ export class SupabaseDashboardRepository implements DashboardRepository {
     try {
       const [
         kpis,
+        bdMetrics,
         warmLeads,
         recentSignals,
         recentVacancies,
@@ -110,6 +112,7 @@ export class SupabaseDashboardRepository implements DashboardRepository {
         signalTrend,
       ] = await Promise.all([
         this.loadKpis(organizationId, periodStart, todayStart),
+        loadBdDashboardMetrics(this.client, organizationId),
         this.loadWarmLeads(organizationId, filters),
         this.loadRecentSignals(organizationId, periodStart, filters),
         this.loadRecentVacancies(organizationId, periodStart, filters),
@@ -125,6 +128,7 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       return {
         filters,
         kpis,
+        bdMetrics,
         warmLeads,
         recentSignals,
         recentVacancies,

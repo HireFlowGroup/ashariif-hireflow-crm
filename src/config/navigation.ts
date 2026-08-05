@@ -11,6 +11,7 @@ import {
   Radio,
   Settings,
   UserRound,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,6 +73,14 @@ export const navGroups: NavGroup[] = [
         description: "Bedrijven, hiring signals en outreach",
         shortcut: "G C",
         keywords: ["bedrijven", "clients", "accounts"],
+      },
+      {
+        title: "Pipeline",
+        href: "/pipeline",
+        icon: Workflow,
+        description: "Commerciële BD pipeline — prospect tot plaatsing",
+        shortcut: "G P",
+        keywords: ["kanban", "deals", "bd", "sales", "funnel"],
       },
       {
         title: "Candidates",

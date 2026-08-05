@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Radio } from "lucide-react";
 
+import { BdDashboardCharts } from "@/components/dashboard/bd-dashboard-charts";
+import { BdTodayKpiStrip } from "@/components/dashboard/bd-today-kpi-strip";
 import { DashboardFiltersBar } from "@/components/dashboard/dashboard-filters";
-import { DashboardKpiStrip } from "@/components/dashboard/dashboard-kpi-strip";
 import {
   AiRecommendationsWidget,
   HiringSignalsWidget,
@@ -16,6 +17,8 @@ import {
   VacanciesWidget,
   WarmLeadsWidget,
 } from "@/components/dashboard/dashboard-widgets";
+import { CommercialPipelineDashboardWidget } from "@/components/commercial-pipeline/commercial-pipeline-dashboard-widget";
+import type { CommercialPipelineBoard } from "@/features/commercial-pipeline/domain/types";
 import type { DashboardSnapshot } from "@/features/dashboard/domain/dashboard.types";
 import type { DashboardStreamEvent } from "@/lib/dashboard/stream-events";
 import { cn } from "@/lib/utils";
@@ -23,6 +26,7 @@ import { cn } from "@/lib/utils";
 type RecruitmentIntelligenceDashboardProps = {
   initialSnapshot: DashboardSnapshot;
   sectors: string[];
+  commercialPipelineBoard: CommercialPipelineBoard;
 };
 
 function buildStreamUrl(filters: DashboardSnapshot["filters"]): string {
@@ -36,6 +40,7 @@ function buildStreamUrl(filters: DashboardSnapshot["filters"]): string {
 export function RecruitmentIntelligenceDashboard({
   initialSnapshot,
   sectors,
+  commercialPipelineBoard,
 }: RecruitmentIntelligenceDashboardProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [live, setLive] = useState(true);
@@ -131,25 +136,36 @@ export function RecruitmentIntelligenceDashboard({
         </p>
       ) : null}
 
-      <DashboardKpiStrip kpis={snapshot.kpis} />
+      <BdTodayKpiStrip today={snapshot.bdMetrics.today} />
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <HiringSignalsWidget signals={snapshot.recentSignals} trend={snapshot.signalTrend} />
-        <VacanciesWidget vacancies={snapshot.recentVacancies} />
-        <NewCompaniesWidget count={snapshot.kpis.newCompanies} leads={snapshot.warmLeads} />
-        <RecruitersWidget recruiters={snapshot.recruiterSignals} />
-        <TodaysIntelligenceWidget data={snapshot.todaysIntelligence} />
-        <LeadPriorityWidget distribution={snapshot.priorityDistribution} />
-      </div>
+      <BdDashboardCharts trends={snapshot.bdMetrics.trends} />
 
-      <WarmLeadsWidget leads={snapshot.warmLeads} />
+      <details className="rounded-xl border bg-card/50">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground">
+          Recruitment intelligence (signals, leads, aanbevelingen)
+        </summary>
+        <div className="space-y-6 border-t px-4 py-4">
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <HiringSignalsWidget signals={snapshot.recentSignals} trend={snapshot.signalTrend} />
+            <VacanciesWidget vacancies={snapshot.recentVacancies} />
+            <NewCompaniesWidget count={snapshot.kpis.newCompanies} leads={snapshot.warmLeads} />
+            <RecruitersWidget recruiters={snapshot.recruiterSignals} />
+            <TodaysIntelligenceWidget data={snapshot.todaysIntelligence} />
+            <LeadPriorityWidget distribution={snapshot.priorityDistribution} />
+          </div>
 
-      <PipelineHealthWidget
-        pipelineStages={snapshot.pipelineStages}
-        outreachDistribution={snapshot.outreachDistribution}
-      />
+          <WarmLeadsWidget leads={snapshot.warmLeads} />
 
-      <AiRecommendationsWidget recommendations={snapshot.aiRecommendations} />
+          <PipelineHealthWidget
+            pipelineStages={snapshot.pipelineStages}
+            outreachDistribution={snapshot.outreachDistribution}
+          />
+
+          <AiRecommendationsWidget recommendations={snapshot.aiRecommendations} />
+        </div>
+      </details>
+
+      <CommercialPipelineDashboardWidget board={commercialPipelineBoard} />
     </div>
   );
 }

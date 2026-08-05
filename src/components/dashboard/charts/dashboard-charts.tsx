@@ -108,6 +108,69 @@ export function DashboardAreaChart({ data, className, height = 200 }: DashboardA
   );
 }
 
+type DashboardMultiSeriesAreaChartProps = {
+  data: Array<Record<string, string | number>>;
+  series: Array<{ key: string; name: string }>;
+  className?: string;
+  height?: number;
+};
+
+export function DashboardMultiSeriesAreaChart({
+  data,
+  series,
+  className,
+  height = 220,
+}: DashboardMultiSeriesAreaChartProps) {
+  return (
+    <div className={cn("w-full", className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+          <defs>
+            {series.map((item, index) => (
+              <linearGradient key={item.key} id={`bdGradient-${item.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={chartColor(index)} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={chartColor(index)} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            className="fill-muted-foreground"
+          />
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            className="fill-muted-foreground"
+          />
+          <Tooltip content={<ChartTooltipContent />} />
+          <Legend
+            verticalAlign="top"
+            height={28}
+            formatter={(value) => <span className="text-xs text-muted-foreground">{value}</span>}
+          />
+          {series.map((item, index) => (
+            <Area
+              key={item.key}
+              type="monotone"
+              dataKey={item.key}
+              name={item.name}
+              stroke={chartColor(index)}
+              fill={`url(#bdGradient-${item.key})`}
+              strokeWidth={2}
+            />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 type DashboardBarChartProps = {
   data: Array<{ label: string; value: number }>;
   className?: string;

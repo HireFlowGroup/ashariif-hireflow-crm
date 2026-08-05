@@ -114,9 +114,48 @@ export type DashboardSignalTrendPoint = {
   count: number;
 };
 
+export type BdTodayKpis = {
+  companiesFound: number;
+  analyzed: number;
+  newContacts: number;
+  draftEmails: number;
+  sentEmails: number;
+  openReplies: number;
+  positiveReplies: number;
+  intakes: number;
+  newVacancies: number;
+  candidatesProposed: number;
+  placements: number;
+  conversionRate: number;
+  pipelineValue: number;
+};
+
+export type BdDailyTrendPoint = {
+  date: string;
+  companiesFound: number;
+  analyzed: number;
+  newContacts: number;
+  draftEmails: number;
+  sentEmails: number;
+  openReplies: number;
+  positiveReplies: number;
+  intakes: number;
+  newVacancies: number;
+  candidatesProposed: number;
+  placements: number;
+};
+
+export type BdChartPeriod = "7d" | "30d" | "90d";
+
+export type BdDashboardMetrics = {
+  today: BdTodayKpis;
+  trends: Record<BdChartPeriod, BdDailyTrendPoint[]>;
+};
+
 export type DashboardSnapshot = {
   filters: DashboardFilters;
   kpis: DashboardKpis;
+  bdMetrics: BdDashboardMetrics;
   warmLeads: DashboardWarmLead[];
   recentSignals: DashboardSignalItem[];
   recentVacancies: DashboardVacancyItem[];
@@ -146,5 +185,12 @@ export function periodToStartDate(period: DashboardPeriod): string {
 export function todayStartIso(): string {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
+  return now.toISOString();
+}
+
+export function daysAgoStartIso(days: number): string {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  now.setDate(now.getDate() - (days - 1));
   return now.toISOString();
 }

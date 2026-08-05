@@ -10,7 +10,7 @@ export async function runFastTavilySearch(
   criteria: CompanySearchCriteria,
   options: { maxResults: number; timeoutMs: number },
 ): Promise<{ results: TavilyDiscoveryResult[]; providerId: string }> {
-  const query = buildSignalQuery(criteria, "bedrijf Nederland");
+  const query = buildSignalQuery(criteria, "recruitment opdracht vacature hiring behoefte Nederland");
   const chain = await withTimeout(
     getProviderManager().executeSearchChain(query, options.maxResults),
     options.timeoutMs,

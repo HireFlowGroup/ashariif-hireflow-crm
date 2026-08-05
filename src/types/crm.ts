@@ -154,3 +154,22 @@ export type Profile = TimestampFields & {
   avatar_url: string | null;
   role: "owner" | "admin" | "recruiter";
 };
+
+export type CommercialPipelineCardRow = TimestampFields & {
+  id: string;
+  organization_id: string;
+  company_id: string;
+  stage: string;
+  position: number;
+  company_name: string;
+  sector: string | null;
+  city: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  lead_score: number | null;
+  deal_value: number | null;
+  notes: string | null;
+  source_run_item_id: string | null;
+  lost_reason: string | null;
+  moved_at: string;
+};

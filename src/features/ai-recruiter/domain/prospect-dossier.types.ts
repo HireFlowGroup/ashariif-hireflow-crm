@@ -1,4 +1,6 @@
+import type { AiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import type { BdOutreachAnalysis } from "@/features/ai-recruiter/domain/types";
+import type { RecruitmentIntelligenceAnalysis } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 
 export type ProspectDossierCompanyInfo = {
   companyId: string | null;
@@ -76,6 +78,7 @@ export type ProspectDraftMail = {
   followUpSubject: string | null;
   followUpBodyText: string | null;
   warnings: string[];
+  emailWriter: AiEmailWriterDraft | null;
 };
 
 export type ProspectDossier = {
@@ -91,6 +94,9 @@ export type ProspectDossier = {
   notes: string | null;
   draft: ProspectDraftMail;
   bdAnalysis: BdOutreachAnalysis | null;
+  recruitmentIntelligence: RecruitmentIntelligenceAnalysis | null;
+  recruitmentIntelligenceGeneratedAt: string | null;
+  recruitmentIntelligenceIsStale: boolean;
   itemStage: string;
   totalScore: number | null;
   warnings: string[];

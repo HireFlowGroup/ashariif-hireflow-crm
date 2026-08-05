@@ -130,6 +130,9 @@ export const scoreBreakdownSchema = z.object({
       externalRecruiterChance: z.number(),
     })
     .optional(),
+  recruitmentIntelligenceScore: z.number().optional(),
+  recruitmentIntelligenceTier: z.enum(["warm", "interessant", "lage_kans"]).optional(),
+  urgencyRationale: z.string().optional(),
 });
 
 export type AiRecruiterScoreBreakdown = z.infer<typeof scoreBreakdownSchema>;

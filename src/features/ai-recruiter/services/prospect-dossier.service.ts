@@ -21,6 +21,7 @@ import { createCompanyPageService } from "@/features/company-intelligence/create
 import type { ExternalCompanyCandidate } from "@/features/company-finder/domain";
 import { createOutreachEngineService } from "@/features/outreach-engine/create-outreach-engine-service";
 import type { OutreachMessage } from "@/features/outreach-engine/domain/types";
+import { parseAiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.schema";
 import { formatContactName } from "@/lib/contacts/format";
 
 const DEPT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
@@ -298,6 +299,7 @@ export class ProspectDossierService {
     const followUp = external.followUpDraft as
       | { subject: string; bodyText: string; confidence?: number }
       | undefined;
+    const storedEmailWriter = parseAiEmailWriterDraft(external.emailWriterDraft);
 
     let pageData: CompanyPageData | null = null;
     if (item.companyId) {
@@ -382,6 +384,31 @@ export class ProspectDossierService {
       hiringScore: item.hiringScore,
     });
 
+    let recruitmentIntelligence = null;
+    let recruitmentIntelligenceGeneratedAt: string | null = null;
+    let recruitmentIntelligenceIsStale = false;
+
+    if (item.companyId) {
+      const intelligenceEngine = await createRecruitmentIntelligenceEngine();
+      const intelligence = await intelligenceEngine.getAnalysis(context, item.companyId, {
+        generateIfMissing: true,
+      });
+
+      if (intelligence.isStale || !intelligence.analysis) {
+        const refreshed = await intelligenceEngine.ensureFreshAnalysis(context, item.companyId, {
+          runItemId: item.id,
+          force: intelligence.isStale,
+        });
+        recruitmentIntelligence = refreshed?.analysis ?? intelligence.analysis;
+        recruitmentIntelligenceGeneratedAt = refreshed?.generatedAt ?? intelligence.generatedAt;
+        recruitmentIntelligenceIsStale = false;
+      } else {
+        recruitmentIntelligence = intelligence.analysis;
+        recruitmentIntelligenceGeneratedAt = intelligence.record?.generatedAt ?? intelligence.generatedAt;
+        recruitmentIntelligenceIsStale = intelligence.isStale;
+      }
+    }
+
     const history = item.companyId
       ? await loadOutreachHistory(this.supabase, context.organizationId, item.companyId)
       : {
@@ -434,14 +461,18 @@ export class ProspectDossierService {
       notes: company?.notes ?? null,
       draft: {
         messageId: item.outreachMessageId,
-        subject: outreachMessage?.subject ?? item.draftSubject ?? null,
-        bodyText: outreachMessage?.bodyText ?? null,
+        subject: storedEmailWriter?.subject ?? outreachMessage?.subject ?? item.draftSubject ?? null,
+        bodyText: storedEmailWriter?.bodyText ?? outreachMessage?.bodyText ?? null,
         status: outreachMessage?.status ?? null,
         followUpSubject: followUp?.subject ?? null,
         followUpBodyText: followUp?.bodyText ?? null,
         warnings: item.warnings ?? [],
+        emailWriter: storedEmailWriter,
       },
       bdAnalysis,
+      recruitmentIntelligence,
+      recruitmentIntelligenceGeneratedAt,
+      recruitmentIntelligenceIsStale,
       itemStage: item.stage,
       totalScore: item.totalScore,
       warnings: item.warnings ?? [],

@@ -21,15 +21,14 @@ import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories
 import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
-import { computeLeadScore, type ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
+import { computeLeadScoreFromAnalysis } from "@/features/ai-recruiter/services/lead-scoring-from-analysis.service";
+import type { ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
 import {
   computeOpportunityAssessment,
-  isOutreachEligible,
   type OpportunityAssessment,
 } from "@/features/ai-recruiter/services/opportunity-scorer.service";
 import {
   computeSalesIntelligence,
-  isSalesOutreachEligible,
   salesToScoreBreakdownFields,
   type SalesIntelligenceAssessment,
 } from "@/features/ai-recruiter/services/sales-intelligence.service";
@@ -58,6 +57,9 @@ import {
 import type { CompanyFinderService } from "@/features/company-finder/services/company-finder.service";
 import type { ContactDiscoveryEngine } from "@/features/contact-finder/services/contact-discovery-engine.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
+import { createRecruitmentIntelligenceEngine } from "@/features/recruitment-intelligence/create-recruitment-intelligence-engine";
+import type { RecruitmentIntelligenceAnalysis } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
+import { INSUFFICIENT_DATA } from "@/features/recruitment-intelligence/domain/recruitment-intelligence.types";
 import { OutreachEngine, OutreachEngineError } from "@/features/outreach-engine/services/outreach-engine.service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -129,7 +131,7 @@ export class AiRecruiterOrchestrator {
         status: "discovering",
         startedAt: new Date().toISOString(),
       });
-      yield { type: "run_status", status: "discovering", message: "Bedrijven ontdekken…" };
+      yield { type: "run_status", status: "discovering", message: "Recruitmentopdrachten zoeken…" };
 
       pipeline.startStep("discovery");
       yield emitPipeline();
@@ -293,17 +295,16 @@ export class AiRecruiterOrchestrator {
         skipped: discoveryRejected,
         message:
           counters.validated > 0
-            ? `${counters.validated} bedrijf(en) opgeslagen`
+            ? `${counters.validated} recruitment opportunity(s) opgeslagen`
             : diagnostics.errorCode === "no_results"
               ? "Geen zoekresultaten"
-              : "Geen bedrijven opgeslagen na validatie",
+              : "Geen opportunities opgeslagen na validatie",
       });
       pipeline.skipStep("crawler", "Niet gebruikt in AI Recruiter fast mode");
-      pipeline.skipStep("ai_analysis", "Niet gebruikt in AI Recruiter fast mode");
       yield emitPipeline();
 
       if (counters.validated === 0) {
-        skipEnrichmentAndDownstream(pipeline, "Geen bedrijven om te verwerken");
+        skipEnrichmentAndDownstream(pipeline, "Geen recruitment opportunities om te verwerken");
         pipeline.finalizeTerminalRun();
         yield emitPipeline();
 
@@ -364,15 +365,10 @@ export class AiRecruiterOrchestrator {
           if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
-          let outreachEligible = isOutreachEligible(opportunity.opportunityScore, plan);
+          let outreachEligible = true;
           let outreachRejectionReason: string | null = null;
 
-          if (!outreachEligible) {
-            outreachRejectionReason = `Opportunity score ${opportunity.opportunityScore} onder drempel ${plan.minimum_opportunity_score} — geen outreach`;
-          } else if (!isSalesOutreachEligible(sales.tier)) {
-            outreachEligible = false;
-            outreachRejectionReason = `Sales Intelligence ${sales.tier} (${sales.salesScore}/100) — geen outreach`;
-          } else if (plan.vacancy_required && hiring.vacancyCount === 0) {
+          if (plan.vacancy_required && hiring.vacancyCount === 0) {
             outreachEligible = false;
             outreachRejectionReason = "Vacature vereist maar niet gevonden";
           } else if (hiring.hiringScore < plan.minimum_hiring_score) {
@@ -445,6 +441,39 @@ export class AiRecruiterOrchestrator {
 
       pipeline.completeStep("vacancies", { succeeded: counters.withVacancies });
       pipeline.completeStep("hiring_signals", { succeeded: counters.withSignals });
+      yield emitPipeline();
+
+      pipeline.startStep("ai_analysis");
+      yield emitPipeline();
+
+      let aiAnalysisSucceeded = 0;
+      const intelligenceEngine = await createRecruitmentIntelligenceEngine();
+      const analysisByCompanyId = new Map<string, RecruitmentIntelligenceAnalysis>();
+
+      for (const { companyId, itemId } of savedCompanyIds) {
+        try {
+          const record = await intelligenceEngine.ensureFreshAnalysis(context, companyId, {
+            runItemId: itemId,
+          });
+          if (record) {
+            aiAnalysisSucceeded += 1;
+            analysisByCompanyId.set(companyId, record.analysis);
+          }
+        } catch (error) {
+          console.error("[RecruitmentIntelligence] analyse mislukt", {
+            companyId,
+            itemId,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
+
+      pipeline.completeStep("ai_analysis", {
+        processed: savedCompanyIds.length,
+        succeeded: aiAnalysisSucceeded,
+        errors: savedCompanyIds.length - aiAnalysisSucceeded,
+        message: `${aiAnalysisSucceeded}/${savedCompanyIds.length} recruitment intelligence analyses`,
+      });
       yield emitPipeline();
 
       await this.repository.updateRun(context.organizationId, runId, { status: "finding_contacts" });
@@ -604,8 +633,24 @@ export class AiRecruiterOrchestrator {
           continue;
         }
 
-        const { result, hiring, outreachEligible, outreachRejectionReason } = discovery;
+        const { result, hiring, outreachRejectionReason: preContactRejection } = discovery;
         const { opportunity, sales, company } = entry;
+        const analysis = analysisByCompanyId.get(entry.companyId) ?? null;
+        const analysisScore = analysis?.recruitment_opportunity_score ?? null;
+
+        const outreachEligible =
+          analysisScore !== null
+          && analysisScore >= plan.minimum_opportunity_score
+          && (preContactRejection === null);
+
+        const outreachRejectionReason = !outreachEligible
+          ? analysisScore === null
+            ? INSUFFICIENT_DATA
+            : analysisScore < plan.minimum_opportunity_score
+              ? `Recruitment Opportunity Score ${analysisScore} onder drempel ${plan.minimum_opportunity_score}`
+              : preContactRejection
+          : null;
+
         const salesFields = salesToScoreBreakdownFields(sales);
         const contactDiscoveryPayload = {
           contactDiscovery: {
@@ -702,7 +747,7 @@ export class AiRecruiterOrchestrator {
           confidence: result.selected.relevanceScore / 100,
         };
 
-        const leadScore = computeLeadScore(company, hiring, opportunity, sales, contactInput, plan);
+        const leadScore = computeLeadScoreFromAnalysis(company, analysis, contactInput, plan);
 
         const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
           stage: result.stage,

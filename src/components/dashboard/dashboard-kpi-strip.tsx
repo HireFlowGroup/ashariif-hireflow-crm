@@ -18,7 +18,10 @@ type KpiCardProps = {
   icon: ReactNode;
   accent?: "emerald" | "sky" | "amber" | "violet" | "rose";
   suffix?: string;
+  format?: "number" | "currency" | "percent";
 };
+
+export type { KpiCardProps };
 
 const accentClasses = {
   emerald: "from-emerald-500/15 to-emerald-500/5 text-emerald-600 dark:text-emerald-400",
@@ -28,7 +31,14 @@ const accentClasses = {
   rose: "from-rose-500/15 to-rose-500/5 text-rose-600 dark:text-rose-400",
 };
 
-function KpiCard({ label, value, icon, accent = "sky", suffix }: KpiCardProps) {
+export function KpiCard({ label, value, icon, accent = "sky", suffix, format = "number" }: KpiCardProps) {
+  const formattedValue =
+    format === "currency"
+      ? value.toLocaleString("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })
+      : format === "percent"
+        ? `${value.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+        : value.toLocaleString("nl-NL");
+
   return (
     <div className="relative overflow-hidden rounded-xl border bg-card p-4 shadow-sm">
       <div
@@ -41,7 +51,7 @@ function KpiCard({ label, value, icon, accent = "sky", suffix }: KpiCardProps) {
         <div>
           <p className="text-xs font-medium text-muted-foreground">{label}</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight">
-            {value.toLocaleString("nl-NL")}
+            {formattedValue}
             {suffix ? <span className="ml-1 text-sm font-normal text-muted-foreground">{suffix}</span> : null}
           </p>
         </div>

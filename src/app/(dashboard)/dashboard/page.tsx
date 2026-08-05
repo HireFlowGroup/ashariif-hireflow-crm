@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import { RecruitmentIntelligenceDashboard } from "@/components/dashboard/recruitment-intelligence-dashboard";
 import { WorkspacePage } from "@/components/layout/workspace-page";
+import { createCommercialPipelineService } from "@/features/commercial-pipeline/create-commercial-pipeline-service";
 import { createDashboardService } from "@/features/dashboard/create-dashboard-service";
 import { parseDashboardFilters } from "@/lib/dashboard/filters";
 import { authRoutes } from "@/config/navigation";
@@ -46,10 +47,15 @@ async function DashboardContent({
   }
 
   const dashboardService = await createDashboardService();
-  const snapshot = await dashboardService.getSnapshot(
-    { userId: user.id, organizationId: profile.organization_id },
-    filters,
-  );
+  const commercialPipelineService = await createCommercialPipelineService();
+
+  const [snapshot, commercialPipelineBoard] = await Promise.all([
+    dashboardService.getSnapshot(
+      { userId: user.id, organizationId: profile.organization_id },
+      filters,
+    ),
+    commercialPipelineService.getBoard(profile.organization_id),
+  ]);
 
   const sectors = [
     ...new Set(snapshot.warmLeads.map((lead) => lead.sector).filter(Boolean) as string[]),
@@ -58,9 +64,13 @@ async function DashboardContent({
   return (
     <WorkspacePage
       title="Dashboard"
-      description="Realtime hiring intelligence — warme leads, signals en AI-aanbevelingen."
+      description="Realtime BD-operatie — van prospect tot plaatsing, live bijgewerkt."
     >
-      <RecruitmentIntelligenceDashboard initialSnapshot={snapshot} sectors={sectors} />
+      <RecruitmentIntelligenceDashboard
+        initialSnapshot={snapshot}
+        sectors={sectors}
+        commercialPipelineBoard={commercialPipelineBoard}
+      />
     </WorkspacePage>
   );
 }

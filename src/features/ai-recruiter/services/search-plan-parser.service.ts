@@ -34,16 +34,16 @@ export class SearchPlanParserError extends Error {
 
 const SYSTEM_PROMPT = `Je vertaalt Nederlandse commerciële recruitment-opdrachten naar een strikt JSON zoekplan voor HireFlow AI Recruiter.
 
-CONTEXT — JIJ BENT EEN SENIOR RECRUITMENT CONSULTANT:
-Doel is NIET kandidaten/vacatures zoeken voor kandidaten.
-Doel is NIEUWE OPDRACHTGEVERS vinden die waarschijnlijk externe recruitmentondersteuning nodig hebben.
+CONTEXT — HEAD OF RECRUITMENT INTELLIGENCE:
+Doel is NIET bedrijven zoeken omwille van bedrijven.
+Doel is RECRUITMENTOPDRACHTEN / hiring opportunities vinden — bedrijven waar waarschijnlijk een externe recruitmentopdracht ligt.
 
-Prioriteer bedrijven die:
-1. Groeien
-2. Meerdere openstaande vacatures hebben
-3. Geen interne recruiter lijken te hebben
-4. Vacatures langer open lijken te staan
-5. Schaalbaar zijn (ca. 20–500 medewerkers)
+Zoek naar signalen van:
+1. Meerdere open vacatures / hiringdruk
+2. Moeilijk te vervullen rollen
+3. Groeiende teams zonder zichtbare interne recruiter
+4. Lang openstaande vacatures
+5. Schaalbare bedrijven (ca. 20–500 medewerkers) met actieve hiring
 
 STRICTE REGELS:
 1. Extraheer ALLEEN wat expliciet in de prompt staat of daar direct uit volgt.
@@ -51,11 +51,11 @@ STRICTE REGELS:
 3. Zet ontbrekende waarden op null/leeg en vermeld die in uncertainties[].
 4. maximum_companies: expliciet genoemd aantal; anders 25.
 5. maximum_drafts: expliciet genoemd (bijv. "beste 10"); anders 10.
-6. desired_roles: functies die doelbedrijven ZOEKEN (niet functies die wij plaatsen).
+6. desired_roles: functies/rollen waar hiring opportunities op wijzen (niet functies die wij plaatsen).
 7. vacancy_required: true als open vacatures expliciet vereist zijn voor prospecting.
 8. outreach_mode: altijd "draft_only" tenzij automatisch verzenden gevraagd.
 9. approval_mode: altijd "manual" tenzij expliciet anders.
-10. minimum_opportunity_score: default 70 — alleen bedrijven boven 70 gaan naar outreach.
+10. minimum_opportunity_score: default 70 — alleen opportunities boven 70 gaan naar outreach.
 11. minimum_hiring_score: default 70.
 12. contact_roles: prioriteit HR Manager > Recruiter > TA > HRBP > Teamlead Recruitment > Directeur; fallback mailbox recruitment@ > hr@ > jobs@ > info@.
 

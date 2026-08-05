@@ -1,4 +1,8 @@
 export type {
+  BdChartPeriod,
+  BdDailyTrendPoint,
+  BdDashboardMetrics,
+  BdTodayKpis,
   DashboardAiRecommendation,
   DashboardFilters,
   DashboardKpis,
@@ -13,6 +17,6 @@ export type {
   DashboardVacancyItem,
   DashboardWarmLead,
 } from "@/features/dashboard/domain/dashboard.types";
-export { periodToStartDate, todayStartIso } from "@/features/dashboard/domain/dashboard.types";
+export { periodToStartDate, todayStartIso, daysAgoStartIso } from "@/features/dashboard/domain/dashboard.types";
 export { createDashboardService } from "@/features/dashboard/create-dashboard-service";
 export { DashboardService } from "@/features/dashboard/services/dashboard.service";

@@ -7,26 +7,25 @@ import {
   Calendar,
   ExternalLink,
   Loader2,
-  Mail,
   RefreshCw,
-  Send,
   Sparkles,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
 
+import { AiEmailWriterPanel } from "@/components/ai-recruiter/ai-email-writer-panel";
+import { AiEmailWriterPanel } from "@/components/ai-recruiter/ai-email-writer-panel";
 import { ProspectContactReview } from "@/components/ai-recruiter/prospect-contact-review";
+import { RecruitmentIntelligencePanel } from "@/components/ai-recruiter/recruitment-intelligence-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import type { ProspectDossier, DraftRewriteStyle } from "@/features/ai-recruiter/domain/prospect-dossier.types";
+import type { ProspectDossier } from "@/features/ai-recruiter/domain/prospect-dossier.types";
+import type { AiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import type { AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
-import {
-  aiRecruiterFetchJson,
-  buildOutreachMessagePath,
-} from "@/lib/ai-recruiter/client-api";
+import { aiRecruiterFetchJson } from "@/lib/ai-recruiter/client-api";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -101,8 +100,6 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
-  const [rewriteLoading, setRewriteLoading] = useState<DraftRewriteStyle | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const loadDossier = useCallback(async () => {
     setLoading(true);
@@ -141,71 +138,6 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
     }
   }
 
-  async function rewriteDraft(style: DraftRewriteStyle) {
-    setRewriteLoading(style);
-    try {
-      const { data } = await aiRecruiterFetchJson<{ subject: string; bodyText: string }>(
-        "rewriteDraft",
-        `/api/ai-recruiter/runs/${runId}/items/${item.id}/draft/rewrite`,
-        { method: "POST", body: { style }, expectedStatuses: [200] },
-      );
-      setDossier((prev) =>
-        prev
-          ? {
-              ...prev,
-              draft: {
-                ...prev.draft,
-                subject: data.subject,
-                bodyText: data.bodyText,
-              },
-            }
-          : prev,
-      );
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Herschrijven mislukt");
-    } finally {
-      setRewriteLoading(null);
-    }
-  }
-
-  async function approveDraft() {
-    if (!item.outreachMessageId) return;
-    setActionLoading("approve");
-    try {
-      await aiRecruiterFetchJson(
-        "approveDraft",
-        buildOutreachMessagePath(item.outreachMessageId, "approve"),
-        { method: "POST", expectedStatuses: [200] },
-      );
-      setDossier((prev) =>
-        prev ? { ...prev, draft: { ...prev.draft, status: "approved" } } : prev,
-      );
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Goedkeuren mislukt");
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function sendDraft() {
-    if (!item.outreachMessageId) return;
-    setActionLoading("send");
-    try {
-      await aiRecruiterFetchJson(
-        "sendDraft",
-        buildOutreachMessagePath(item.outreachMessageId, "send"),
-        { method: "POST", body: { confirmed: true }, expectedStatuses: [200] },
-      );
-      setDossier((prev) =>
-        prev ? { ...prev, draft: { ...prev.draft, status: "sent" } } : prev,
-      );
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Verzenden mislukt — goedkeur eerst het concept.");
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-[400px] items-center justify-center rounded-xl border border-dashed">
@@ -222,7 +154,7 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
     );
   }
 
-  const { company, hiring, whyInteresting, painScore, contacts, history, draft } = dossier;
+  const { company, hiring, whyInteresting, painScore, contacts, history, draft, recruitmentIntelligence, recruitmentIntelligenceGeneratedAt, recruitmentIntelligenceIsStale } = dossier;
 
   return (
     <div className="space-y-6">
@@ -329,6 +261,17 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
       </section>
 
       <Separator />
+
+      {recruitmentIntelligence ? (
+        <>
+          <RecruitmentIntelligencePanel
+            analysis={recruitmentIntelligence}
+            generatedAt={recruitmentIntelligenceGeneratedAt}
+            isStale={recruitmentIntelligenceIsStale}
+          />
+          <Separator />
+        </>
+      ) : null}
 
       {/* Waarom interessant */}
       {whyInteresting ? (
@@ -500,82 +443,40 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
 
       <Separator />
 
-      {/* AI Conceptmail */}
-      <section className="space-y-4">
-        <SectionTitle>AI Conceptmail</SectionTitle>
-        {!draft.bodyText && !draft.subject ? (
-          <p className="text-sm text-muted-foreground">Nog geen conceptmail gegenereerd voor dit prospect.</p>
-        ) : (
-          <>
-            <div className="rounded-lg border bg-muted/10 p-4 space-y-3">
-              <p className="text-sm">
-                <span className="text-muted-foreground">Onderwerp: </span>
-                <span className="font-medium">{draft.subject ?? "—"}</span>
-              </p>
-              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{draft.bodyText}</pre>
-              {draft.status ? (
-                <Badge variant="outline" className="text-[10px]">{draft.status}</Badge>
-              ) : null}
-              {(draft.warnings?.length ?? 0) > 0 ? (
-                <p className="text-xs text-amber-700">{draft.warnings.join(" · ")}</p>
-              ) : null}
-            </div>
+      <AiEmailWriterPanel
+        runId={runId}
+        item={item}
+        draft={draft.emailWriter}
+        draftStatus={draft.status}
+        hasAnalysis={recruitmentIntelligence != null}
+        onDraftUpdated={(updated: AiEmailWriterDraft) => {
+          setDossier((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  draft: {
+                    ...prev.draft,
+                    emailWriter: updated,
+                    subject: updated.subject,
+                    bodyText: updated.bodyText,
+                  },
+                }
+              : prev,
+          );
+        }}
+        onError={onError}
+      />
 
-            {draft.followUpBodyText ? (
-              <details className="rounded-lg border px-4 py-2 text-sm">
-                <summary className="cursor-pointer font-medium text-muted-foreground">Follow-up concept</summary>
-                <p className="mt-2 text-xs text-muted-foreground">Onderwerp: {draft.followUpSubject}</p>
-                <pre className="mt-2 whitespace-pre-wrap font-sans text-sm">{draft.followUpBodyText}</pre>
-              </details>
-            ) : null}
-
-            {item.outreachMessageId ? (
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ["rewrite", "Herschrijven"],
-                    ["shorter", "Korter"],
-                    ["personal", "Persoonlijker"],
-                    ["formal", "Formeler"],
-                    ["new_version", "Nieuwe versie"],
-                  ] as const
-                ).map(([style, label]) => (
-                  <Button
-                    key={style}
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={rewriteLoading !== null || actionLoading !== null}
-                    onClick={() => void rewriteDraft(style)}
-                  >
-                    {rewriteLoading === style ? <Loader2 className="size-4 animate-spin" /> : null}
-                    {label}
-                  </Button>
-                ))}
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={actionLoading !== null}
-                  onClick={() => void approveDraft()}
-                >
-                  {actionLoading === "approve" ? <Loader2 className="size-4 animate-spin" /> : null}
-                  Goedkeuren
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={actionLoading !== null}
-                  onClick={() => void sendDraft()}
-                >
-                  {actionLoading === "send" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  Verzenden
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
+      {draft.followUpBodyText ? (
+        <>
+          <Separator />
+          <details className="rounded-lg border px-4 py-2 text-sm">
+            <summary className="cursor-pointer font-medium text-muted-foreground">Follow-up concept</summary>
+            <p className="mt-2 text-xs text-muted-foreground">Onderwerp: {draft.followUpSubject}</p>
+            <pre className="mt-2 whitespace-pre-wrap font-sans text-sm">{draft.followUpBodyText}</pre>
+          </details>
+        </>
+      ) : null}
     </div>
   );
 }

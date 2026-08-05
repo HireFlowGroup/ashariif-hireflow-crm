@@ -20,6 +20,7 @@ import type {
   Profile,
   Task,
   Vacancy,
+  CommercialPipelineCardRow,
 } from "@/types/crm";
 import type { AiConversation, AiMessage } from "@/types/ai";
 import type { AiToolLog, OrganizationProviderConfig, OrganizationProviderHealth, PlatformEvent } from "@/types/platform";
@@ -140,6 +141,20 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<PipelineEntry>;
+        Relationships: [];
+      };
+      commercial_pipeline_cards: {
+        Row: CommercialPipelineCardRow;
+        Insert: Omit<
+          CommercialPipelineCardRow,
+          "id" | "created_at" | "updated_at" | "moved_at"
+        > & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+          moved_at?: string;
+        };
+        Update: Partial<CommercialPipelineCardRow>;
         Relationships: [];
       };
       tasks: {
