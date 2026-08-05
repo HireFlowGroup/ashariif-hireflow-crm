@@ -4,6 +4,7 @@ import type { Company } from "@/features/companies/domain";
 import type { OutreachDraftContent } from "@/features/ai-recruiter/domain/types";
 import { outreachDraftContentSchema } from "@/features/ai-recruiter/domain/types";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
+import { buildOutreachSalutation } from "@/features/contact-finder/services/contact-validation.service";
 import { isOpenAIConfigured } from "@/platform/config/env";
 import { getOpenAIClient } from "@/lib/ai/client";
 
@@ -15,6 +16,12 @@ const BANNED_PHRASES = [
   "revolutionair",
   "marktleider",
 ];
+
+export type DraftRecipient = {
+  recipientName: string | null;
+  email: string;
+  isGeneralMailbox: boolean;
+};
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -28,22 +35,30 @@ function truncateWords(text: string, limit: number): string {
 
 function buildFallbackDraft(
   company: Company,
-  contactName: string | null,
+  recipient: DraftRecipient,
   hiring: HiringIntelligenceProfile,
 ): OutreachDraftContent {
-  const greeting = contactName ? `Beste ${contactName.split(" ")[0]},` : "Goedemiddag,";
+  const greeting = buildOutreachSalutation(
+    recipient.recipientName,
+    recipient.isGeneralMailbox,
+    recipient.email,
+  );
   const signal = hiring.signals[0]?.description;
   const signalLine = signal ? ` Ik zag recent ${signal.toLowerCase()}.` : "";
   const sector = company.sector ? ` in de ${company.sector}` : "";
   const city = company.city ? ` (${company.city})` : "";
+  const vacancyLine =
+    hiring.vacancyCount > 0
+      ? ` Met betrekking tot uw openstaande vacature(s) bij ${company.name}`
+      : "";
 
   const bodyText = truncateWords(
     [
       greeting,
       "",
-      `Ik neem contact op namens HireFlow Group. Wij ondersteunen organisaties${sector}${city} bij het invullen van vacatures.${signalLine}`,
+      `Ik neem contact op namens HireFlow Group.${vacancyLine} Wij ondersteunen organisaties${sector}${city} bij het invullen van vacatures en het vinden van geschikte kandidaten.${signalLine}`,
       "",
-      "Zou het passen om kort kennis te maken? Ik hoor graag of er op dit moment behoefte is aan ondersteuning.",
+      "Mag ik u kandidaten voorstellen voor uw huidige of aankomende vacatures? Graag hoor ik of u openstaat voor een korte kennismaking.",
       "",
       "Met vriendelijke groet,",
       "HireFlow Group",
@@ -51,11 +66,12 @@ function buildFallbackDraft(
     MAX_WORDS,
   );
 
-  const warnings = hiring.warnings.length ? hiring.warnings : [];
+  const warnings = hiring.warnings.length ? [...hiring.warnings] : [];
   if (!signal) warnings.push("beperkte personalisatie");
+  if (recipient.isGeneralMailbox) warnings.push("algemene mailbox — neutrale aanhef");
 
   const subjects = [
-    `Kennismaking HireFlow — ${company.name}`,
+    `Kandidaten voorstellen — ${company.name}`,
     `${company.name}: ondersteuning bij werving`,
     `Recruitment — ${company.name}`,
   ];
@@ -79,12 +95,27 @@ function buildFallbackDraft(
 
 export async function generateRecruiterOutreachDraft(
   company: Company,
-  contactName: string | null,
+  recipient: DraftRecipient | string | null,
   hiring: HiringIntelligenceProfile,
 ): Promise<OutreachDraftContent> {
+  const normalizedRecipient: DraftRecipient =
+    typeof recipient === "string" || recipient === null
+      ? {
+          recipientName: recipient,
+          email: company.hrEmail ?? company.email ?? "info@bedrijf.nl",
+          isGeneralMailbox: !recipient,
+        }
+      : recipient;
+
   if (!isOpenAIConfigured()) {
-    return buildFallbackDraft(company, contactName, hiring);
+    return buildFallbackDraft(company, normalizedRecipient, hiring);
   }
+
+  const salutation = buildOutreachSalutation(
+    normalizedRecipient.recipientName,
+    normalizedRecipient.isGeneralMailbox,
+    normalizedRecipient.email,
+  );
 
   const facts = [
     `Bedrijf: ${company.name}`,
@@ -92,7 +123,9 @@ export async function generateRecruiterOutreachDraft(
     company.city ? `Locatie: ${company.city}` : null,
     hiring.vacancyCount > 0 ? `Vacatures: ${hiring.vacancyCount}` : null,
     hiring.signals[0] ? `Signaal: ${hiring.signals[0].description}` : null,
-    contactName ? `Contact: ${contactName}` : null,
+    normalizedRecipient.recipientName ? `Contact: ${normalizedRecipient.recipientName}` : null,
+    `Aanhef: ${salutation}`,
+    normalizedRecipient.isGeneralMailbox ? "Algemene HR/recruitment mailbox" : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -104,8 +137,10 @@ export async function generateRecruiterOutreachDraft(
       messages: [
         {
           role: "system",
-          content: `Schrijf een Nederlandse B2B introductiemail namens HireFlow Group (recruitment).
+          content: `Schrijf een Nederlandse B2B introductiemail namens HireFlow Group (recruitment/W&S).
+Doel: toestemming vragen om kandidaten te mogen zoeken/voorstellen voor concrete vacatures.
 Max ${MAX_WORDS} woorden. Professioneel, menselijk, kort. Geen clichés. Geen verzonnen feiten.
+Gebruik exact de opgegeven aanhef. Bij algemene mailbox: neutrale HR/recruitment-toon.
 Vermijd: ${BANNED_PHRASES.join(", ")}.
 Eén call-to-action. Bij weinig feiten: korte algemene mail + waarschuwing.`,
         },
@@ -120,15 +155,15 @@ Eén call-to-action. Bij weinig feiten: korte algemene mail + waarschuwing.`,
     });
 
     const content = response.choices[0]?.message?.content;
-    if (!content) return buildFallbackDraft(company, contactName, hiring);
+    if (!content) return buildFallbackDraft(company, normalizedRecipient, hiring);
 
     const parsed = outreachDraftContentSchema.safeParse(JSON.parse(content));
-    if (!parsed.success) return buildFallbackDraft(company, contactName, hiring);
+    if (!parsed.success) return buildFallbackDraft(company, normalizedRecipient, hiring);
 
     let bodyText = parsed.data.bodyText;
     for (const phrase of BANNED_PHRASES) {
       if (bodyText.toLowerCase().includes(phrase)) {
-        return buildFallbackDraft(company, contactName, hiring);
+        return buildFallbackDraft(company, normalizedRecipient, hiring);
       }
     }
 
@@ -138,6 +173,6 @@ Eén call-to-action. Bij weinig feiten: korte algemene mail + waarschuwing.`,
 
     return { ...parsed.data, bodyText };
   } catch {
-    return buildFallbackDraft(company, contactName, hiring);
+    return buildFallbackDraft(company, normalizedRecipient, hiring);
   }
 }

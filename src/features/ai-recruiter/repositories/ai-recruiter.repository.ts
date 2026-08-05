@@ -66,6 +66,7 @@ export interface AiRecruiterRepository {
       warnings: string[];
       selectedContactId: string | null;
       outreachMessageId: string | null;
+      externalCompanyData: Record<string, unknown>;
     }>,
   ): Promise<AiRecruiterRunItem>;
 

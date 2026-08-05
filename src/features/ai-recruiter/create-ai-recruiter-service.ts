@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createCompaniesServiceWithWriteClient } from "@/features/companies/create-companies-service";
 import { createCompanyFinderService } from "@/features/company-finder/create-company-finder-service";
-import { createContactFinderService } from "@/features/contact-finder/create-contact-finder-service";
+import { createContactDiscoveryEngine } from "@/features/contact-finder/create-contact-discovery-engine";
+import { createContactsServiceFromClient } from "@/features/contacts/create-contacts-service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import type {
   AiRecruiterEngineContext,
@@ -38,14 +39,15 @@ export async function createAiRecruiterOrchestrator(): Promise<AiRecruiterOrches
   const authClient = await createClient();
   const repository = new SupabaseAiRecruiterRepository(authClient);
   const companyFinder = await createCompanyFinderService();
-  const contactFinder = await createContactFinderService();
   const companiesService = await createCompaniesServiceWithWriteClient(authClient);
+  const contactsService = createContactsServiceFromClient(authClient);
+  const contactDiscovery = await createContactDiscoveryEngine(authClient, contactsService, companiesService);
   const outreachEngine = await createOutreachEngineService();
 
   return new AiRecruiterOrchestrator(
     repository,
     companyFinder,
-    contactFinder,
+    contactDiscovery,
     companiesService,
     outreachEngine,
     authClient,

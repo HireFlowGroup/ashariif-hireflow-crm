@@ -20,6 +20,7 @@ import {
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
 import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services/draft-generator.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
+import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { computeLeadScore, type ContactScoreInput } from "@/features/ai-recruiter/services/lead-scoring.service";
 import { RecruiterPipelineTracker } from "@/features/ai-recruiter/services/recruiter-pipeline-tracker";
 import {
@@ -27,12 +28,9 @@ import {
   searchPlanToCompanyFinderCriteria,
 } from "@/features/ai-recruiter/services/search-plan-parser.service";
 import type { CompanyFinderService } from "@/features/company-finder/services/company-finder.service";
-import type { ContactFinderService } from "@/features/contact-finder/services/contact-finder.service";
+import type { ContactDiscoveryEngine } from "@/features/contact-finder/services/contact-discovery-engine.service";
+import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 import { OutreachEngine, OutreachEngineError } from "@/features/outreach-engine/services/outreach-engine.service";
-import {
-  selectRecipient,
-  type OutreachContactRecord,
-} from "@/features/outreach-engine/services/recipient-selection.service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export class AiRecruiterOrchestratorError extends Error {
@@ -46,7 +44,7 @@ export class AiRecruiterOrchestrator {
   constructor(
     private readonly repository: AiRecruiterRepository,
     private readonly companyFinder: CompanyFinderService,
-    private readonly contactFinder: ContactFinderService,
+    private readonly contactDiscovery: ContactDiscoveryEngine,
     private readonly companiesService: CompaniesService,
     private readonly outreachEngine: OutreachEngine,
     private readonly contactsClient: SupabaseClient,
@@ -165,7 +163,21 @@ export class AiRecruiterOrchestrator {
       pipeline.startStep("hiring_signals");
       yield emitPipeline();
 
-      const qualifiedItems: Array<{ itemId: string; companyId: string; totalScore: number }> = [];
+      const qualifiedItems: Array<{
+        itemId: string;
+        companyId: string;
+        totalScore: number;
+        selected: SelectedDiscoveredContact;
+      }> = [];
+
+      type EligibleCompany = {
+        companyId: string;
+        itemId: string;
+        company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
+        hiring: HiringIntelligenceProfile;
+      };
+
+      const eligibleCompanies: EligibleCompany[] = [];
 
       for (const { companyId, itemId } of savedCompanyIds) {
         if (Date.now() - startedAt > timeoutMs) break;
@@ -201,83 +213,7 @@ export class AiRecruiterOrchestrator {
             continue;
           }
 
-          await this.repository.updateRun(context.organizationId, runId, { status: "finding_contacts" });
-
-          pipeline.startStep("contact_finder");
-          const contactJob = await this.contactFinder.createJob(context, {
-            companyId,
-            targetRoles: plan.contact_roles,
-          });
-
-          for await (const _ of this.contactFinder.runJob(context, contactJob.id)) {
-            /* consume stream */
-          }
-
-          const contacts = await this.loadContacts(context.organizationId, companyId);
-          const suppressed = new Set<string>();
-          const bounced = new Set<string>();
-          const recentCompanies = new Set<string>();
-          const activeEmails = new Set<string>();
-
-          const recipient = selectRecipient({
-            company,
-            contacts,
-            suppressedEmails: suppressed,
-            bouncedEmails: bounced,
-            recentlyContactedCompanyIds: recentCompanies,
-          });
-
-          let contactInput: ContactScoreInput = {
-            hasContact: false,
-            contactName: null,
-            contactEmail: null,
-            verificationStatus: "unknown",
-            confidence: null,
-          };
-
-          if (recipient.ok) {
-            counters.contactFound += 1;
-            contactInput = {
-              hasContact: true,
-              contactName: recipient.recipientName,
-              contactEmail: recipient.recipientEmail,
-              verificationStatus: recipient.source === "contact" ? "likely" : "catch_all",
-              confidence: 0.7,
-            };
-          } else {
-            await this.repository.updateRunItem(context.organizationId, itemId, {
-              stage: "skipped",
-              status: "skipped",
-              hiringScore: hiring.hiringScore,
-              rejectionReason: recipient.reason,
-              warnings: [...hiring.warnings, recipient.reason],
-            });
-            counters.skipped += 1;
-            continue;
-          }
-
-          pipeline.startStep("lead_score");
-          const leadScore = computeLeadScore(company, hiring, contactInput, plan);
-
-          await this.repository.updateRunItem(context.organizationId, itemId, {
-            stage: "scored",
-            status: leadScore.priority === "Reject" ? "skipped" : "completed",
-            hiringScore: hiring.hiringScore,
-            contactScore: leadScore.contactScore,
-            outreachScore: leadScore.outreachReadinessScore,
-            totalScore: leadScore.totalScore,
-            scoreBreakdown: leadScore.breakdown,
-            rejectionReason: leadScore.priority === "Reject" ? "Score onder drempel" : null,
-            warnings: hiring.warnings,
-            selectedContactId: recipient.contactId,
-          });
-
-          if (leadScore.priority === "Reject") {
-            counters.skipped += 1;
-            continue;
-          }
-
-          qualifiedItems.push({ itemId, companyId, totalScore: leadScore.totalScore });
+          eligibleCompanies.push({ companyId, itemId, company, hiring });
         } catch (error) {
           consecutiveFailures += 1;
           counters.failed += 1;
@@ -289,7 +225,183 @@ export class AiRecruiterOrchestrator {
 
       pipeline.completeStep("vacancies", { succeeded: counters.withVacancies });
       pipeline.completeStep("hiring_signals", { succeeded: counters.withSignals });
-      pipeline.completeStep("contact_finder", { succeeded: counters.contactFound });
+      yield emitPipeline();
+
+      await this.repository.updateRun(context.organizationId, runId, { status: "finding_contacts" });
+      yield { type: "run_status", status: "finding_contacts", message: "Contacten zoeken…" };
+
+      pipeline.startStep("contact_finder");
+      yield emitPipeline();
+
+      const suppressedEmails = await this.loadSuppressedEmails(context.organizationId);
+      const bouncedEmails = await this.loadBouncedEmails(context.organizationId);
+
+      const contactStats = {
+        processed: 0,
+        personal: 0,
+        general: 0,
+        missing: 0,
+        lookupFailed: 0,
+        providerErrors: 0,
+        totalDurationMs: 0,
+      };
+
+      type DiscoveryEntry = {
+        itemId: string;
+        companyId: string;
+        hiring: HiringIntelligenceProfile;
+        result: Awaited<ReturnType<ContactDiscoveryEngine["discoverForCompany"]>>;
+      };
+
+      const discoveryByItem = new Map<string, DiscoveryEntry>();
+
+      await runWithConcurrency(eligibleCompanies, 5, async (entry) => {
+        const discoveryStarted = Date.now();
+        contactStats.processed += 1;
+
+        try {
+          const result = await this.contactDiscovery.discoverForCompany(
+            { ...context, runId, runItemId: entry.itemId },
+            {
+              companyId: entry.companyId,
+              targetRoles: plan.contact_roles,
+              suppressedEmails,
+              bouncedEmails,
+            },
+          );
+
+          contactStats.totalDurationMs += Date.now() - discoveryStarted;
+
+          if (result.stage === "contact_found") contactStats.personal += 1;
+          else if (result.stage === "general_mailbox_found") contactStats.general += 1;
+          else if (result.stage === "blocked_missing_contact") contactStats.missing += 1;
+          else if (result.stage === "contact_lookup_failed") {
+            contactStats.lookupFailed += 1;
+            if (result.traces.some((trace) => trace.error)) {
+              contactStats.providerErrors += 1;
+            }
+          }
+
+          discoveryByItem.set(entry.itemId, {
+            itemId: entry.itemId,
+            companyId: entry.companyId,
+            hiring: entry.hiring,
+            result,
+          });
+        } catch (error) {
+          contactStats.lookupFailed += 1;
+          contactStats.providerErrors += 1;
+          counters.failed += 1;
+          discoveryByItem.set(entry.itemId, {
+            itemId: entry.itemId,
+            companyId: entry.companyId,
+            hiring: entry.hiring,
+            result: {
+              stage: "contact_lookup_failed",
+              selected: null,
+              alternatives: [],
+              traces: [],
+              errorMessage: error instanceof Error ? error.message : "Contact lookup mislukt",
+            },
+          });
+        }
+      });
+
+      pipeline.startStep("lead_score");
+
+      for (const entry of eligibleCompanies) {
+        const discovery = discoveryByItem.get(entry.itemId);
+        if (!discovery) continue;
+
+        const { result, hiring } = discovery;
+        const contactDiscoveryPayload = {
+          contactDiscovery: {
+            stage: result.stage,
+            selected: result.selected,
+            alternatives: result.alternatives,
+            errorMessage: result.errorMessage,
+          },
+        };
+
+        if (!result.selected) {
+          if (result.stage === "blocked_missing_contact") {
+            counters.blockedMissingContact += 1;
+          }
+
+          const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
+            stage: result.stage,
+            status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
+            hiringScore: hiring.hiringScore,
+            rejectionReason: result.errorMessage,
+            warnings: hiring.warnings,
+            externalCompanyData: contactDiscoveryPayload,
+          });
+
+          if (result.stage !== "contact_lookup_failed") {
+            counters.skipped += 1;
+          }
+
+          yield { type: "item", item: updatedItem };
+          continue;
+        }
+
+        if (result.stage === "contact_found") {
+          counters.contactFound += 1;
+        } else if (result.stage === "general_mailbox_found") {
+          counters.generalMailboxFound += 1;
+        }
+
+        const contactInput: ContactScoreInput = {
+          hasContact: true,
+          contactName: result.selected.recipientName,
+          contactEmail: result.selected.email,
+          verificationStatus: result.selected.verificationStatus,
+          confidence: result.selected.relevanceScore / 100,
+        };
+
+        const leadScore = computeLeadScore(entry.company, hiring, contactInput, plan);
+
+        const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
+          stage: result.stage,
+          status: leadScore.priority === "Reject" ? "skipped" : "completed",
+          hiringScore: hiring.hiringScore,
+          contactScore: leadScore.contactScore,
+          outreachScore: leadScore.outreachReadinessScore,
+          totalScore: leadScore.totalScore,
+          scoreBreakdown: leadScore.breakdown,
+          rejectionReason: leadScore.priority === "Reject" ? "Score onder drempel" : null,
+          warnings: hiring.warnings,
+          selectedContactId: result.selected.contactId,
+          externalCompanyData: contactDiscoveryPayload,
+        });
+
+        yield { type: "item", item: updatedItem };
+
+        if (leadScore.priority === "Reject") {
+          counters.skipped += 1;
+          continue;
+        }
+
+        qualifiedItems.push({
+          itemId: entry.itemId,
+          companyId: entry.companyId,
+          totalScore: leadScore.totalScore,
+          selected: result.selected,
+        });
+      }
+
+      const avgDuration =
+        contactStats.processed > 0
+          ? Math.round(contactStats.totalDurationMs / contactStats.processed)
+          : 0;
+
+      pipeline.completeStep("contact_finder", {
+        processed: contactStats.processed,
+        succeeded: contactStats.personal + contactStats.general,
+        skipped: contactStats.missing + contactStats.lookupFailed,
+        errors: contactStats.providerErrors,
+        message: `${contactStats.personal} persoonlijk · ${contactStats.general} mailbox · ${contactStats.missing} geen contact · ${contactStats.lookupFailed} lookup-fout · gem. ${avgDuration}ms`,
+      });
       pipeline.completeStep("lead_score", { succeeded: qualifiedItems.length });
       yield emitPipeline();
 
@@ -300,28 +412,31 @@ export class AiRecruiterOrchestrator {
       qualifiedItems.sort((a, b) => b.totalScore - a.totalScore);
       const topItems = qualifiedItems.slice(0, plan.maximum_drafts);
 
-      for (const { itemId, companyId } of topItems) {
+      for (const { itemId, companyId, selected } of topItems) {
         if (draftsCreated >= plan.maximum_drafts) break;
 
         try {
           const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
           const hiring = computeHiringIntelligenceProfile(company, plan);
-          const contacts = await this.loadContacts(context.organizationId, companyId);
-          const recipient = selectRecipient({
+
+          if (!selected.contactId) continue;
+
+          const draft = await generateRecruiterOutreachDraft(
             company,
-            contacts,
-            suppressedEmails: new Set(),
-            bouncedEmails: new Set(),
-            recentlyContactedCompanyIds: new Set(),
-          });
-
-          if (!recipient.ok) continue;
-
-          const draft = await generateRecruiterOutreachDraft(company, recipient.recipientName, hiring);
+            {
+              recipientName: selected.recipientName,
+              email: selected.email,
+              isGeneralMailbox: selected.isGeneralMailbox,
+            },
+            hiring,
+          );
 
           let outreachMessageId: string | null = null;
           try {
-            const message = await this.outreachEngine.createDraft(context, { companyId, contactId: recipient.contactId });
+            const message = await this.outreachEngine.createDraft(context, {
+              companyId,
+              contactId: selected.contactId,
+            });
             outreachMessageId = message.id;
             await this.outreachEngine.updateDraft(context, message.id, {
               subject: draft.recommendedSubject,
@@ -424,23 +539,44 @@ export class AiRecruiterOrchestrator {
     return results[0] ?? null;
   }
 
-  private async loadContacts(organizationId: string, companyId: string): Promise<OutreachContactRecord[]> {
+  private async loadSuppressedEmails(organizationId: string): Promise<Set<string>> {
     const { data } = await this.contactsClient
-      .from("contacts")
-      .select("id, first_name, last_name, job_title, email, confidence, outreach_opt_out")
-      .eq("organization_id", organizationId)
-      .eq("company_id", companyId);
+      .from("outreach_suppressions")
+      .select("email")
+      .eq("organization_id", organizationId);
 
-    return (data ?? []).map((row) => ({
-      id: row.id as string,
-      firstName: row.first_name as string,
-      lastName: row.last_name as string,
-      jobTitle: (row.job_title as string) ?? null,
-      email: (row.email as string) ?? null,
-      confidence: (row.confidence as number) ?? null,
-      outreachOptOut: Boolean(row.outreach_opt_out),
-    }));
+    return new Set((data ?? []).map((row) => (row.email as string).toLowerCase()));
   }
+
+  private async loadBouncedEmails(organizationId: string): Promise<Set<string>> {
+    const { data } = await this.contactsClient
+      .from("outreach_messages")
+      .select("recipient_email")
+      .eq("organization_id", organizationId)
+      .eq("status", "bounced");
+
+    return new Set((data ?? []).map((row) => (row.recipient_email as string).toLowerCase()));
+  }
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  let index = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const current = items[index];
+      index += 1;
+      if (!current) continue;
+      await worker(current);
+    }
+  });
+
+  await Promise.allSettled(workers);
 }
 
 export function createInitialRunCounters(): AiRecruiterRunCounters {

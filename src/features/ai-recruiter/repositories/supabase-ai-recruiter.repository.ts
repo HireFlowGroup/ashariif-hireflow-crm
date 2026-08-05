@@ -9,6 +9,7 @@ import type {
   CreateAiRecruiterRunInput,
   ReplyClassification,
 } from "@/features/ai-recruiter/domain/types";
+import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 import {
   createInitialCounters,
   createInitialPipelineSteps,
@@ -37,15 +38,35 @@ function mapRun(row: Record<string, unknown>): AiRecruiterRun {
 
 function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
   const companies = row.companies as { name: string; city: string | null; sector: string | null } | null;
-  const contacts = row.contacts as { first_name: string; last_name: string; email: string | null } | null;
+  const contacts = row.contacts as {
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    job_title: string | null;
+    verification_status: string | null;
+    source_type: string | null;
+    relevance_score: number | null;
+    confidence: number | null;
+    is_general_mailbox: boolean | null;
+  } | null;
   const messages = row.outreach_messages as { subject: string; recipient_email: string } | null;
+  const externalCompanyData = (row.external_company_data as Record<string, unknown>) ?? {};
+  const contactDiscovery = externalCompanyData.contactDiscovery as
+    | {
+        selected?: SelectedDiscoveredContact;
+        alternatives?: SelectedDiscoveredContact[];
+        errorMessage?: string | null;
+      }
+    | undefined;
+
+  const selected = contactDiscovery?.selected;
 
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
     runId: row.run_id as string,
     companyId: (row.company_id as string) ?? null,
-    externalCompanyData: (row.external_company_data as Record<string, unknown>) ?? {},
+    externalCompanyData,
     stage: row.stage as AiRecruiterRunItem["stage"],
     status: row.status as AiRecruiterRunItem["status"],
     discoveryScore: row.discovery_score as number | null,
@@ -70,9 +91,26 @@ function mapItem(row: Record<string, unknown>): AiRecruiterRunItem {
     companyName: companies?.name,
     companyCity: companies?.city,
     companySector: companies?.sector,
-    contactName: contacts ? `${contacts.first_name} ${contacts.last_name}`.trim() : undefined,
-    recipientEmail: messages?.recipient_email ?? contacts?.email ?? undefined,
+    contactName:
+      selected?.recipientName
+      ?? (contacts ? `${contacts.first_name} ${contacts.last_name}`.trim() : undefined),
+    recipientEmail: messages?.recipient_email ?? selected?.email ?? contacts?.email ?? undefined,
     draftSubject: messages?.subject,
+    contactJobTitle: selected?.jobTitle ?? contacts?.job_title ?? undefined,
+    contactVerificationStatus: selected?.verificationStatus ?? contacts?.verification_status ?? undefined,
+    contactSourceType: selected?.sourceType ?? contacts?.source_type ?? undefined,
+    contactRelevanceScore: selected?.relevanceScore ?? contacts?.relevance_score ?? undefined,
+    contactSelectionReason: selected?.selectionReason,
+    contactAlternatives: contactDiscovery?.alternatives?.map((alt) => ({
+      email: alt.email,
+      recipientName: alt.recipientName,
+      jobTitle: alt.jobTitle,
+      relevanceScore: alt.relevanceScore,
+      sourceType: alt.sourceType,
+      verificationStatus: alt.verificationStatus,
+      isGeneralMailbox: alt.isGeneralMailbox,
+    })),
+    contactDiscoveryError: contactDiscovery?.errorMessage ?? undefined,
   };
 }
 
@@ -196,13 +234,26 @@ export class SupabaseAiRecruiterRepository implements AiRecruiterRepository {
     if (updates.warnings !== undefined) row.warnings = updates.warnings;
     if (updates.selectedContactId !== undefined) row.selected_contact_id = updates.selectedContactId;
     if (updates.outreachMessageId !== undefined) row.outreach_message_id = updates.outreachMessageId;
+    if (updates.externalCompanyData !== undefined) {
+      const { data: current } = await this.client
+        .from("ai_recruiter_run_items")
+        .select("external_company_data")
+        .eq("id", itemId)
+        .eq("organization_id", organizationId)
+        .maybeSingle();
+
+      row.external_company_data = {
+        ...((current?.external_company_data as Record<string, unknown>) ?? {}),
+        ...updates.externalCompanyData,
+      };
+    }
 
     const { data, error } = await this.client
       .from("ai_recruiter_run_items")
       .update(row)
       .eq("id", itemId)
       .eq("organization_id", organizationId)
-      .select("*, companies(name, city, sector), contacts(first_name, last_name, email), outreach_messages(subject, recipient_email)")
+      .select("*, companies(name, city, sector), contacts(first_name, last_name, email, job_title, verification_status, source_type, relevance_score, confidence, is_general_mailbox), outreach_messages(subject, recipient_email)")
       .single();
 
     if (error || !data) throw new Error("Run item kon niet worden bijgewerkt.");
@@ -212,7 +263,7 @@ export class SupabaseAiRecruiterRepository implements AiRecruiterRepository {
   async getRunItem(organizationId: string, itemId: string): Promise<AiRecruiterRunItem | null> {
     const { data } = await this.client
       .from("ai_recruiter_run_items")
-      .select("*, companies(name, city, sector), contacts(first_name, last_name, email), outreach_messages(subject, recipient_email)")
+      .select("*, companies(name, city, sector), contacts(first_name, last_name, email, job_title, verification_status, source_type, relevance_score, confidence, is_general_mailbox), outreach_messages(subject, recipient_email)")
       .eq("id", itemId)
       .eq("organization_id", organizationId)
       .maybeSingle();
@@ -223,7 +274,7 @@ export class SupabaseAiRecruiterRepository implements AiRecruiterRepository {
   async listRunItems(organizationId: string, runId: string): Promise<AiRecruiterRunItem[]> {
     const { data } = await this.client
       .from("ai_recruiter_run_items")
-      .select("*, companies(name, city, sector), contacts(first_name, last_name, email), outreach_messages(subject, recipient_email)")
+      .select("*, companies(name, city, sector), contacts(first_name, last_name, email, job_title, verification_status, source_type, relevance_score, confidence, is_general_mailbox), outreach_messages(subject, recipient_email)")
       .eq("organization_id", organizationId)
       .eq("run_id", runId)
       .order("total_score", { ascending: false, nullsFirst: false });

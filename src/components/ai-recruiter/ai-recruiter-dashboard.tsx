@@ -11,6 +11,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { ProspectContactReview } from "@/components/ai-recruiter/prospect-contact-review";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,7 +99,15 @@ export function AiRecruiterDashboard() {
   const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
 
   const reviewItems = useMemo(
-    () => items.filter((i) => i.stage === "draft_created" || i.outreachMessageId),
+    () =>
+      items.filter(
+        (i) =>
+          i.stage === "draft_created"
+          || i.outreachMessageId
+          || i.stage === "contact_found"
+          || i.stage === "general_mailbox_found"
+          || i.stage === "blocked_missing_contact",
+      ),
     [items],
   );
 
@@ -378,6 +387,8 @@ export function AiRecruiterDashboard() {
                     <span>Gevonden: {activeRun.counters?.found ?? 0}</span>
                     <span>Gevalideerd: {activeRun.counters?.validated ?? 0}</span>
                     <span>Contact: {activeRun.counters?.contactFound ?? 0}</span>
+                    <span>Mailbox: {activeRun.counters?.generalMailboxFound ?? 0}</span>
+                    <span>Geen contact: {activeRun.counters?.blockedMissingContact ?? 0}</span>
                     <span>Concepten: {activeRun.counters?.draftsCreated ?? 0}</span>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -410,7 +421,9 @@ export function AiRecruiterDashboard() {
                         onClick={() => setSelectedItemId(item.id)}
                       >
                         <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
-                        <p className="text-xs text-muted-foreground">Score {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Score {item.totalScore ?? "—"} · {item.recipientEmail ?? "geen ontvanger"} · {item.stage}
+                        </p>
                       </button>
                     ))
                   )}
@@ -424,9 +437,17 @@ export function AiRecruiterDashboard() {
                         <p><span className="text-muted-foreground">Bedrijf:</span> {selectedItem.companyName}</p>
                         <p><span className="text-muted-foreground">Locatie:</span> {selectedItem.companyCity ?? "—"}</p>
                         <p><span className="text-muted-foreground">Sector:</span> {selectedItem.companySector ?? "—"}</p>
-                        <p><span className="text-muted-foreground">Contact:</span> {selectedItem.contactName ?? "—"}</p>
-                        <p><span className="text-muted-foreground">Ontvanger:</span> {selectedItem.recipientEmail ?? "—"}</p>
                         <p><span className="text-muted-foreground">Score:</span> {selectedItem.totalScore ?? "—"}</p>
+                        {activeRun ? (
+                          <ProspectContactReview
+                            runId={activeRun.id}
+                            item={selectedItem}
+                            onUpdated={(updated) => {
+                              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+                            }}
+                            onError={setError}
+                          />
+                        ) : null}
                         <p><span className="text-muted-foreground">Onderwerp:</span> {selectedItem.draftSubject ?? "—"}</p>
                         {(selectedItem.warnings?.length ?? 0) > 0 ? (
                           <div className="text-amber-700 text-xs">{selectedItem.warnings.join(" · ")}</div>

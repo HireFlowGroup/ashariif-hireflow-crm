@@ -24,6 +24,9 @@ export const aiRecruiterRunItemStageSchema = z.enum([
   "enriched",
   "scored",
   "contact_found",
+  "general_mailbox_found",
+  "blocked_missing_contact",
+  "contact_lookup_failed",
   "draft_created",
   "approved",
   "sent",
@@ -153,6 +156,8 @@ export type AiRecruiterRunCounters = {
   withVacancies: number;
   withSignals: number;
   contactFound: number;
+  generalMailboxFound: number;
+  blockedMissingContact: number;
   draftsCreated: number;
   approved: number;
   sent: number;
@@ -205,6 +210,21 @@ export type AiRecruiterRunItem = {
   contactName?: string | null;
   recipientEmail?: string | null;
   draftSubject?: string | null;
+  contactJobTitle?: string | null;
+  contactVerificationStatus?: string | null;
+  contactSourceType?: string | null;
+  contactRelevanceScore?: number | null;
+  contactSelectionReason?: string | null;
+  contactAlternatives?: Array<{
+    email: string;
+    recipientName: string | null;
+    jobTitle: string | null;
+    relevanceScore: number;
+    sourceType: string;
+    verificationStatus: string;
+    isGeneralMailbox: boolean;
+  }>;
+  contactDiscoveryError?: string | null;
 };
 
 export type AiRecruiterEngineContext = {
@@ -241,6 +261,8 @@ export function createInitialCounters(): AiRecruiterRunCounters {
     withVacancies: 0,
     withSignals: 0,
     contactFound: 0,
+    generalMailboxFound: 0,
+    blockedMissingContact: 0,
     draftsCreated: 0,
     approved: 0,
     sent: 0,
