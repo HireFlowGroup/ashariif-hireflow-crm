@@ -80,7 +80,10 @@ export class AiRecruiterOrchestrator {
     const config = getAiRecruiterConfig();
     const timeoutMs = config.runTimeoutMinutes * 60_000;
     const startedAt = Date.now();
-    const counters = { ...run.counters };
+    const counters: AiRecruiterRunCounters = {
+      ...createInitialCounters(),
+      ...run.counters,
+    };
     let consecutiveFailures = 0;
 
     const pipeline = new RecruiterPipelineTracker(run.pipelineSteps, () => undefined);
@@ -170,16 +173,19 @@ export class AiRecruiterOrchestrator {
         selected: SelectedDiscoveredContact;
       }> = [];
 
-      type EligibleCompany = {
+      type CompanyContactContext = {
         companyId: string;
         itemId: string;
+        name: string;
         company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
         hiring: HiringIntelligenceProfile;
+        hiringQualified: boolean;
+        hiringRejectionReason: string | null;
       };
 
-      const eligibleCompanies: EligibleCompany[] = [];
+      const companyContactContexts: CompanyContactContext[] = [];
 
-      for (const { companyId, itemId } of savedCompanyIds) {
+      for (const { companyId, itemId, name } of savedCompanyIds) {
         if (Date.now() - startedAt > timeoutMs) break;
 
         try {
@@ -189,38 +195,57 @@ export class AiRecruiterOrchestrator {
           if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
+          let hiringQualified = true;
+          let hiringRejectionReason: string | null = null;
+
           if (plan.vacancy_required && hiring.vacancyCount === 0) {
-            await this.repository.updateRunItem(context.organizationId, itemId, {
-              stage: "skipped",
-              status: "skipped",
-              hiringScore: hiring.hiringScore,
-              rejectionReason: "Vacature vereist maar niet gevonden",
-              warnings: hiring.warnings,
-            });
-            counters.skipped += 1;
-            continue;
+            hiringQualified = false;
+            hiringRejectionReason = "Vacature vereist maar niet gevonden";
+          } else if (hiring.hiringScore < plan.minimum_hiring_score) {
+            hiringQualified = false;
+            hiringRejectionReason = `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`;
           }
 
-          if (hiring.hiringScore < plan.minimum_hiring_score) {
-            await this.repository.updateRunItem(context.organizationId, itemId, {
-              stage: "scored",
-              status: "skipped",
-              hiringScore: hiring.hiringScore,
-              rejectionReason: `Hiring score ${hiring.hiringScore} onder minimum ${plan.minimum_hiring_score}`,
-              warnings: hiring.warnings,
-            });
-            counters.skipped += 1;
-            continue;
-          }
-
-          eligibleCompanies.push({ companyId, itemId, company, hiring });
+          companyContactContexts.push({
+            companyId,
+            itemId,
+            name,
+            company,
+            hiring,
+            hiringQualified,
+            hiringRejectionReason,
+          });
         } catch (error) {
           consecutiveFailures += 1;
           counters.failed += 1;
+          console.error("[ContactFinder] company context failed", {
+            companyId,
+            itemId,
+            error: error instanceof Error ? error.message : error,
+          });
           if (consecutiveFailures >= config.consecutiveProviderFailuresKillSwitch) {
             throw new AiRecruiterOrchestratorError("Kill switch: te veel opeenvolgende fouten.", "provider_kill_switch");
           }
         }
+      }
+
+      console.info("[ContactFinder] DEBUG overview — start", {
+        companiesReceived: savedCompanyIds.length,
+        validatedCounter: counters.validated,
+        companiesPreparedForContactFinder: companyContactContexts.length,
+      });
+
+      if (counters.validated > 0 && savedCompanyIds.length === 0) {
+        console.error("[ContactFinder] BUG: validated > 0 maar geen company_id op run items", {
+          validated: counters.validated,
+          savedCompanyIds: savedCompanyIds.length,
+        });
+      }
+
+      if (companyContactContexts.length === 0 && savedCompanyIds.length > 0) {
+        console.error("[ContactFinder] BUG: geen company context — Contact Finder wordt niet uitgevoerd", {
+          savedCompanyIds: savedCompanyIds.length,
+        });
       }
 
       pipeline.completeStep("vacancies", { succeeded: counters.withVacancies });
@@ -243,6 +268,8 @@ export class AiRecruiterOrchestrator {
         missing: 0,
         lookupFailed: 0,
         providerErrors: 0,
+        providersInvoked: 0,
+        rejected: 0,
         totalDurationMs: 0,
       };
 
@@ -250,14 +277,21 @@ export class AiRecruiterOrchestrator {
         itemId: string;
         companyId: string;
         hiring: HiringIntelligenceProfile;
+        hiringQualified: boolean;
+        hiringRejectionReason: string | null;
         result: Awaited<ReturnType<ContactDiscoveryEngine["discoverForCompany"]>>;
       };
 
       const discoveryByItem = new Map<string, DiscoveryEntry>();
 
-      await runWithConcurrency(eligibleCompanies, 5, async (entry) => {
+      await runWithConcurrency(companyContactContexts, 5, async (entry) => {
         const discoveryStarted = Date.now();
         contactStats.processed += 1;
+
+        console.info("[ContactFinder] START company", {
+          companyId: entry.companyId,
+          companyName: entry.name,
+        });
 
         try {
           const result = await this.contactDiscovery.discoverForCompany(
@@ -271,6 +305,31 @@ export class AiRecruiterOrchestrator {
           );
 
           contactStats.totalDurationMs += Date.now() - discoveryStarted;
+          contactStats.providersInvoked += result.traces.length;
+          contactStats.rejected += result.traces.reduce((sum, trace) => sum + trace.rejectedCount, 0);
+
+          for (const trace of result.traces) {
+            console.info("[ContactFinder] provider", {
+              companyId: entry.companyId,
+              companyName: entry.name,
+              provider: trace.provider,
+              providerResult: trace.rawResultCount,
+              normalized: trace.normalizedCount,
+              accepted: trace.validCount,
+              rejected: trace.rejectedCount,
+              reason:
+                trace.error
+                ?? trace.rejectionReasons.map((r) => r.message).join("; ")
+                ?? null,
+            });
+          }
+
+          if (result.traces.length === 0) {
+            console.error("[ContactFinder] BUG: geen provider aangeroepen", {
+              companyId: entry.companyId,
+              companyName: entry.name,
+            });
+          }
 
           if (result.stage === "contact_found") contactStats.personal += 1;
           else if (result.stage === "general_mailbox_found") contactStats.general += 1;
@@ -282,20 +341,39 @@ export class AiRecruiterOrchestrator {
             }
           }
 
+          console.info("[ContactFinder] END company", {
+            companyId: entry.companyId,
+            companyName: entry.name,
+            stage: result.stage,
+            selectedEmail: result.selected?.email ?? null,
+            providerCount: result.traces.length,
+          });
+
           discoveryByItem.set(entry.itemId, {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
+            hiringQualified: entry.hiringQualified,
+            hiringRejectionReason: entry.hiringRejectionReason,
             result,
           });
         } catch (error) {
           contactStats.lookupFailed += 1;
           contactStats.providerErrors += 1;
           counters.failed += 1;
+
+          console.error("[ContactFinder] END company — lookup failed", {
+            companyId: entry.companyId,
+            companyName: entry.name,
+            error: error instanceof Error ? error.message : error,
+          });
+
           discoveryByItem.set(entry.itemId, {
             itemId: entry.itemId,
             companyId: entry.companyId,
             hiring: entry.hiring,
+            hiringQualified: entry.hiringQualified,
+            hiringRejectionReason: entry.hiringRejectionReason,
             result: {
               stage: "contact_lookup_failed",
               selected: null,
@@ -307,13 +385,31 @@ export class AiRecruiterOrchestrator {
         }
       });
 
+      console.info("[ContactFinder] DEBUG overview — after discovery", {
+        companiesReceived: savedCompanyIds.length,
+        companiesProcessed: contactStats.processed,
+        providersInvoked: contactStats.providersInvoked,
+        contactsFound: contactStats.personal,
+        mailboxesFound: contactStats.general,
+        noContact: contactStats.missing,
+        rejected: contactStats.rejected,
+        lookupFailed: contactStats.lookupFailed,
+      });
+
       pipeline.startStep("lead_score");
 
-      for (const entry of eligibleCompanies) {
+      for (const entry of companyContactContexts) {
         const discovery = discoveryByItem.get(entry.itemId);
-        if (!discovery) continue;
+        if (!discovery) {
+          console.error("[ContactFinder] BUG: geen discovery result", {
+            companyId: entry.companyId,
+            companyName: entry.name,
+            itemId: entry.itemId,
+          });
+          continue;
+        }
 
-        const { result, hiring } = discovery;
+        const { result, hiring, hiringQualified, hiringRejectionReason } = discovery;
         const contactDiscoveryPayload = {
           contactDiscovery: {
             stage: result.stage,
@@ -349,6 +445,21 @@ export class AiRecruiterOrchestrator {
           counters.contactFound += 1;
         } else if (result.stage === "general_mailbox_found") {
           counters.generalMailboxFound += 1;
+        }
+
+        if (!hiringQualified) {
+          const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
+            stage: result.stage,
+            status: "skipped",
+            hiringScore: hiring.hiringScore,
+            rejectionReason: hiringRejectionReason,
+            warnings: hiring.warnings,
+            selectedContactId: result.selected.contactId,
+            externalCompanyData: contactDiscoveryPayload,
+          });
+          counters.skipped += 1;
+          yield { type: "item", item: updatedItem };
+          continue;
         }
 
         const contactInput: ContactScoreInput = {
@@ -400,10 +511,20 @@ export class AiRecruiterOrchestrator {
         succeeded: contactStats.personal + contactStats.general,
         skipped: contactStats.missing + contactStats.lookupFailed,
         errors: contactStats.providerErrors,
-        message: `${contactStats.personal} persoonlijk · ${contactStats.general} mailbox · ${contactStats.missing} geen contact · ${contactStats.lookupFailed} lookup-fout · gem. ${avgDuration}ms`,
+        message: [
+          `ontvangen ${savedCompanyIds.length}`,
+          `verwerkt ${contactStats.processed}`,
+          `providers ${contactStats.providersInvoked}`,
+          `${contactStats.personal} contact`,
+          `${contactStats.general} mailbox`,
+          `${contactStats.missing} geen contact`,
+          `${contactStats.rejected} rejected`,
+          `gem. ${avgDuration}ms`,
+        ].join(" · "),
       });
       pipeline.completeStep("lead_score", { succeeded: qualifiedItems.length });
       yield emitPipeline();
+      yield { type: "counters", counters };
 
       await this.repository.updateRun(context.organizationId, runId, { status: "drafting" });
       yield { type: "run_status", status: "drafting" };

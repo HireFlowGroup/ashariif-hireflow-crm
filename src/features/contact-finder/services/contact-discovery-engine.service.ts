@@ -61,6 +61,13 @@ export class ContactDiscoveryEngine {
         limit: 500,
       });
 
+      console.info("[ContactFinder] START company (engine)", {
+        companyId: input.companyId,
+        companyName: company.name,
+        domain: company.domain,
+        crmContacts: existingContacts.length,
+      });
+
       const allCandidates: DiscoveredContactCandidate[] = [];
 
       // A. Existing CRM
@@ -194,6 +201,10 @@ export class ContactDiscoveryEngine {
 
       return this.finalize(allCandidates, company, traces, suppressed, bounced, null, null, existingContacts, context);
     } catch (error) {
+      console.error("[ContactFinder] END company (engine) — error", {
+        companyId: input.companyId,
+        error: error instanceof Error ? error.message : error,
+      });
       return {
         stage: "contact_lookup_failed",
         selected: null,
@@ -254,6 +265,13 @@ export class ContactDiscoveryEngine {
     }
 
     if (!selected) {
+      console.info("[ContactFinder] END company (engine)", {
+        companyId: company.id,
+        companyName: company.name,
+        stage: "blocked_missing_contact",
+        selectedEmail: null,
+        providerCount: traces.length,
+      });
       return {
         stage: "blocked_missing_contact",
         selected: null,
@@ -269,6 +287,14 @@ export class ContactDiscoveryEngine {
     }
 
     const stage = selected.isGeneralMailbox ? "general_mailbox_found" : "contact_found";
+
+    console.info("[ContactFinder] END company (engine)", {
+      companyId: company.id,
+      companyName: company.name,
+      stage,
+      selectedEmail: selected.email,
+      providerCount: traces.length,
+    });
 
     return {
       stage,
@@ -381,7 +407,15 @@ export class ContactDiscoveryEngine {
       });
     }
 
-    console.info("[ContactDiscovery]", entry);
+    console.info("[ContactDiscovery] provider", {
+      companyId: entry.companyId,
+      companyName: entry.companyName,
+      provider: entry.provider,
+      providerResult: entry.rawResultCount,
+      accepted: entry.validCount,
+      rejected: entry.rejectedCount,
+      reason: entry.error ?? (entry.rejectionReasons.map((r) => r.message).join("; ") || null),
+    });
     return entry;
   }
 }
