@@ -454,5 +454,3 @@ export async function runDiscoveryQualityGate(input: {
 
   return { qualified, rejected, report };
 }
-
-export { countHomepageSignals };

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recruiter/discovery-funnel-panel";
+import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
 import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
 import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";

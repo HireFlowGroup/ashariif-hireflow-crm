@@ -23,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
+import type { ProspectDossier } from "@/features/ai-recruiter/domain/prospect-dossier.types";
 import type { AiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import type { AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
 import { aiRecruiterFetchJson } from "@/lib/ai-recruiter/client-api";
