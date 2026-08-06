@@ -7,6 +7,12 @@ import {
   evaluateProspectPipeline,
   summarizeEligibilityDecisions,
 } from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
+import {
+  mapScoreToDecision,
+  prospectDecisionToBreakdownFields,
+} from "@/features/ai-recruiter/services/prospect-decision.service";
+import { classifyBusinessModel, isExcludedBusinessModel } from "@/features/company-finder/discovery/business-model-classifier.service";
+import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import type {
   AiRecruiterEngineContext,
@@ -627,6 +633,14 @@ export class AiRecruiterOrchestrator {
         const analysis = analysisByCompanyId.get(entry.companyId) ?? null;
         const salesFields = salesToScoreBreakdownFields(sales);
 
+        const businessModel = classifyBusinessModel({
+          name: company.name,
+          url: company.website,
+          description: company.aiSummary,
+          sector: company.sector,
+          excludeRecruitmentAgencies: recruiterConfig.excludeRecruitmentAgencies,
+        });
+
         const pipelineDecision = evaluateProspectPipeline({
           company,
           plan,
@@ -636,6 +650,14 @@ export class AiRecruiterOrchestrator {
           contactStage: result.stage,
           contactRejectionReason: result.errorMessage,
         });
+
+        const decisionFields = prospectDecisionToBreakdownFields(
+          mapScoreToDecision(pipelineDecision.eligibility.score),
+        );
+
+        const identityBlocked =
+          isGenericCompanyLabel(company.name)
+          || isExcludedBusinessModel(businessModel.classification, recruiterConfig.excludeRecruitmentAgencies);
 
         eligibilityDecisions.push(pipelineDecision.eligibility);
 
@@ -677,9 +699,15 @@ export class AiRecruiterOrchestrator {
           recruitmentPotentialMotivation: opportunity.recruitmentPotentialMotivation,
           recruitmentIntelligenceScore: pipelineDecision.aiOpportunityScore ?? undefined,
           ...salesFields,
+          ...decisionFields,
+          officialName: company.name,
+          businessClassification: businessModel.classification,
+          identityUnresolved: isGenericCompanyLabel(company.name),
         };
 
-        if (!pipelineDecision.eligibility.eligible) {
+        const effectivelyEligible = pipelineDecision.eligibility.eligible && !identityBlocked;
+
+        if (!effectivelyEligible) {
           const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
             stage: result.stage,
             status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
@@ -687,7 +715,9 @@ export class AiRecruiterOrchestrator {
             contactScore: result.selected ? 12 : 0,
             totalScore: pipelineDecision.eligibility.score,
             scoreBreakdown,
-            rejectionReason: pipelineDecision.eligibility.userMessage,
+            rejectionReason: identityBlocked
+              ? `Uitgesloten: ${businessModel.classification} / generieke identiteit`
+              : pipelineDecision.eligibility.userMessage,
             warnings: hiring.warnings,
             selectedContactId: result.selected?.contactId ?? null,
             externalCompanyData: contactDiscoveryPayload,

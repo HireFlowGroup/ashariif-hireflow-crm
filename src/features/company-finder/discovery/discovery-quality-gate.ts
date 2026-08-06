@@ -12,11 +12,13 @@ import {
   validateCompanyCandidates,
 } from "@/features/company-finder/discovery/discovery-ai-classifier";
 import { applyDiscoveryHeuristics } from "@/features/company-finder/discovery/discovery-heuristics";
+import { resolveOfficialCompanyIdentity } from "@/features/company-finder/discovery/company-identity.service";
 import {
-  countHomepageSignals,
-  fetchHomepageSignals,
-  formatHomepageSignals,
-} from "@/features/company-finder/discovery/homepage-signals";
+  classifyBusinessModel,
+  isExcludedBusinessModel,
+} from "@/features/company-finder/discovery/business-model-classifier.service";
+import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
+import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import type {
   DiscoveryQualityReport,
   DiscoveryUrlCategory,
@@ -26,6 +28,10 @@ import type {
 import {
   DISCOVERY_MIN_SAVE_SCORE,
 } from "@/features/company-finder/discovery/discovery-quality.types";
+import {
+  fetchHomepageSignals,
+  formatHomepageSignals,
+} from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
 import { logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
@@ -100,7 +106,11 @@ function toCandidate(
   criteria: CompanySearchCriteria,
   provider: string,
 ): ExternalCompanyCandidate | null {
-  const name = cleanCompanyTitle(result.title);
+  const rawTitle = cleanCompanyTitle(result.title);
+  if (isGenericCompanyLabel(rawTitle)) {
+    return null;
+  }
+  const name = rawTitle;
   if (!name || name.length < 2) return null;
 
   const domain = extractDomain(result.url);
@@ -260,11 +270,13 @@ export async function runDiscoveryQualityGate(input: {
     signalSummary: string;
   }> = [];
 
+  const recruiterConfig = getAiRecruiterConfig();
+
   for (const settled of homepageResults) {
     if (settled.status === "rejected") continue;
 
     const { result, homepage } = settled.value;
-    const candidate = toCandidate(result, input.criteria, provider);
+    let candidate = toCandidate(result, input.criteria, provider);
     if (!candidate) continue;
 
     if (homepage.signalCount < 2) {
@@ -278,6 +290,71 @@ export async function runDiscoveryQualityGate(input: {
         detail: `Homepage signalen: ${homepage.signalCount}/10 (${formatHomepageSignals(homepage.signals) || "geen"})`,
       });
       continue;
+    }
+
+    const identity = await resolveOfficialCompanyIdentity({
+      searchTitle: result.title,
+      url: candidate.website ?? result.url,
+      description: result.description,
+      html: homepage.html ?? null,
+      fetchHtml: false,
+    });
+
+    const businessModel = classifyBusinessModel({
+      name: identity.officialName ?? candidate.name,
+      url: candidate.website ?? result.url,
+      description: result.description,
+      sector: candidate.sector,
+      html: homepage.html ?? null,
+      excludeRecruitmentAgencies: recruiterConfig.excludeRecruitmentAgencies,
+    });
+
+    if (isExcludedBusinessModel(businessModel.classification, recruiterConfig.excludeRecruitmentAgencies)) {
+      report.rejected += 1;
+      report.rejectedByHeuristics += 1;
+      rejected.push({
+        url: result.url,
+        title: result.title,
+        category: "directory",
+        reason: "heuristic_title",
+        detail: `Concurrent uitgesloten: ${businessModel.classification} — ${businessModel.reasons.join("; ")}`,
+      });
+      continue;
+    }
+
+    if (identity.unresolved || !identity.officialName || isGenericCompanyLabel(candidate.name)) {
+      if (identity.officialName && identity.confidence >= 0.5) {
+        candidate = {
+          ...candidate,
+          name: identity.officialName,
+          normalizedName: normalizeCompanyName(identity.officialName),
+          confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
+        };
+      } else {
+        report.rejected += 1;
+        report.rejectedByHeuristics += 1;
+        rejected.push({
+          url: result.url,
+          title: result.title,
+          category: "unknown",
+          reason: "heuristic_title",
+          detail: identity.unresolved
+            ? "Bedrijfsidentiteit niet betrouwbaar vastgesteld (unresolved_company_identity)"
+            : `Generieke titel afgewezen: ${result.title}`,
+        });
+        continue;
+      }
+    } else {
+      candidate = {
+        ...candidate,
+        name: identity.officialName,
+        normalizedName: normalizeCompanyName(identity.officialName),
+        confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
+        description: [
+          candidate.description,
+          `Identity: ${identity.source} (${Math.round(identity.confidence * 100)}%)`,
+        ].filter(Boolean).join(" · "),
+      };
     }
 
     signalPassed.push({

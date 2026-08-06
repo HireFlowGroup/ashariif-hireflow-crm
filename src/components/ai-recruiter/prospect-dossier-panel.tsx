@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import type { ProspectDossier } from "@/features/ai-recruiter/domain/prospect-dossier.types";
+import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
 import type { AiEmailWriterDraft } from "@/features/ai-email-writer/domain/ai-email-writer.types";
 import type { AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
 import { aiRecruiterFetchJson } from "@/lib/ai-recruiter/client-api";
@@ -164,6 +164,14 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
           {dossier.totalScore != null ? (
             <Badge variant="secondary">Totaalscore {dossier.totalScore}</Badge>
           ) : null}
+          {item.scoreBreakdown?.decision ? (
+            <Badge variant="outline">
+              Advies {formatDecisionLabel(item.scoreBreakdown.decision)} · Prioriteit {item.scoreBreakdown.priority ?? "—"}
+            </Badge>
+          ) : null}
+          {item.scoreBreakdown?.identityUnresolved ? (
+            <Badge variant="destructive">Identiteit onzeker</Badge>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {company.companyId ? (
@@ -193,7 +201,21 @@ export function ProspectDossierPanel({ runId, item, onItemUpdated, onError }: Pr
             )}
           </div>
           <div className="min-w-0 flex-1 space-y-2">
-            <h2 className="text-xl font-semibold tracking-tight">{company.name}</h2>
+            <h2 className="text-xl font-semibold tracking-tight">
+              {item.scoreBreakdown?.officialName ?? company.name}
+            </h2>
+            {item.scoreBreakdown?.identityUnresolved ? (
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                Bedrijfsidentiteit kon niet betrouwbaar worden vastgesteld.
+              </p>
+            ) : null}
+            <InfoRow label="Domein" value={company.website?.replace(/^https?:\/\//, "").split("/")[0] ?? null} />
+            {item.scoreBreakdown?.businessClassification ? (
+              <InfoRow label="Classificatie" value={item.scoreBreakdown.businessClassification} />
+            ) : null}
+            {item.scoreBreakdown?.scoringVersion ? (
+              <InfoRow label="Scoring" value={item.scoreBreakdown.scoringVersion} />
+            ) : null}
             <InfoRow label="Website" value={company.website} href={company.website} />
             <InfoRow label="LinkedIn" value={company.linkedinUrl ? "Bedrijfspagina" : null} href={company.linkedinUrl} />
             <InfoRow label="Locatie" value={company.location} />

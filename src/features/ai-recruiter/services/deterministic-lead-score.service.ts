@@ -164,8 +164,8 @@ export function computeDeterministicLeadScore(input: {
   const score = vacancyIntent + companyFit + contactability + urgency;
 
   let priority: DeterministicLeadScoreResult["priority"];
-  if (score >= 60) priority = "priority_a";
-  else if (score >= 45) priority = "priority_b";
+  if (score >= 80) priority = "priority_a";
+  else if (score >= 60) priority = "priority_b";
   else if (score >= 30) priority = "priority_c";
   else if (score >= 1) priority = "low_priority";
   else priority = "reject";

@@ -62,6 +62,7 @@ export type HomepageSignalResult = {
   signals: HomepageSignals;
   signalCount: number;
   htmlFetched: boolean;
+  html?: string;
 };
 
 export type UrlClassificationResult = {

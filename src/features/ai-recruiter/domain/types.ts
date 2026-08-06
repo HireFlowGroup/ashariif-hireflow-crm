@@ -135,6 +135,16 @@ export const scoreBreakdownSchema = z.object({
   recruitmentIntelligenceScore: z.number().optional(),
   recruitmentIntelligenceTier: z.enum(["warm", "interessant", "lage_kans"]).optional(),
   urgencyRationale: z.string().optional(),
+  decision: z.enum(["HOT", "WARM", "REVIEW", "IGNORE"]).optional(),
+  priority: z.enum(["A", "B", "C", "LOW"]).optional(),
+  decisionReason: z.string().optional(),
+  scoringVersion: z.string().optional(),
+  evaluatedAt: z.string().optional(),
+  officialName: z.string().optional(),
+  identityConfidence: z.number().optional(),
+  identitySource: z.string().optional(),
+  businessClassification: z.string().optional(),
+  identityUnresolved: z.boolean().optional(),
 });
 
 export type AiRecruiterScoreBreakdown = z.infer<typeof scoreBreakdownSchema>;

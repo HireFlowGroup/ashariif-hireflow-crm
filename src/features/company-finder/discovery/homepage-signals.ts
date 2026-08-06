@@ -22,13 +22,13 @@ export async function fetchHomepageSignals(
     const signals = detectHomepageSignals(html);
     const signalCount = countHomepageSignals(signals);
 
-    return { signals, signalCount, htmlFetched: true };
+    return { signals, signalCount, htmlFetched: true, html: html.slice(0, 300_000) };
   } catch {
     return { signals: { ...EMPTY_SIGNALS }, signalCount: 0, htmlFetched: false };
   }
 }
 
-async function fetchHomepageHtml(url: string, timeoutMs: number): Promise<string> {
+export async function fetchHomepageHtml(url: string, timeoutMs: number): Promise<string> {
   const normalized = url.startsWith("http") ? url : `https://${url}`;
 
   const response = await fetch(normalized, {

@@ -2,6 +2,12 @@ import "server-only";
 
 import type { CompanySearchCriteria } from "@/features/lead-intelligence/domain";
 import type { TavilyDiscoveryResult } from "@/features/company-finder/discovery/discovery-quality-gate";
+import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
+import { brandNameFromDomain } from "@/features/company-finder/discovery/parse-website-identity";
+import {
+  classifyBusinessModel,
+  isExcludedBusinessModel,
+} from "@/features/company-finder/discovery/business-model-classifier.service";
 import { classifyDiscoveryResult } from "@/features/company-finder/discovery/result-classifier.service";
 import { validateOfficialDomain } from "@/features/company-finder/discovery/official-domain.service";
 import type {
@@ -144,6 +150,26 @@ function processRawResult(input: {
     rejectionReason = "competitor";
   }
 
+  let resolvedName = employerName;
+  if (resolvedName && isGenericCompanyLabel(resolvedName) && officialDomain) {
+    resolvedName = brandNameFromDomain(officialDomain);
+  }
+  if (resolvedName && isGenericCompanyLabel(resolvedName)) {
+    accepted = false;
+    rejectionReason = "not_a_company";
+  }
+
+  const businessModel = classifyBusinessModel({
+    name: resolvedName ?? input.title,
+    url: input.url,
+    description: input.description,
+    excludeRecruitmentAgencies: input.excludeRecruitmentAgencies,
+  });
+  if (isExcludedBusinessModel(businessModel.classification, input.excludeRecruitmentAgencies)) {
+    accepted = false;
+    rejectionReason = "competitor";
+  }
+
   return {
     title: input.title,
     url: input.url,
@@ -152,8 +178,8 @@ function processRawResult(input: {
     resultType: classified.resultType,
     classificationConfidence: classified.classificationConfidence,
     classificationReason: classified.classificationReason,
-    extractedCompanyName: employerName,
-    extractedEmployer: employerName,
+    extractedCompanyName: resolvedName,
+    extractedEmployer: resolvedName,
     officialDomain,
     domainConfidence,
     domainSource,

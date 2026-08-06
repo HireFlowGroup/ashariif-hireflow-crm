@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recruiter/discovery-funnel-panel";
-import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
+import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
 import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
 import { WorkspacePage } from "@/components/layout/workspace-page";
@@ -140,14 +140,24 @@ export function AiRecruiterDashboard() {
 
   const reviewItems = useMemo(
     () =>
-      items.filter(
-        (i) =>
+      items.filter((i) => {
+        const stageOk =
           i.stage === "draft_created"
           || i.outreachMessageId
           || i.stage === "contact_found"
           || i.stage === "general_mailbox_found"
-          || i.stage === "blocked_missing_contact",
-      ),
+          || i.stage === "blocked_missing_contact";
+        if (!stageOk) return false;
+        if (i.scoreBreakdown?.decision === "IGNORE") return false;
+        if (i.scoreBreakdown?.identityUnresolved) return false;
+        if (
+          i.scoreBreakdown?.businessClassification === "recruitment_competitor"
+          || i.scoreBreakdown?.businessClassification === "staffing_competitor"
+        ) {
+          return false;
+        }
+        return true;
+      }),
     [items],
   );
 
@@ -468,7 +478,7 @@ export function AiRecruiterDashboard() {
                       >
                         <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
                         <p className="text-xs text-muted-foreground">
-                          Score {item.totalScore ?? "—"} · {item.scoreBreakdown?.salesTier ?? item.stage}
+                          Totaalscore {item.totalScore ?? "—"} · Advies {formatDecisionLabel(item.scoreBreakdown?.decision)} · Prioriteit {item.scoreBreakdown?.priority ?? "—"}
                         </p>
                       </button>
                     ))
