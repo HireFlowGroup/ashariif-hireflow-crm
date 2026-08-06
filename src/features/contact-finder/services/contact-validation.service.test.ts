@@ -181,7 +181,7 @@ describe("buildOutreachSalutation", () => {
   });
 
   it("uses HR team salutation for HR mailbox", () => {
-    expect(buildOutreachSalutation(null, true, "hr@acme.nl")).toBe("Beste HR- of recruitmentteam,");
+    expect(buildOutreachSalutation(null, true, "hr@acme.nl")).toBe("Beste HR- en recruitmentteam,");
   });
 
   it("uses formal salutation for info@", () => {

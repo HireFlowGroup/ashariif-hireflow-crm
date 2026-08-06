@@ -119,12 +119,16 @@ export class SupabaseOutreachEngineRepository implements OutreachEngineRepositor
         campaign_id: input.campaignId,
         company_id: input.companyId,
         contact_id: input.contactId,
+        run_id: input.runId ?? null,
+        vacancy_id: input.vacancyId ?? null,
         recipient_name: input.recipientName,
         recipient_email: input.recipientEmail,
         subject: input.subject,
         body_text: input.bodyText,
         status: input.status,
         personalization_data: input.personalizationData,
+        personalization_facts: (input.personalizationData as { personalizationFacts?: unknown }).personalizationFacts ?? [],
+        source_evidence: (input.personalizationData as { sourceEvidence?: unknown }).sourceEvidence ?? [],
         idempotency_key: input.idempotencyKey,
         provider: input.provider,
         created_by: userId,
@@ -153,6 +157,7 @@ export class SupabaseOutreachEngineRepository implements OutreachEngineRepositor
     if (updates.providerMessageId !== undefined) row.provider_message_id = updates.providerMessageId;
     if (updates.errorMessage !== undefined) row.error_message = updates.errorMessage;
     if (updates.retryCount !== undefined) row.retry_count = updates.retryCount;
+    if (updates.failureCode !== undefined) row.failure_code = updates.failureCode;
 
     const { data, error } = await this.client
       .from("outreach_messages")

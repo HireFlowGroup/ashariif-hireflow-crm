@@ -35,6 +35,8 @@ export interface OutreachEngineRepository {
       personalizationData: Record<string, unknown>;
       idempotencyKey: string;
       provider: string | null;
+      runId?: string | null;
+      vacancyId?: string | null;
     },
   ): Promise<OutreachMessage>;
 
@@ -46,13 +48,14 @@ export interface OutreachEngineRepository {
       bodyText: string;
       bodyHtml: string | null;
       status: OutreachMessageStatus;
-      approvedBy: string;
-      approvedAt: string;
+      approvedBy: string | null;
+      approvedAt: string | null;
       sentAt: string;
       provider: string;
       providerMessageId: string;
       errorMessage: string;
       retryCount: number;
+      failureCode: string;
     }>,
   ): Promise<OutreachMessage>;
 

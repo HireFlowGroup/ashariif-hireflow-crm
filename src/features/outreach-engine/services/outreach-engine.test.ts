@@ -178,6 +178,8 @@ function createContactsClient(contacts: Array<Record<string, unknown>> = []) {
 describe("OutreachEngine", () => {
   beforeEach(() => {
     process.env.OUTREACH_DRAFT_ONLY = "true";
+    process.env.OUTREACH_SEND_ENABLED = "true";
+    process.env.OUTREACH_TEST_RECIPIENT = "me@hireflowgroup.nl";
     process.env.OUTREACH_SENDER_EMAIL = "outreach@hireflowgroup.nl";
     process.env.OUTREACH_DAILY_LIMIT = "10";
     process.env.OUTREACH_KILL_SWITCH = "false";
@@ -219,13 +221,13 @@ describe("OutreachEngine", () => {
         messageId: "msg-1",
         confirmedByUser: true,
         isTest: true,
-        testRecipientEmail: "test@hireflowgroup.nl",
+        testRecipientEmail: "me@hireflowgroup.nl",
       },
     );
 
     expect(result.status).toBe("sent");
     expect(provider.getSentMessages()).toHaveLength(1);
-    expect(provider.getSentMessages()[0]?.to).toBe("test@hireflowgroup.nl");
+    expect(provider.getSentMessages()[0]?.to).toBe("me@hireflowgroup.nl");
   });
 
   it("uses configured business sender address", async () => {

@@ -7,6 +7,7 @@ import type { CompanyId } from "@/features/companies/domain";
 import { toCompanyId } from "@/features/companies/domain";
 import type {
   CreateOutreachDraftInput,
+  CreateRecruiterDraftInput,
   OutreachEngineContext,
   OutreachMessage,
   SendOutreachInput,
@@ -16,8 +17,10 @@ import {
   getOutreachSendConfig,
   validateDraftOnlyMode,
   validateKillSwitch,
+  validateSendEnabled,
   validateSendWindow,
   validateSenderEmail,
+  validateTestRecipient,
 } from "@/features/outreach-engine/domain/send-rules.config";
 import type { EmailProvider } from "@/features/outreach-engine/email/email-provider.types";
 import type { OutreachEngineRepository } from "@/features/outreach-engine/repositories/outreach-engine.repository";
@@ -134,21 +137,77 @@ export class OutreachEngine {
     return message;
   }
 
+  async createRecruiterDraft(
+    context: OutreachEngineContext,
+    input: CreateRecruiterDraftInput,
+  ): Promise<OutreachMessage> {
+    const suppressed = await this.repository.getSuppressedEmails(context.organizationId);
+    const bounced = await this.repository.getBouncedEmails(context.organizationId);
+    const recentCompanies = await this.repository.getRecentlyContactedCompanyIds(
+      context.organizationId,
+      getOutreachSendConfig().companyCooldownDays,
+    );
+    const activeEmails = await this.repository.getActiveRecipientEmails(context.organizationId);
+
+    const emailLower = input.recipientEmail.toLowerCase();
+
+    if (suppressed.has(emailLower) || bounced.has(emailLower)) {
+      throw new OutreachEngineError("Contactadres is geblokkeerd (suppressed/bounced).", "suppressed_contact");
+    }
+
+    if (recentCompanies.has(input.companyId)) {
+      throw new OutreachEngineError("Cooldown actief voor dit bedrijf.", "cooldown_active");
+    }
+
+    if (findDuplicateRecipient(input.recipientEmail, activeEmails)) {
+      throw new OutreachEngineError("Dit e-mailadres heeft al een actief outreach-bericht.", "duplicate");
+    }
+
+    const idempotencyKey = buildIdempotencyKey(input.companyId, input.recipientEmail);
+
+    const message = await this.repository.createMessage(context.organizationId, context.userId, {
+      campaignId: input.campaignId ?? null,
+      companyId: input.companyId,
+      contactId: input.contactId,
+      recipientName: input.recipientName,
+      recipientEmail: input.recipientEmail,
+      subject: input.subject,
+      bodyText: input.bodyText,
+      status: "needs_review",
+      personalizationData: input.personalizationData,
+      idempotencyKey,
+      provider: this.emailProvider.providerId,
+      runId: input.runId ?? null,
+      vacancyId: input.vacancyId ?? null,
+    });
+
+    await this.repository.logEvent(context.organizationId, message.id, "draft_created", {
+      source: "ai_recruiter",
+      intent: "permission_to_source_candidates",
+    });
+
+    return message;
+  }
+
   async approveMessage(context: OutreachEngineContext, messageId: string): Promise<OutreachMessage> {
     const message = await this.requireMessage(context, messageId);
 
-    if (!["draft", "pending_approval"].includes(message.status)) {
+    if (!["draft", "needs_review", "pending_approval"].includes(message.status)) {
       throw new OutreachEngineError("Alleen concepten kunnen worden goedgekeurd.", "invalid_status");
     }
 
+    const config = getOutreachSendConfig();
+    const targetStatus = config.sendEnabled ? "approved" : "approved";
+
     const updated = await this.repository.updateMessage(context.organizationId, messageId, {
-      status: "approved",
+      status: targetStatus,
       approvedBy: context.userId,
       approvedAt: new Date().toISOString(),
     });
 
     await this.repository.logEvent(context.organizationId, messageId, "approved", {
       approvedBy: context.userId,
+      sendEnabled: config.sendEnabled,
     });
 
     return updated;
@@ -157,7 +216,7 @@ export class OutreachEngine {
   async rejectMessage(context: OutreachEngineContext, messageId: string): Promise<OutreachMessage> {
     const message = await this.requireMessage(context, messageId);
     const updated = await this.repository.updateMessage(context.organizationId, messageId, {
-      status: "cancelled",
+      status: "rejected",
     });
     await this.repository.logEvent(context.organizationId, messageId, "rejected", {
       previousStatus: message.status,
@@ -176,10 +235,41 @@ export class OutreachEngine {
       throw new OutreachEngineError("Verzonden berichten kunnen niet worden bewerkt.", "already_sent");
     }
 
-    const updated = await this.repository.updateMessage(context.organizationId, messageId, updates);
-    await this.repository.logEvent(context.organizationId, messageId, "edited", {
+    const patch: Parameters<OutreachEngineRepository["updateMessage"]>[2] = { ...updates };
+
+    if (message.status === "approved") {
+      patch.status = "needs_review";
+      patch.approvedBy = null;
+      patch.approvedAt = null;
+    }
+
+    const updated = await this.repository.updateMessage(context.organizationId, messageId, patch);
+    await this.repository.logEvent(context.organizationId, messageId, "draft_edited", {
       fields: Object.keys(updates),
+      previousStatus: message.status,
     });
+    return updated;
+  }
+
+  async queueApprovedMessage(context: OutreachEngineContext, messageId: string): Promise<OutreachMessage> {
+    const message = await this.requireMessage(context, messageId);
+    const config = getOutreachSendConfig();
+
+    if (config.requireApproval && message.status !== "approved") {
+      throw new OutreachEngineError("Bericht moet eerst worden goedgekeurd.", "not_approved");
+    }
+
+    if (!config.sendEnabled) {
+      throw new OutreachEngineError(
+        "Verzending is uitgeschakeld — concept blijft goedgekeurd.",
+        "send_disabled",
+      );
+    }
+
+    const updated = await this.repository.updateMessage(context.organizationId, messageId, {
+      status: "queued",
+    });
+    await this.repository.logEvent(context.organizationId, messageId, "queued", {});
     return updated;
   }
 
@@ -196,15 +286,17 @@ export class OutreachEngine {
       throw new OutreachEngineError("Bericht moet eerst worden goedgekeurd.", "not_approved");
     }
 
-    if (!["approved", "pending_approval", "draft"].includes(message.status)) {
+    if (!["approved", "queued", "needs_review", "pending_approval", "draft"].includes(message.status)) {
       throw new OutreachEngineError(`Verzending niet toegestaan vanuit status ${message.status}.`, "invalid_status");
     }
 
     const config = getOutreachSendConfig();
 
     for (const check of [
+      validateSendEnabled(isTest),
       validateKillSwitch(),
       validateDraftOnlyMode(input.confirmedByUser, isTest),
+      validateTestRecipient(isTest, input.testRecipientEmail),
       isTest ? null : validateSendWindow(),
     ]) {
       if (check) throw new OutreachEngineError(check.message, check.code);

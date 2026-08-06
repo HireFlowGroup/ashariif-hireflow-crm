@@ -29,7 +29,8 @@ import {
   priorityFromTotalScore,
 } from "@/features/ai-recruiter/domain/types";
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
-import { generateRecruiterOutreachDraft, generateRecruiterFollowUpDraft } from "@/features/ai-recruiter/services/draft-generator.service";
+import { createProspectOutreachDraft } from "@/features/ai-recruiter/services/create-prospect-outreach-draft.service";
+import type { VacancyEvidence, ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import {
@@ -350,6 +351,8 @@ export class AiRecruiterOrchestrator {
         totalScore: number;
         opportunity: OpportunityAssessment;
         selected: SelectedDiscoveredContact;
+        vacancies: VacancyEvidence[];
+        contactStage: string;
       }> = [];
 
       type CompanyContactContext = {
@@ -778,6 +781,8 @@ export class AiRecruiterOrchestrator {
             totalScore: pipelineDecision.eligibility.score,
             opportunity,
             selected: result.selected,
+            vacancies: pipelineDecision.vacancies,
+            contactStage: result.stage,
           });
         }
       }
@@ -819,79 +824,76 @@ export class AiRecruiterOrchestrator {
       qualifiedItems.sort((a, b) => b.totalScore - a.totalScore);
       const topItems = qualifiedItems.slice(0, plan.maximum_drafts);
 
-      for (const { itemId, companyId, opportunity, selected } of topItems) {
+      for (const { itemId, companyId, opportunity, selected, vacancies, contactStage } of topItems) {
         if (draftsCreated >= plan.maximum_drafts) break;
 
         try {
           const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
           const hiring = computeHiringIntelligenceProfile(company, plan);
 
-          if (!selected.contactId) continue;
+          if (!selected.email) continue;
 
-          const draft = await generateRecruiterOutreachDraft(
-            company,
+          const { outreachMessageId, draftWarnings, followUpDraft } = await createProspectOutreachDraft(
+            context,
+            this.outreachEngine,
             {
-              recipientName: selected.recipientName,
-              email: selected.email,
-              isGeneralMailbox: selected.isGeneralMailbox,
-            },
-            hiring,
-            opportunity,
-          );
-
-          const followUp = await generateRecruiterFollowUpDraft(
-            company,
-            {
-              recipientName: selected.recipientName,
-              email: selected.email,
-              isGeneralMailbox: selected.isGeneralMailbox,
-            },
-            hiring,
-            {
-              subject: draft.recommendedSubject,
-              bodyText: draft.bodyText,
-            },
-          );
-
-          let outreachMessageId: string | null = null;
-          try {
-            const message = await this.outreachEngine.createDraft(context, {
+              runId,
               companyId,
-              contactId: selected.contactId,
-            });
-            outreachMessageId = message.id;
-            await this.outreachEngine.updateDraft(context, message.id, {
-              subject: draft.recommendedSubject,
-              bodyText: draft.bodyText,
-            });
-          } catch (error) {
-            if (error instanceof OutreachEngineError && error.code === "duplicate") {
-              counters.skipped += 1;
-              continue;
-            }
-            throw error;
-          }
+              company,
+              selected,
+              hiring,
+              opportunity,
+              vacancies,
+            },
+          );
 
           draftsCreated += 1;
           counters.draftsCreated += 1;
+
+          const existingItem = await this.repository.getRunItem(context.organizationId, itemId);
+          const external = (existingItem?.externalCompanyData ?? {}) as Record<string, unknown>;
 
           const updatedItem = await this.repository.updateRunItem(context.organizationId, itemId, {
             stage: "draft_created",
             status: "completed",
             outreachMessageId,
-            warnings: [...draft.warnings, ...followUp.warnings],
+            warnings: draftWarnings,
             externalCompanyData: {
-              followUpDraft: {
-                subject: followUp.subject,
-                bodyText: followUp.bodyText,
-                confidence: followUp.confidence,
-              },
-              bdAnalysis: draft.bdAnalysis ?? null,
+              ...external,
+              followUpDraft: followUpDraft,
             },
           });
 
+          const eligibility = (external.eligibility as ConceptEligibilityResult | undefined)
+            ?? {
+              eligible: true,
+              score: 0,
+              threshold: recruiterConfig.conceptScoreThreshold,
+              priority: "priority_a" as const,
+              acceptedRules: ["draft_created"],
+              rejectedRules: [],
+              reasonCode: "eligible" as const,
+              userMessage: "Concept aangemaakt.",
+            };
+
+          await this.prospectAudit.upsertDecision({
+            organizationId: context.organizationId,
+            runId,
+            runItemId: itemId,
+            company,
+            eligibility,
+            vacancies,
+            contact: selected,
+            contactStage,
+            conceptStatus: "created",
+          });
+
           yield { type: "item", item: updatedItem };
-        } catch {
+        } catch (error) {
+          if (error instanceof OutreachEngineError && error.code === "duplicate") {
+            counters.skipped += 1;
+            continue;
+          }
           counters.failed += 1;
         }
       }

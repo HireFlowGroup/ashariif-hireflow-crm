@@ -38,25 +38,29 @@ type OutreachMessageRow = {
 
 type TabKey =
   | "draft"
+  | "needs_review"
   | "pending_approval"
   | "approved"
   | "sent"
   | "failed"
+  | "rejected"
   | "all";
 
 const TAB_CONFIG: Array<{ key: TabKey; label: string; statuses?: OutreachMessageStatus[] }> = [
   { key: "draft", label: "Concepten", statuses: ["draft"] },
-  { key: "pending_approval", label: "Wacht op goedkeuring", statuses: ["pending_approval"] },
-  { key: "approved", label: "Klaar voor verzending", statuses: ["approved", "queued"] },
+  { key: "needs_review", label: "Ter beoordeling", statuses: ["needs_review", "pending_approval"] },
+  { key: "approved", label: "Goedgekeurd", statuses: ["approved"] },
+  { key: "pending_approval", label: "Klaar voor verzending", statuses: ["queued"] },
   { key: "sent", label: "Verzonden", statuses: ["sent", "replied"] },
-  { key: "failed", label: "Mislukt", statuses: ["failed", "bounced", "blocked_missing_recipient", "cancelled"] },
+  { key: "failed", label: "Mislukt", statuses: ["failed", "bounced", "blocked_missing_recipient"] },
+  { key: "rejected", label: "Afgewezen", statuses: ["rejected", "cancelled"] },
   { key: "all", label: "Alles" },
 ];
 
 export function OutreachDashboard() {
   const [messages, setMessages] = useState<OutreachMessageRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("pending_approval");
+  const [activeTab, setActiveTab] = useState<TabKey>("needs_review");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);

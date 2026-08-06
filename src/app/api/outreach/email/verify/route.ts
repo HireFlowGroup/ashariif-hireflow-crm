@@ -17,7 +17,13 @@ export async function GET(): Promise<NextResponse> {
     ...status,
     identities,
     draftOnly: config.draftOnly,
+    sendEnabled: config.sendEnabled,
+    requireApproval: config.requireApproval,
+    testRecipient: config.testRecipient ? "***configured***" : null,
     dailyLimit: config.dailyLimit,
+    domainDailyLimit: config.domainDailyLimit,
+    cooldownDays: config.companyCooldownDays,
     killSwitch: config.killSwitch,
+    senderEmail: config.senderEmail,
   });
 }

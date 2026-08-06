@@ -11,8 +11,7 @@ import {
 
 import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recruiter/discovery-funnel-panel";
 import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
-import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
-import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier-panel";
+import { ProspectReviewWorkspace } from "@/components/ai-recruiter/prospect-review-workspace";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { Badge } from "@/components/ui/badge";
@@ -462,50 +461,16 @@ export function AiRecruiterDashboard() {
                 providerId={discoveryPanel.providerId}
               />
 
-              <div className="flex flex-col gap-4 xl:flex-row">
-                <div className="w-full shrink-0 divide-y rounded-xl border xl:w-72 xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto">
-                  <div className="sticky top-0 z-10 border-b bg-muted/30 px-4 py-2 text-sm font-medium">
-                    Prospect review ({reviewItems.length})
-                  </div>
-                  {reviewItems.length === 0 ? (
-                    <p className="px-4 py-8 text-sm text-muted-foreground">Nog geen prospects om te reviewen.</p>
-                  ) : (
-                    reviewItems.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`w-full px-4 py-3 text-left hover:bg-muted/30 ${selectedItemId === item.id ? "bg-muted/50 ring-1 ring-inset ring-primary/20" : ""}`}
-                        onClick={() => setSelectedItemId(item.id)}
-                      >
-                        <p className="font-medium">{item.companyName ?? "Bedrijf"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Totaalscore {item.totalScore ?? "—"} · Advies {formatDecisionLabel(item.scoreBreakdown?.decision)} · Prioriteit {item.scoreBreakdown?.priority ?? "—"}
-                        </p>
-                      </button>
-                    ))
-                  )}
-                </div>
-
-                <Card className="min-w-0 flex-1">
-                  <CardHeader>
-                    <CardTitle className="text-base">Bedrijfsdossier</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedItem && activeRun ? (
-                      <ProspectDossierPanel
-                        runId={activeRun.id}
-                        item={selectedItem}
-                        onItemUpdated={(updated) => {
-                          setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-                        }}
-                        onError={setError}
-                      />
-                    ) : (
-                      <p className="text-sm text-muted-foreground">Selecteer een prospect uit de queue.</p>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+              <ProspectReviewWorkspace
+                run={activeRun}
+                items={reviewItems}
+                selectedItemId={selectedItemId}
+                onSelectItem={setSelectedItemId}
+                onItemUpdated={(updated) => {
+                  setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+                }}
+                onError={setError}
+              />
             </>
           ) : (
             <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">

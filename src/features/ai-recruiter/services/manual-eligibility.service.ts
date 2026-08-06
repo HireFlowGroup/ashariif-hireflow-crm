@@ -5,7 +5,7 @@ import { createCompaniesServiceWithWriteClient } from "@/features/companies/crea
 import type { AiRecruiterEngineContext } from "@/features/ai-recruiter/domain/types";
 import { createAiRecruiterRepository } from "@/features/ai-recruiter/create-ai-recruiter-service";
 import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
-import { generateRecruiterOutreachDraft } from "@/features/ai-recruiter/services/draft-generator.service";
+import { createProspectOutreachDraft } from "@/features/ai-recruiter/services/create-prospect-outreach-draft.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { evaluateProspectPipeline } from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
 import type { OpportunityAssessment } from "@/features/ai-recruiter/services/opportunity-scorer.service";
@@ -97,35 +97,22 @@ export async function applyManualEligibilityOverride(
   let draftCreated = false;
   let outreachMessageId = item.outreachMessageId;
 
-  if (!outreachMessageId && contact.contactId) {
-    const draft = await generateRecruiterOutreachDraft(
-      company,
+  if (!outreachMessageId) {
+    const { outreachMessageId: messageId } = await createProspectOutreachDraft(
+      context,
+      outreachEngine,
       {
-        recipientName: contact.recipientName,
-        email: contact.email,
-        isGeneralMailbox: contact.isGeneralMailbox,
-      },
-      hiring,
-      opportunity,
-    );
-
-    try {
-      const message = await outreachEngine.createDraft(context, {
+        runId,
         companyId: item.companyId,
-        contactId: contact.contactId,
-      });
-      outreachMessageId = message.id;
-      await outreachEngine.updateDraft(context, message.id, {
-        subject: draft.recommendedSubject,
-        bodyText: draft.bodyText,
-      });
-      draftCreated = true;
-    } catch (error) {
-      if (error instanceof OutreachEngineError && error.code === "duplicate") {
-        throw new Error("Duplicate outreach — er bestaat al een actief concept voor dit contact");
-      }
-      throw error;
-    }
+        company,
+        selected: contact,
+        hiring,
+        opportunity,
+        vacancies: pipelineDecision.vacancies,
+      },
+    );
+    outreachMessageId = messageId;
+    draftCreated = true;
   }
 
   const updatedItem = await repository.updateRunItem(context.organizationId, itemId, {

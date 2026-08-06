@@ -1,13 +1,22 @@
 import "server-only";
 
-/** Outreach send safety configuration — DRAFT_ONLY is default. */
+/** Outreach send safety configuration — send disabled by default. */
 export function getOutreachSendConfig() {
+  const sendEnabled = process.env.OUTREACH_SEND_ENABLED === "true";
   const draftOnly = process.env.OUTREACH_DRAFT_ONLY !== "false";
+  const requireApproval = process.env.OUTREACH_REQUIRE_APPROVAL !== "false";
 
   return {
+    sendEnabled,
     draftOnly,
+    requireApproval,
     dailyLimit: parseInt(process.env.OUTREACH_DAILY_LIMIT ?? "10", 10),
-    companyCooldownDays: parseInt(process.env.OUTREACH_COMPANY_COOLDOWN_DAYS ?? "30", 10),
+    domainDailyLimit: parseInt(process.env.OUTREACH_DOMAIN_DAILY_LIMIT ?? "2", 10),
+    companyCooldownDays: parseInt(
+      process.env.OUTREACH_COOLDOWN_DAYS ?? process.env.OUTREACH_COMPANY_COOLDOWN_DAYS ?? "30",
+      10,
+    ),
+    testRecipient: process.env.OUTREACH_TEST_RECIPIENT?.trim() ?? null,
     killSwitch: process.env.OUTREACH_KILL_SWITCH === "true",
     maxRetries: parseInt(process.env.OUTREACH_MAX_RETRIES ?? "2", 10),
     timezone: process.env.OUTREACH_TIMEZONE ?? "Europe/Amsterdam",
@@ -87,6 +96,42 @@ export function validateDraftOnlyMode(confirmedByUser: boolean, isTest: boolean)
       message: "DRAFT_ONLY modus: expliciete gebruikersbevestiging vereist voor verzending.",
     };
   }
+  return null;
+}
+
+export function validateSendEnabled(isTest: boolean): SendRuleViolation | null {
+  const config = getOutreachSendConfig();
+  if (!config.sendEnabled && !isTest) {
+    return {
+      code: "send_disabled",
+      message: "Verzending is uitgeschakeld (OUTREACH_SEND_ENABLED=false).",
+    };
+  }
+  return null;
+}
+
+export function validateTestRecipient(
+  isTest: boolean,
+  testRecipientEmail: string | undefined,
+): SendRuleViolation | null {
+  const config = getOutreachSendConfig();
+  if (!isTest) return null;
+
+  const allowed = config.testRecipient;
+  if (!allowed) {
+    return {
+      code: "test_recipient_not_configured",
+      message: "Testmodus vereist OUTREACH_TEST_RECIPIENT.",
+    };
+  }
+
+  if (!testRecipientEmail || testRecipientEmail.toLowerCase() !== allowed.toLowerCase()) {
+    return {
+      code: "test_recipient_mismatch",
+      message: `Testmail mag alleen naar ${allowed} worden verzonden.`,
+    };
+  }
+
   return null;
 }
 

@@ -173,24 +173,58 @@ function extractDomainFromWebsite(website: string | null): string | null {
   }
 }
 
+const UNRELIABLE_FIRST_NAMES = new Set([
+  "contact",
+  "team",
+  "hr",
+  "recruitment",
+  "—",
+  "-",
+  "onbekend",
+]);
+
 export function buildOutreachSalutation(
   recipientName: string | null,
   isGeneralMailbox: boolean,
   email: string,
+  options?: { firstNameReliable?: boolean; lastName?: string | null },
 ): string {
-  if (recipientName?.trim()) {
-    const firstName = recipientName.trim().split(/\s+/)[0];
-    return `Beste ${firstName},`;
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+  const recruitmentPrefixes = ["recruitment", "recruiter", "recruit", "werving"];
+  const careersPrefixes = ["careers", "jobs", "vacatures", "werkenbij", "job"];
+  const hrPrefixes = ["hr", "personeel", "people", "talent"];
+
+  if (recipientName?.trim() && !isGeneralMailbox) {
+    const parts = recipientName.trim().split(/\s+/);
+    const firstName = parts[0] ?? "";
+    const lastName = options?.lastName ?? (parts.length > 1 ? parts[parts.length - 1] : null);
+    const nameReliable =
+      options?.firstNameReliable !== false
+      && firstName.length > 1
+      && !UNRELIABLE_FIRST_NAMES.has(firstName.toLowerCase());
+
+    if (nameReliable) {
+      return `Beste ${firstName},`;
+    }
+
+    if (lastName && lastName !== firstName && !UNRELIABLE_FIRST_NAMES.has(lastName.toLowerCase())) {
+      return `Geachte heer/mevrouw ${lastName},`;
+    }
   }
 
-  const local = email.split("@")[0]?.toLowerCase() ?? "";
-  const hrPrefixes = ["hr", "recruitment", "recruiter", "vacatures", "werkenbij", "careers", "jobs", "personeel"];
+  if (recruitmentPrefixes.some((p) => local.startsWith(p) || local.includes(p))) {
+    return "Beste recruitmentteam,";
+  }
+
+  if (careersPrefixes.some((p) => local.startsWith(p))) {
+    return "Beste HR- en recruitmentteam,";
+  }
 
   if (isGeneralMailbox && hrPrefixes.some((p) => local.startsWith(p))) {
-    return "Beste HR- of recruitmentteam,";
+    return "Beste HR- en recruitmentteam,";
   }
 
-  if (local === "info") {
+  if (local === "info" || local === "contact") {
     return "Geachte heer/mevrouw,";
   }
 

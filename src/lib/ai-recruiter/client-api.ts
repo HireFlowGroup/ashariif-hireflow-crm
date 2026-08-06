@@ -142,7 +142,10 @@ export function buildRunDetailPath(runId: string): string {
   return `/api/ai-recruiter/runs/${runId}`;
 }
 
-export function buildOutreachMessagePath(messageId: string, action: "approve" | "send"): string {
+export function buildOutreachMessagePath(
+  messageId: string,
+  action: "approve" | "send" | "reject",
+): string {
   assertUuid("buildOutreachMessagePath", "messageId", messageId);
   return `/api/outreach/messages/${messageId}/${action}`;
 }

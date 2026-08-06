@@ -3,8 +3,10 @@ export type OutreachApprovalMode = "manual" | "automatic";
 
 export type OutreachMessageStatus =
   | "draft"
+  | "needs_review"
   | "pending_approval"
   | "approved"
+  | "rejected"
   | "queued"
   | "sending"
   | "sent"
@@ -16,6 +18,9 @@ export type OutreachMessageStatus =
 
 export type OutreachEventType =
   | "draft_created"
+  | "draft_regenerated"
+  | "draft_edited"
+  | "recipient_changed"
   | "edited"
   | "approved"
   | "rejected"
@@ -55,6 +60,25 @@ export type OutreachPersonalizationData = {
   fieldsUsed: string[];
   warnings: string[];
   generatedAt: string;
+  personalizationFacts?: Array<{
+    claim: string;
+    sourceUrl: string | null;
+    sourceType: string;
+    confidence: number;
+  }>;
+  sourceEvidence?: Array<{
+    claim: string;
+    sourceUrl: string | null;
+    sourceType: string;
+    confidence: number;
+  }>;
+  promptVersion?: string;
+  model?: string;
+  intent?: string;
+  cta?: string;
+  salutation?: string;
+  runId?: string | null;
+  vacancyId?: string | null;
 };
 
 export type OutreachMessage = {
@@ -63,6 +87,8 @@ export type OutreachMessage = {
   campaignId: string | null;
   companyId: string;
   contactId: string | null;
+  runId?: string | null;
+  vacancyId?: string | null;
   recipientName: string | null;
   recipientEmail: string;
   subject: string;
@@ -73,6 +99,7 @@ export type OutreachMessage = {
   provider: string | null;
   providerMessageId: string | null;
   errorMessage: string | null;
+  failureCode?: string | null;
   idempotencyKey: string;
   retryCount: number;
   approvedBy: string | null;
@@ -82,6 +109,19 @@ export type OutreachMessage = {
   createdAt: string;
   updatedAt: string;
   companyName?: string;
+};
+
+export type CreateRecruiterDraftInput = {
+  companyId: string;
+  contactId: string | null;
+  recipientName: string | null;
+  recipientEmail: string;
+  subject: string;
+  bodyText: string;
+  runId?: string | null;
+  vacancyId?: string | null;
+  personalizationData: Record<string, unknown>;
+  campaignId?: string | null;
 };
 
 export type OutreachEvent = {
