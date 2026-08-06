@@ -423,14 +423,20 @@ export function AiRecruiterDashboard() {
                     <span>Geen contact: {activeRun.counters?.blockedMissingContact ?? 0}</span>
                     <span>Concepten: {activeRun.counters?.draftsCreated ?? 0}</span>
                   </div>
-                  {activeRun.errorMessage ? (
+                  {streaming && activeRun.status === "drafting" ? (
+                    <p className="mb-3 rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-sm text-blue-900 dark:text-blue-100">
+                      Concepten worden voorbereid…
+                    </p>
+                  ) : null}
+                  {activeRun.errorMessage && activeRun.status !== "drafting" ? (
                     <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
                       {activeRun.errorMessage}
                     </p>
                   ) : null}
                   {(activeRun.counters?.draftsCreated ?? 0) === 0
                   && (activeRun.counters?.validated ?? 0) > 0
-                  && !streaming ? (
+                  && !streaming
+                  && activeRun.status !== "drafting" ? (
                     <div className="mb-4">
                       <ProspectDecisionsPanel
                         runId={activeRun.id}

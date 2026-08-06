@@ -112,32 +112,62 @@ export class SupabaseOutreachEngineRepository implements OutreachEngineRepositor
     userId: string,
     input: Parameters<OutreachEngineRepository["createMessage"]>[2],
   ): Promise<OutreachMessage> {
-    const { data, error } = await this.client
-      .from("outreach_messages")
-      .insert({
-        organization_id: organizationId,
-        campaign_id: input.campaignId,
-        company_id: input.companyId,
-        contact_id: input.contactId,
-        run_id: input.runId ?? null,
-        vacancy_id: input.vacancyId ?? null,
-        recipient_name: input.recipientName,
-        recipient_email: input.recipientEmail,
-        subject: input.subject,
-        body_text: input.bodyText,
-        status: input.status,
-        personalization_data: input.personalizationData,
-        personalization_facts: (input.personalizationData as { personalizationFacts?: unknown }).personalizationFacts ?? [],
-        source_evidence: (input.personalizationData as { sourceEvidence?: unknown }).sourceEvidence ?? [],
-        idempotency_key: input.idempotencyKey,
-        provider: input.provider,
-        created_by: userId,
-      })
-      .select("*")
-      .single();
+    const fullRow = {
+      organization_id: organizationId,
+      campaign_id: input.campaignId,
+      company_id: input.companyId,
+      contact_id: input.contactId,
+      run_id: input.runId ?? null,
+      vacancy_id: input.vacancyId ?? null,
+      recipient_name: input.recipientName,
+      recipient_email: input.recipientEmail,
+      subject: input.subject,
+      body_text: input.bodyText,
+      status: input.status,
+      personalization_data: input.personalizationData,
+      personalization_facts:
+        (input.personalizationData as { personalizationFacts?: unknown }).personalizationFacts ?? [],
+      source_evidence:
+        (input.personalizationData as { sourceEvidence?: unknown }).sourceEvidence ?? [],
+      idempotency_key: input.idempotencyKey,
+      provider: input.provider,
+      created_by: userId,
+    };
 
-    if (error || !data) throw new Error(error?.message ?? "Bericht kon niet worden aangemaakt.");
-    return mapMessage(data);
+    const fullResult = await this.client.from("outreach_messages").insert(fullRow).select("*").single();
+    if (!fullResult.error && fullResult.data) {
+      return mapMessage(fullResult.data);
+    }
+
+    const fallbackStatus = input.status === "needs_review" ? "pending_approval" : input.status;
+    const minimalRow = {
+      organization_id: organizationId,
+      campaign_id: input.campaignId,
+      company_id: input.companyId,
+      contact_id: input.contactId,
+      recipient_name: input.recipientName,
+      recipient_email: input.recipientEmail,
+      subject: input.subject,
+      body_text: input.bodyText,
+      status: fallbackStatus,
+      personalization_data: input.personalizationData,
+      idempotency_key: input.idempotencyKey,
+      provider: input.provider,
+      created_by: userId,
+    };
+
+    const fallbackResult = await this.client.from("outreach_messages").insert(minimalRow).select("*").single();
+    if (fallbackResult.error || !fallbackResult.data) {
+      throw new Error(fallbackResult.error?.message ?? fullResult.error?.message ?? "Bericht kon niet worden aangemaakt.");
+    }
+
+    console.warn("[OutreachEngine] createMessage used compatibility fallback insert", {
+      originalStatus: input.status,
+      fallbackStatus,
+      originalError: fullResult.error?.message ?? null,
+    });
+
+    return mapMessage(fallbackResult.data);
   }
 
   async updateMessage(

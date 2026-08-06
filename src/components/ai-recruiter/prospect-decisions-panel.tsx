@@ -181,7 +181,7 @@ export function ProspectDecisionsPanel({
                 </p>
               ) : null}
               {decision.eligibility_status === "ineligible"
-              && decision.concept_status !== "created" ? (
+              && !["created", "generated", "generated_with_fallback"].includes(decision.concept_status) ? (
                 <Button
                   type="button"
                   size="sm"

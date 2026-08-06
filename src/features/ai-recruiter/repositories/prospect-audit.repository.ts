@@ -17,7 +17,7 @@ export type PersistProspectDecisionInput = {
   vacancies: VacancyEvidence[];
   contact: SelectedDiscoveredContact | null;
   contactStage: string;
-  conceptStatus: "pending" | "created" | "skipped" | "failed";
+  conceptStatus: "pending" | "generating" | "generated" | "generated_with_fallback" | "created" | "failed" | "skipped" | "blocked";
   manualEligibilityOverride?: boolean;
   sourceUrl?: string | null;
   sourceType?: string | null;
@@ -79,6 +79,37 @@ export class ProspectAuditRepository {
 
     if (error) {
       console.error("[ProspectAudit] upsert failed", { runItemId: input.runItemId, error: error.message });
+    }
+  }
+
+  async updateConceptStatus(
+    organizationId: string,
+    runItemId: string,
+    updates: {
+      conceptStatus: PersistProspectDecisionInput["conceptStatus"];
+      finalReason?: string;
+      reasonCode?: string;
+    },
+  ): Promise<void> {
+    const row: ProspectDecisionRow = {
+      concept_status: updates.conceptStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (updates.finalReason !== undefined) row.final_reason = updates.finalReason;
+    if (updates.reasonCode !== undefined) row.reason_code = updates.reasonCode;
+
+    const { error } = await this.auditTable()
+      .from("ai_recruiter_prospect_decisions")
+      .update(row)
+      .eq("organization_id", organizationId)
+      .eq("run_item_id", runItemId);
+
+    if (error) {
+      console.error("[ProspectAudit] concept status update failed", {
+        runItemId,
+        conceptStatus: updates.conceptStatus,
+        error: error.message,
+      });
     }
   }
 

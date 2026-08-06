@@ -29,7 +29,10 @@ import {
   priorityFromTotalScore,
 } from "@/features/ai-recruiter/domain/types";
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
-import { createProspectOutreachDraft } from "@/features/ai-recruiter/services/create-prospect-outreach-draft.service";
+import {
+  dispatchConceptGeneration,
+} from "@/features/ai-recruiter/services/concept-generation-dispatch.service";
+import type { EligibleProspectForConcept } from "@/features/ai-recruiter/domain/concept-generation.types";
 import type { VacancyEvidence, ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
@@ -348,11 +351,13 @@ export class AiRecruiterOrchestrator {
       const qualifiedItems: Array<{
         itemId: string;
         companyId: string;
+        company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
         totalScore: number;
         opportunity: OpportunityAssessment;
         selected: SelectedDiscoveredContact;
         vacancies: VacancyEvidence[];
         contactStage: string;
+        eligibility: ConceptEligibilityResult;
       }> = [];
 
       type CompanyContactContext = {
@@ -778,11 +783,13 @@ export class AiRecruiterOrchestrator {
           qualifiedItems.push({
             itemId: entry.itemId,
             companyId: entry.companyId,
+            company,
             totalScore: pipelineDecision.eligibility.score,
             opportunity,
             selected: result.selected,
             vacancies: pipelineDecision.vacancies,
             contactStage: result.stage,
+            eligibility: pipelineDecision.eligibility,
           });
         }
       }
@@ -822,95 +829,79 @@ export class AiRecruiterOrchestrator {
       pipeline.startStep("drafts");
 
       qualifiedItems.sort((a, b) => b.totalScore - a.totalScore);
-      const topItems = qualifiedItems.slice(0, plan.maximum_drafts);
 
-      for (const { itemId, companyId, opportunity, selected, vacancies, contactStage } of topItems) {
-        if (draftsCreated >= plan.maximum_drafts) break;
+      const eligibleProspects: EligibleProspectForConcept[] = qualifiedItems
+        .filter((entry) => entry.eligibility.eligible)
+        .map((entry) => ({
+          itemId: entry.itemId,
+          companyId: entry.companyId,
+          company: entry.company,
+          selected: entry.selected,
+          vacancies: entry.vacancies,
+          contactStage: entry.contactStage,
+          opportunity: entry.opportunity,
+          eligibility: entry.eligibility,
+        }));
 
-        try {
-          const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
-          const hiring = computeHiringIntelligenceProfile(company, plan);
+      console.info("[ConceptGenerationDispatch] eligible prospects", {
+        run_id: runId,
+        qualified_items: qualifiedItems.length,
+        eligible_prospects: eligibleProspects.length,
+        maximum_drafts: plan.maximum_drafts,
+      });
 
-          if (!selected.email) continue;
+      let conceptDispatchResult: Awaited<ReturnType<typeof dispatchConceptGeneration>> | null = null;
 
-          const { outreachMessageId, draftWarnings, followUpDraft } = await createProspectOutreachDraft(
-            context,
-            this.outreachEngine,
-            {
-              runId,
-              companyId,
-              company,
-              selected,
-              hiring,
-              opportunity,
-              vacancies,
+      try {
+        conceptDispatchResult = await dispatchConceptGeneration({
+          context,
+          runId,
+          plan,
+          eligibleProspects,
+          outreachEngine: this.outreachEngine,
+          repository: this.repository,
+          prospectAudit: this.prospectAudit,
+          maxConcepts: plan.maximum_drafts,
+        });
+      } finally {
+        if (!conceptDispatchResult) {
+          conceptDispatchResult = {
+            results: [],
+            counters: {
+              prospectsEvaluated: eligibleProspects.length,
+              prospectsEligible: eligibleProspects.length,
+              conceptsStarted: 0,
+              conceptsCreated: 0,
+              conceptsFailed: eligibleProspects.length,
+              conceptsSkipped: 0,
+              conceptsPending: 0,
+              conceptsGenerating: 0,
             },
-          );
-
-          draftsCreated += 1;
-          counters.draftsCreated += 1;
-
-          const existingItem = await this.repository.getRunItem(context.organizationId, itemId);
-          const external = (existingItem?.externalCompanyData ?? {}) as Record<string, unknown>;
-
-          const updatedItem = await this.repository.updateRunItem(context.organizationId, itemId, {
-            stage: "draft_created",
-            status: "completed",
-            outreachMessageId,
-            warnings: draftWarnings,
-            externalCompanyData: {
-              ...external,
-              followUpDraft: followUpDraft,
-            },
-          });
-
-          const eligibility = (external.eligibility as ConceptEligibilityResult | undefined)
-            ?? {
-              eligible: true,
-              score: 0,
-              threshold: recruiterConfig.conceptScoreThreshold,
-              priority: "priority_a" as const,
-              acceptedRules: ["draft_created"],
-              rejectedRules: [],
-              reasonCode: "eligible" as const,
-              userMessage: "Concept aangemaakt.",
-            };
-
-          await this.prospectAudit.upsertDecision({
-            organizationId: context.organizationId,
-            runId,
-            runItemId: itemId,
-            company,
-            eligibility,
-            vacancies,
-            contact: selected,
-            contactStage,
-            conceptStatus: "created",
-          });
-
-          yield { type: "item", item: updatedItem };
-        } catch (error) {
-          if (error instanceof OutreachEngineError && error.code === "duplicate") {
-            counters.skipped += 1;
-            continue;
-          }
-          counters.failed += 1;
+          };
         }
       }
 
+      draftsCreated = conceptDispatchResult.counters.conceptsCreated;
+      counters.draftsCreated = conceptDispatchResult.counters.conceptsCreated;
+      counters.failed += conceptDispatchResult.counters.conceptsFailed;
+
+      for (const result of conceptDispatchResult.results) {
+        if (!result.success) continue;
+        const item = await this.repository.getRunItem(context.organizationId, result.itemId);
+        if (item) yield { type: "item", item };
+      }
+
       pipeline.completeStep("drafts", {
-        succeeded: counters.draftsCreated,
-        processed: qualifiedItems.length,
-        skipped: eligibilitySummary.rejectedCount,
+        succeeded: conceptDispatchResult.counters.conceptsCreated,
+        processed: conceptDispatchResult.counters.prospectsEligible,
+        skipped: conceptDispatchResult.counters.conceptsSkipped,
+        errors: conceptDispatchResult.counters.conceptsFailed,
         message: [
-          `ontvangen ${eligibilitySummary.prospectsReviewed}`,
-          `eligible ${eligibilitySummary.eligibleCount}`,
-          `afgewezen ${eligibilitySummary.rejectedCount}`,
-          `concepten ${counters.draftsCreated}`,
-          eligibilitySummary.topRejectionReasons[0]
-            ? `top reden: ${eligibilitySummary.topRejectionReasons[0].reason}`
-            : null,
-        ].filter(Boolean).join(" · "),
+          `eligible ${conceptDispatchResult.counters.prospectsEligible}`,
+          `gestart ${conceptDispatchResult.counters.conceptsStarted}`,
+          `aangemaakt ${conceptDispatchResult.counters.conceptsCreated}`,
+          `mislukt ${conceptDispatchResult.counters.conceptsFailed}`,
+        ].join(" · "),
       });
       pipeline.skipStep("sending", "Handmatige goedkeuring vereist");
       pipeline.skipStep("follow_up", "Na verzending");
@@ -927,6 +918,7 @@ export class AiRecruiterOrchestrator {
         diagnostics: runDiagnostics!,
         draftsCreated: counters.draftsCreated,
         eligibilitySummary,
+        conceptCounters: conceptDispatchResult?.counters ?? null,
       });
       const uiMessage =
         outcome.errorMessage && runDiagnostics

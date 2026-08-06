@@ -14,6 +14,10 @@ import {
 } from "@/features/contact-finder/services/contact-validation.service";
 import { isOpenAIConfigured } from "@/platform/config/env";
 import { getOpenAIClient } from "@/lib/ai/client";
+import {
+  parseRecruitmentDraftOutput,
+  repairRecruitmentDraftOutput,
+} from "@/features/ai-recruiter/validation/recruitment-outreach-draft.schema";
 
 import {
   RECRUITMENT_OUTREACH_PROMPT_VERSION,
@@ -435,4 +439,146 @@ export async function generateRecruitmentOutreachVariant(
 
 export function countRecruitmentOutreachWords(text: string): number {
   return countWords(text);
+}
+
+export type RecruitmentDraftGenerationMeta = {
+  provider: string;
+  model: string;
+  durationMs: number;
+  responseReceived: boolean;
+  finishReason: string | null;
+  rawResponseLength: number;
+  parsedSuccessfully: boolean;
+  schemaValid: boolean;
+  validationErrors: string[];
+};
+
+export async function generateRecruitmentOutreachDraftWithValidation(
+  input: RecruitmentOutreachDraftInput,
+): Promise<{
+  draft: RecruitmentOutreachDraft;
+  usedFallback: boolean;
+  meta: RecruitmentDraftGenerationMeta;
+}> {
+  const startedAt = Date.now();
+  const fallback = buildFallbackDraft(input);
+
+  if (!isOpenAIConfigured()) {
+    return {
+      draft: fallback,
+      usedFallback: true,
+      meta: {
+        provider: "fallback",
+        model: fallback.model,
+        durationMs: Date.now() - startedAt,
+        responseReceived: true,
+        finishReason: "fallback_no_ai",
+        rawResponseLength: fallback.bodyText.length,
+        parsedSuccessfully: true,
+        schemaValid: true,
+        validationErrors: [],
+      },
+    };
+  }
+
+  try {
+    const draft = await generateRecruitmentOutreachDraft(input);
+    const parsed = parseRecruitmentDraftOutput({
+      subject: draft.recommendedSubject,
+      salutation: draft.salutation,
+      body: draft.bodyText,
+      cta: draft.cta,
+      closing: draft.closing,
+      personalizationFacts: draft.personalizationFacts,
+      sourceEvidence: draft.sourceEvidence,
+      warnings: draft.warnings,
+      confidence: draft.confidence,
+    });
+
+    if (parsed.ok) {
+      return {
+        draft,
+        usedFallback: draft.model === "fallback",
+        meta: {
+          provider: "openai",
+          model: draft.model,
+          durationMs: Date.now() - startedAt,
+          responseReceived: true,
+          finishReason: "stop",
+          rawResponseLength: draft.bodyText.length,
+          parsedSuccessfully: true,
+          schemaValid: true,
+          validationErrors: [],
+        },
+      };
+    }
+
+    const repaired = repairRecruitmentDraftOutput(
+      {
+        subject: draft.recommendedSubject,
+        salutation: draft.salutation,
+        body: draft.bodyText,
+        cta: draft.cta,
+        closing: draft.closing,
+        personalizationFacts: draft.personalizationFacts,
+        sourceEvidence: draft.sourceEvidence,
+        warnings: [...draft.warnings, "schema_repair_applied"],
+        confidence: draft.confidence,
+      },
+      {
+        subject: fallback.recommendedSubject,
+        salutation: fallback.salutation,
+        body: fallback.bodyText,
+        cta: fallback.cta,
+        closing: fallback.closing,
+      },
+    );
+
+    const repairedDraft: RecruitmentOutreachDraft = {
+      ...draft,
+      recommendedSubject: repaired.subject,
+      subject: repaired.subject,
+      salutation: repaired.salutation,
+      bodyText: repaired.body,
+      body: repaired.body,
+      cta: repaired.cta,
+      closing: repaired.closing,
+      warnings: repaired.warnings,
+    };
+
+    return {
+      draft: repairedDraft,
+      usedFallback: false,
+      meta: {
+        provider: "openai",
+        model: draft.model,
+        durationMs: Date.now() - startedAt,
+        responseReceived: true,
+        finishReason: "schema_repair",
+        rawResponseLength: draft.bodyText.length,
+        parsedSuccessfully: true,
+        schemaValid: true,
+        validationErrors: parsed.errors,
+      },
+    };
+  } catch (error) {
+    return {
+      draft: {
+        ...fallback,
+        warnings: [...fallback.warnings, "ai_generation_failed_fallback_used"],
+      },
+      usedFallback: true,
+      meta: {
+        provider: "openai",
+        model: "fallback",
+        durationMs: Date.now() - startedAt,
+        responseReceived: false,
+        finishReason: "error",
+        rawResponseLength: 0,
+        parsedSuccessfully: false,
+        schemaValid: false,
+        validationErrors: [error instanceof Error ? error.message : "AI generation failed"],
+      },
+    };
+  }
 }
