@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const companyStatusSchema = z.enum(["active", "inactive", "prospect", "archived"]);
+const companyStatusSchema = z.enum(["active", "inactive", "prospect", "archived", "review"]);
 
 const companyPrioritySchema = z.enum(["low", "medium", "high"]);
 

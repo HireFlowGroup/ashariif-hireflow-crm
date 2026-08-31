@@ -111,6 +111,17 @@ export class ProviderManager {
     const ordered = pickFastestProvider(enabled);
     const fallbacksAttempted: string[] = [];
     let lastError: Error | null = null;
+    // Accumulate unique search hits across providers (failover + optional combine/dedupe).
+    const mergedResults: SearchResultItem[] = [];
+    const seenUrls = new Set<string>();
+    let primaryProviderId = ordered[0]?.definition.id ?? "search";
+    let totalDurationMs = 0;
+    let lastMeta: {
+      durationMs: number;
+      responseSize?: number;
+      fromCache: boolean;
+      attempt: number;
+    } | null = null;
 
     for (let index = 0; index < ordered.length; index += 1) {
       const adapter = ordered[index]!;
@@ -130,30 +141,49 @@ export class ProviderManager {
           () => adapter.executeSearch!(query, maxResults),
         );
 
+        totalDurationMs += execution.durationMs;
+        lastMeta = {
+          durationMs: execution.durationMs,
+          responseSize: execution.responseSize,
+          fromCache: execution.fromCache,
+          attempt: execution.attempt,
+        };
+
         if (execution.data.length === 0) {
           fallbacksAttempted.push(provider.id);
           lastError = new Error(`${provider.name} retourneerde 0 resultaten`);
           continue;
         }
 
+        if (mergedResults.length === 0) {
+          primaryProviderId = provider.id;
+        }
+
+        for (const hit of execution.data) {
+          const key = hit.url.trim().toLowerCase();
+          if (!key || seenUrls.has(key)) continue;
+          seenUrls.add(key);
+          mergedResults.push({
+            ...hit,
+            description: hit.description ?? "",
+          });
+          if (mergedResults.length >= maxResults) break;
+        }
+
         pipelineDebug("search.chain.success", {
           providerId: provider.id,
           count: execution.data.length,
+          mergedCount: mergedResults.length,
           fallbacksAttempted,
         });
 
-        return {
-          results: execution.data,
-          meta: {
-            providerId: provider.id,
-            durationMs: execution.durationMs,
-            responseSize: execution.responseSize,
-            fromCache: execution.fromCache,
-            attempt: execution.attempt,
-            fallbackUsed: index > 0,
-            fallbacksAttempted,
-          },
-        };
+        // Enough unique results — stop chain early.
+        if (mergedResults.length >= maxResults) {
+          break;
+        }
+
+        // Sparse result set: try next provider to combine/dedupe more hits.
+        fallbacksAttempted.push(`${provider.id}:sparse`);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Onbekende fout";
         fallbacksAttempted.push(provider.id);
@@ -162,7 +192,22 @@ export class ProviderManager {
       }
     }
 
-    throw lastError ?? new Error("Alle zoekproviders zijn mislukt");
+    if (mergedResults.length === 0) {
+      throw lastError ?? new Error("Alle zoekproviders zijn mislukt");
+    }
+
+    return {
+      results: mergedResults.slice(0, maxResults),
+      meta: {
+        providerId: primaryProviderId,
+        durationMs: totalDurationMs || lastMeta?.durationMs || 0,
+        responseSize: lastMeta?.responseSize ?? 0,
+        fromCache: lastMeta?.fromCache ?? false,
+        attempt: lastMeta?.attempt ?? 1,
+        fallbackUsed: fallbacksAttempted.length > 0,
+        fallbacksAttempted,
+      },
+    };
   }
 
   async executeCrawlChain(url: string): Promise<CrawlChainResult> {

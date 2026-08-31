@@ -106,7 +106,7 @@ export const MANAGED_PROVIDERS: ManagedProviderDefinition[] = [
         required: true,
       },
     ],
-    envFallbackKeys: ["GOOGLE_CSE_API_KEY", "GOOGLE_CSE_CX"],
+    envFallbackKeys: ["GOOGLE_CSE_API_KEY", "GOOGLE_SEARCH_API_KEY", "GOOGLE_CSE_CX", "GOOGLE_CSE_ID"],
   },
   {
     id: "bing-search",

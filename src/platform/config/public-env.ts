@@ -5,13 +5,25 @@ import {
 
 let cachedPublic: PublicEnv | null = null;
 
+/**
+ * Resolve Supabase anon/publishable key.
+ * Accepts NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as alias (Make-HireFlow Vercel naming).
+ */
+export function resolveSupabaseAnonKey(): string | undefined {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim()
+    || undefined
+  );
+}
+
 /** Client-safe public environment (no server-only dependencies). */
 export function getPublicEnv(): PublicEnv {
   if (cachedPublic) return cachedPublic;
 
   const parsed = publicEnvSchema.safeParse({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: resolveSupabaseAnonKey(),
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   });
 

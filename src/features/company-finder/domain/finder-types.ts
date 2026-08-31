@@ -122,12 +122,16 @@ export type CompanyFinderQualityReport = {
   government: number;
   social: number;
   jobboards: number;
+  forums?: number;
   unknown: number;
   realCompanies: number;
+  review?: number;
   saved: number;
   rejectedByHeuristics: number;
   rejectedByAiCategory: number;
   rejectedByHomepageSignals: number;
   rejectedByAiValidation: number;
   rejectedByScore: number;
+  rejectedByDuplicate?: number;
+  rejectedByLowConfidence?: number;
 };

@@ -7,12 +7,13 @@ import {
   isAuthRoute,
   isProtectedRoute,
 } from "@/config/navigation";
+import { resolveSupabaseAnonKey } from "@/platform/config/public-env";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseAnonKey = resolveSupabaseAnonKey();
 
   if (!supabaseUrl || !supabaseAnonKey) {
     return supabaseResponse;

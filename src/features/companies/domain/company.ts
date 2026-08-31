@@ -5,7 +5,7 @@ export function toCompanyId(value: string): CompanyId {
   return value as CompanyId;
 }
 
-export type CompanyStatus = "active" | "inactive" | "prospect" | "archived";
+export type CompanyStatus = "active" | "inactive" | "prospect" | "archived" | "review";
 
 export type CompanyPriority = "low" | "medium" | "high";
 

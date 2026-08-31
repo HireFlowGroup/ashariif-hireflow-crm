@@ -114,8 +114,19 @@ export function getSerpApiKey(): string | null {
 }
 
 export function getGoogleCseConfig(): { apiKey: string; cx: string } | null {
-  const apiKey = resolveVaultOrEnv("google-cse", "apiKey", "GOOGLE_CSE_API_KEY");
-  const cx = resolveVaultOrEnv("google-cse", "cx", "GOOGLE_CSE_CX");
+  // Prefer canonical names; accept common aliases used in Vercel/docs.
+  const apiKey = resolveVaultOrEnv(
+    "google-cse",
+    "apiKey",
+    "GOOGLE_CSE_API_KEY",
+    "GOOGLE_SEARCH_API_KEY",
+  );
+  const cx = resolveVaultOrEnv(
+    "google-cse",
+    "cx",
+    "GOOGLE_CSE_CX",
+    "GOOGLE_CSE_ID",
+  );
   if (!apiKey || !cx) return null;
   return { apiKey, cx };
 }

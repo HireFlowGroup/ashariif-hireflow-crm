@@ -95,14 +95,18 @@ export async function* runFastCompanyFinderPipeline(input: {
     government: 0,
     social: 0,
     jobboards: 0,
+    forums: 0,
     unknown: 0,
     realCompanies: 0,
+    review: 0,
     saved: 0,
     rejectedByHeuristics: 0,
     rejectedByAiCategory: 0,
     rejectedByHomepageSignals: 0,
     rejectedByAiValidation: 0,
     rejectedByScore: 0,
+    rejectedByDuplicate: 0,
+    rejectedByLowConfidence: 0,
   };
   let qualifiedCandidates: QualifiedDiscoveryCandidate[] = [];
 

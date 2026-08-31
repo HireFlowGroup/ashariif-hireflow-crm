@@ -331,9 +331,28 @@ export function CompanyFinderDialog({
           {qualityReport ? (
             <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
               <p className="font-medium">Discovery kwaliteit</p>
-              <p className="mt-1 text-muted-foreground">
-                {qualityReport.totalUrls} URLs · {qualityReport.rejected} afgewezen ·{" "}
-                {qualityReport.realCompanies} echte bedrijven · {qualityReport.saved} opgeslagen
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md border bg-background px-2 py-2">
+                  <div className="text-lg font-semibold text-emerald-700 dark:text-emerald-300">
+                    {Math.max(0, qualityReport.realCompanies - (qualityReport.review ?? 0))}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Companies</div>
+                </div>
+                <div className="rounded-md border bg-background px-2 py-2">
+                  <div className="text-lg font-semibold text-amber-700 dark:text-amber-300">
+                    {qualityReport.review ?? 0}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Review</div>
+                </div>
+                <div className="rounded-md border bg-background px-2 py-2">
+                  <div className="text-lg font-semibold text-rose-700 dark:text-rose-300">
+                    {qualityReport.rejected}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Rejected</div>
+                </div>
+              </div>
+              <p className="mt-2 text-muted-foreground">
+                {qualityReport.totalUrls} URLs · {qualityReport.saved} opgeslagen
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Directories: {qualityReport.directories + qualityReport.listings} · Blogs/nieuws:{" "}
