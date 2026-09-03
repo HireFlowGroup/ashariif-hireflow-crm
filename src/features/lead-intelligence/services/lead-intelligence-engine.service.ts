@@ -61,7 +61,7 @@ export type LeadIntelligenceContext = CompaniesServiceContext;
 export type LeadIntelligenceRunEvent =
   | { type: "progress"; progress: CompanyFinderProgress }
   | { type: "event"; eventType: string; payload: Record<string, unknown> }
-  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean }
+  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean; companyId?: string }
   | { type: "pipeline"; event: PipelineStreamEvent }
   | { type: "complete"; job: CompanySearchJob }
   | { type: "error"; message: string };

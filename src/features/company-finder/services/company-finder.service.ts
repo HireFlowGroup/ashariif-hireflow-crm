@@ -13,7 +13,7 @@ export type CompanyFinderServiceContext = CompaniesServiceContext;
 export type CompanyFinderRunEvent =
   | { type: "progress"; progress: CompanyFinderProgress }
   | { type: "event"; eventType: string; payload: Record<string, unknown> }
-  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean }
+  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean; companyId?: string }
   | { type: "pipeline"; event: import("@/features/company-finder/pipeline/pipeline-viewer.types").PipelineStreamEvent }
   | { type: "complete"; job: CompanySearchJob }
   | { type: "error"; message: string };

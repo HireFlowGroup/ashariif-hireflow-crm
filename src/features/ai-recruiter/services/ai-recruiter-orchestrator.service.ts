@@ -222,7 +222,9 @@ export class AiRecruiterOrchestrator {
 
           if (event.saved || event.updated) {
             counters.validated += 1;
-            const company = await this.resolveCompany(context, event.candidate.name, event.candidate.website);
+            const company = event.companyId
+              ? await this.companiesService.getCompany(context, toCompanyId(event.companyId))
+              : await this.resolveCompany(context, event.candidate.name, event.candidate.website);
             const item = await this.repository.createRunItem(context.organizationId, runId, {
               companyId: company?.id ?? null,
               externalCompanyData: { candidate: event.candidate },
@@ -900,6 +902,7 @@ export class AiRecruiterOrchestrator {
           `eligible ${conceptDispatchResult.counters.prospectsEligible}`,
           `gestart ${conceptDispatchResult.counters.conceptsStarted}`,
           `aangemaakt ${conceptDispatchResult.counters.conceptsCreated}`,
+          `overgeslagen ${conceptDispatchResult.counters.conceptsSkipped}`,
           `mislukt ${conceptDispatchResult.counters.conceptsFailed}`,
         ].join(" · "),
       });

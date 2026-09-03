@@ -8,7 +8,10 @@ import {
   PipelineStepTimer,
 } from "@/features/company-finder/pipeline/pipeline-step-timer";
 import { scheduleBackgroundCompanyEnrichment } from "@/features/company-finder/services/background-enrichment.service";
-import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
+import {
+  loadExistingCompaniesForDedupe,
+  saveDiscoveryCompanyWithDedupe,
+} from "@/features/company-finder/services/discovery-company-deduplication.service";
 import { runFastTavilySearch } from "@/features/company-finder/services/fast-discovery.service";
 import { recordDiscoveryQueryRun } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
@@ -69,6 +72,7 @@ export async function* runFastCompanyFinderPipeline(input: {
   const deadline = JobDeadline.fromTimeoutMs(config.globalJobTimeoutMs);
   let currentJob = input.currentJob;
   let savedCount = 0;
+  let updatedCount = 0;
   let skippedCount = 0;
   let saveErrorCount = 0;
 
@@ -241,6 +245,8 @@ export async function* runFastCompanyFinderPipeline(input: {
   timer.start("fast_save", "supabase");
   deadline.assert("fast_save");
 
+  const existingCompanies = await loadExistingCompaniesForDedupe(input.companiesService, input.context);
+
   const saveResults = await runWithConcurrencySettled(
     qualifiedCandidates.map((qualified) => async () => {
       const candidate = qualified.candidate;
@@ -258,10 +264,12 @@ export async function* runFastCompanyFinderPipeline(input: {
       });
 
       try {
-        const created = await input.companiesService.createDiscoveryCompany(
-          input.context,
-          buildQualifiedDiscoveryCreateInput(qualified, input.context.userId),
-        );
+        const saveResult = await saveDiscoveryCompanyWithDedupe({
+          companiesService: input.companiesService,
+          context: input.context,
+          qualified,
+          existingCompanies,
+        });
 
         logPipelinePhase({
           phase: "SAVE",
@@ -272,17 +280,19 @@ export async function* runFastCompanyFinderPipeline(input: {
           jobId: input.jobId,
         });
 
-        scheduleBackgroundCompanyEnrichment({
-          organizationId: input.context.organizationId,
-          companiesService: input.companiesService,
-          context: input.context,
-          companyId: created.id as string,
-          candidate,
-          searchCriteria: input.searchCriteria,
-          jobId: input.jobId,
-        });
+        if (saveResult.type === "saved") {
+          scheduleBackgroundCompanyEnrichment({
+            organizationId: input.context.organizationId,
+            companiesService: input.companiesService,
+            context: input.context,
+            companyId: saveResult.companyId,
+            candidate,
+            searchCriteria: input.searchCriteria,
+            jobId: input.jobId,
+          });
+        }
 
-        return { type: "saved" as const, candidate, companyId: created.id as string };
+        return saveResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Opslaan mislukt";
         logPipelinePhase({
@@ -331,6 +341,31 @@ export async function* runFastCompanyFinderPipeline(input: {
       continue;
     }
 
+    if (result.value.type === "updated") {
+      updatedCount += 1;
+      yield {
+        type: "candidate",
+        candidate: toStreamCandidate(result.value.candidate),
+        saved: false,
+        updated: true,
+        skipped: false,
+        companyId: result.value.companyId,
+      };
+      yield {
+        type: "event",
+        eventType: "company_updated",
+        payload: { name: result.value.candidate.name, mode: "fast" },
+      };
+      yield input.emitProgress("saving", `Bestaand bedrijf gekoppeld: ${result.value.candidate.name}`, {
+        foundCount: candidates.length,
+        savedCount,
+        updatedCount,
+        skippedCount,
+        progressPercent: 35 + Math.round(((savedCount + updatedCount) / Math.max(candidates.length, 1)) * 55),
+      });
+      continue;
+    }
+
     savedCount += 1;
     yield {
       type: "candidate",
@@ -338,6 +373,7 @@ export async function* runFastCompanyFinderPipeline(input: {
       saved: true,
       updated: false,
       skipped: false,
+      companyId: result.value.companyId,
     };
     yield {
       type: "event",
@@ -352,16 +388,17 @@ export async function* runFastCompanyFinderPipeline(input: {
     });
   }
 
-  timer.complete("fast_save", { resultCount: savedCount, provider: "supabase" });
+  timer.complete("fast_save", { resultCount: savedCount + updatedCount, provider: "supabase" });
 
+  const persistedCount = savedCount + updatedCount;
   const finalStatus =
-    savedCount > 0
+    persistedCount > 0
       ? "completed"
       : candidates.length > 0
         ? "failed"
         : "failed";
   const errorMessage =
-    savedCount > 0
+    persistedCount > 0
       ? null
       : saveErrorCount > 0
         ? `${saveErrorCount} bedrijven konden niet worden opgeslagen (validatie of database).`
@@ -371,6 +408,7 @@ export async function* runFastCompanyFinderPipeline(input: {
     status: finalStatus,
     foundCount: qualityReport.totalUrls,
     savedCount,
+    updatedCount,
     skippedCount: skippedCount + qualityReport.rejected,
     errorCount: saveErrorCount,
     providerErrors: [],
@@ -386,8 +424,8 @@ export async function* runFastCompanyFinderPipeline(input: {
   };
 
   const completionMessage =
-    savedCount > 0
-      ? `${savedCount} bedrijven opgeslagen (${qualityReport.rejected} afgewezen) — verrijking op de achtergrond`
+    persistedCount > 0
+      ? `${savedCount} bedrijven opgeslagen${updatedCount > 0 ? `, ${updatedCount} gekoppeld` : ""} (${qualityReport.rejected} afgewezen) — verrijking op de achtergrond`
       : qualityReport.rejected > 0
         ? `Geen bedrijven opgeslagen: ${qualityReport.rejected} URLs afgewezen (${qualityReport.directories} directories, ${qualityReport.blogs + qualityReport.news} blogs/nieuws)`
         : errorMessage ?? "Geen bedrijven opgeslagen";

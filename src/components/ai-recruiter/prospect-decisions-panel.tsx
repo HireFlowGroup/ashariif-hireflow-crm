@@ -30,6 +30,24 @@ type ProspectDecisionsPanelProps = {
   onDraftCreated?: () => void;
 };
 
+function isConceptFailure(decision: ProspectDecisionRow): boolean {
+  return decision.concept_status === "failed";
+}
+
+function isConceptSkippedExisting(decision: ProspectDecisionRow): boolean {
+  return (
+    decision.concept_status === "skipped"
+    && (decision.reason_code === "duplicate_outreach" || decision.reason_code === "outreach_cooldown")
+  );
+}
+
+function conceptStatusLabel(decision: ProspectDecisionRow): string {
+  if (isConceptSkippedExisting(decision)) {
+    return "skipped_existing_concept";
+  }
+  return decision.concept_status;
+}
+
 export function ProspectDecisionsPanel({
   runId,
   threshold = 30,
@@ -159,7 +177,17 @@ export function ProspectDecisionsPanel({
                   {decision.eligibility_status}
                 </Badge>
                 <Badge variant="outline">score {decision.deterministic_score ?? "—"}</Badge>
-                <Badge variant="outline">{decision.concept_status}</Badge>
+                <Badge
+                  variant={
+                    isConceptFailure(decision)
+                      ? "destructive"
+                      : isConceptSkippedExisting(decision)
+                        ? "secondary"
+                        : "outline"
+                  }
+                >
+                  {conceptStatusLabel(decision)}
+                </Badge>
               </div>
               {decision.vacancy_title ? (
                 <p className="text-muted-foreground">Vacature: {decision.vacancy_title}</p>
@@ -169,7 +197,25 @@ export function ProspectDecisionsPanel({
                   Contact: {decision.contact_type ?? "onbekend"} · {decision.contact_email}
                 </p>
               ) : null}
-              <p>{decision.final_reason}</p>
+              {isConceptFailure(decision) ? (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive">
+                  <p className="font-medium">Conceptgeneratie mislukt:</p>
+                  <p>{decision.final_reason}</p>
+                  {decision.reason_code ? (
+                    <span className="mt-1 block text-xs opacity-80">Code: {decision.reason_code}</span>
+                  ) : null}
+                </div>
+              ) : isConceptSkippedExisting(decision) ? (
+                <div className="rounded-md border border-muted bg-muted/30 px-3 py-2 text-muted-foreground">
+                  <p className="font-medium text-foreground">Bestaand actief concept</p>
+                  <p>{decision.final_reason}</p>
+                  {decision.reason_code ? (
+                    <span className="mt-1 block text-xs opacity-80">Code: {decision.reason_code}</span>
+                  ) : null}
+                </div>
+              ) : (
+                <p>{decision.final_reason}</p>
+              )}
               {decision.accepted_rules.length > 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Accepted: {decision.accepted_rules.join(", ")}

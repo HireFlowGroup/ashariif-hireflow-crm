@@ -12,6 +12,7 @@ import { createInitialConceptCounters } from "@/features/ai-recruiter/domain/con
 import type { AiRecruiterEngineContext } from "@/features/ai-recruiter/domain/types";
 import type { AiRecruiterRepository } from "@/features/ai-recruiter/repositories/ai-recruiter.repository";
 import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
+import { aggregateConceptGenerationResults } from "@/features/ai-recruiter/services/concept-generation-result.helpers";
 import {
   logConceptGenerationAiResult,
   logConceptGenerationPersistence,
@@ -310,11 +311,15 @@ async function processEligibleProspect(
       warnings,
     };
   } catch (error) {
-    if (error instanceof OutreachEngineError && error.code === "duplicate") {
+    if (
+      error instanceof OutreachEngineError
+      && (error.code === "duplicate" || error.code === "outreach_cooldown")
+    ) {
+      const reasonCode = error.code === "outreach_cooldown" ? "outreach_cooldown" : "duplicate_outreach";
       await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
         conceptStatus: "skipped",
         finalReason: "Duplicate outreach — actief concept bestaat al.",
-        reasonCode: "duplicate_outreach",
+        reasonCode,
       });
 
       return {
@@ -324,7 +329,7 @@ async function processEligibleProspect(
         success: false,
         outreachMessageId: null,
         conceptStatus: "skipped",
-        errorCode: "duplicate_outreach",
+        errorCode: reasonCode,
         errorMessage: error.message,
         usedFallback: false,
         warnings,
@@ -466,8 +471,10 @@ export async function dispatchConceptGeneration(input: {
   });
 
   counters.conceptsGenerating = 0;
-  counters.conceptsCreated = results.filter((r) => r.success).length;
-  counters.conceptsFailed = results.filter((r) => !r.success).length;
+  const aggregated = aggregateConceptGenerationResults(results);
+  counters.conceptsCreated = aggregated.conceptsCreated;
+  counters.conceptsFailed = aggregated.conceptsFailed;
+  counters.conceptsSkipped = aggregated.conceptsSkipped;
   counters.conceptsPending = Math.max(
     0,
     eligibleProspects.length - counters.conceptsCreated - counters.conceptsFailed - counters.conceptsSkipped,
@@ -476,6 +483,7 @@ export async function dispatchConceptGeneration(input: {
   console.info("[ConceptGenerationDispatch] complete", {
     run_id: input.runId,
     concepts_created: counters.conceptsCreated,
+    concepts_skipped: counters.conceptsSkipped,
     concepts_failed: counters.conceptsFailed,
   });
 

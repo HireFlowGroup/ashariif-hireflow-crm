@@ -1,5 +1,6 @@
 import type { ConceptGenerationCounters } from "@/features/ai-recruiter/domain/concept-generation.types";
 import { resolveConceptGenerationRunStatus } from "@/features/ai-recruiter/services/concept-generation-banner.service";
+import { allEligibleConceptsSkippedForExistingOutreach } from "@/features/ai-recruiter/services/concept-generation-result.helpers";
 import type { AiRecruiterRunCounters, AiRecruiterRunStatus } from "@/features/ai-recruiter/domain/types";
 import type { RunDiagnostics, RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { isProviderFailure } from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
@@ -43,6 +44,20 @@ export function resolveRunOutcome(input: {
       };
     }
 
+    if (allEligibleConceptsSkippedForExistingOutreach(conceptCounters)) {
+      return {
+        status: "partially_completed",
+        errorMessage: `${conceptCounters.conceptsSkipped} prospect(s) overgeslagen — actief concept bestaat al.`,
+      };
+    }
+
+    if (conceptCounters.conceptsSkipped > 0 && conceptCounters.conceptsCreated === 0 && conceptCounters.conceptsFailed === 0) {
+      return {
+        status: "partially_completed",
+        errorMessage: `${conceptCounters.conceptsSkipped} prospect(s) overgeslagen — actief concept bestaat al.`,
+      };
+    }
+
     if (conceptCounters.prospectsEligible > 0 && conceptCounters.conceptsStarted === 0) {
       return {
         status: "failed",
@@ -72,7 +87,7 @@ export function resolveRunOutcome(input: {
           `gem. score ${eligibilitySummary.averageScore}`,
           `drempel ${eligibilitySummary.threshold}`,
           conceptCounters
-            ? `${conceptCounters.conceptsCreated} concepten aangemaakt, ${conceptCounters.conceptsFailed} mislukt`
+            ? `${conceptCounters.conceptsCreated} concepten aangemaakt, ${conceptCounters.conceptsFailed} mislukt, ${conceptCounters.conceptsSkipped} overgeslagen`
             : null,
           eligibilitySummary.topRejectionReasons[0]
             ? `top afwijsreden: ${eligibilitySummary.topRejectionReasons[0].reason} (${eligibilitySummary.topRejectionReasons[0].count}x)`
