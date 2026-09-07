@@ -7,6 +7,7 @@ import {
   evaluateProspectPipeline,
   summarizeEligibilityDecisions,
 } from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
+import { validateCompanyVacancies } from "@/features/ai-recruiter/services/company-vacancy-validation.service";
 import {
   mapScoreToDecision,
   prospectDecisionToBreakdownFields,
@@ -350,6 +351,109 @@ export class AiRecruiterOrchestrator {
       pipeline.startStep("hiring_signals");
       yield emitPipeline();
 
+      const recruiterConfig = getAiRecruiterConfig();
+      const vacancyApprovedCompanies: Array<{
+        companyId: string;
+        itemId: string;
+        name: string;
+        company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
+        validatedVacancies: VacancyEvidence[];
+      }> = [];
+
+      let vacancyValidationProcessed = 0;
+      let vacancyValidationRejected = 0;
+
+      for (const { companyId, itemId, name } of savedCompanyIds) {
+        if (Date.now() - startedAt > timeoutMs) break;
+
+        try {
+          const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
+          vacancyValidationProcessed += 1;
+
+          if (plan.vacancy_required) {
+            const validation = await validateCompanyVacancies({ company, plan });
+            if (validation.status !== "accepted") {
+              vacancyValidationRejected += 1;
+              counters.skipped += 1;
+
+              const reasonCode: ConceptEligibilityResult["reasonCode"] =
+                validation.status === "no_matching_role" ? "no_matching_role" : "no_active_vacancy";
+              const eligibility: ConceptEligibilityResult = {
+                eligible: false,
+                score: 0,
+                threshold: recruiterConfig.conceptScoreThreshold,
+                priority: "reject",
+                acceptedRules: [],
+                rejectedRules: [reasonCode],
+                reasonCode,
+                userMessage: validation.message,
+              };
+
+              const updatedItem = await this.repository.updateRunItem(context.organizationId, itemId, {
+                stage: "skipped",
+                status: "skipped",
+                rejectionReason: validation.message,
+                externalCompanyData: {
+                  vacancyValidation: validation,
+                  validatedVacancies: validation.vacancies,
+                  eligibility,
+                },
+              });
+
+              await this.prospectAudit.upsertDecision({
+                organizationId: context.organizationId,
+                runId,
+                runItemId: itemId,
+                company,
+                eligibility,
+                vacancies: validation.vacancies,
+                contact: null,
+                contactStage: reasonCode,
+                conceptStatus: "skipped",
+              });
+
+              yield { type: "item", item: updatedItem };
+              continue;
+            }
+
+            vacancyApprovedCompanies.push({
+              companyId,
+              itemId,
+              name,
+              company,
+              validatedVacancies: validation.vacancies,
+            });
+            counters.withVacancies += 1;
+            continue;
+          }
+
+          vacancyApprovedCompanies.push({
+            companyId,
+            itemId,
+            name,
+            company,
+            validatedVacancies: [],
+          });
+        } catch (error) {
+          consecutiveFailures += 1;
+          counters.failed += 1;
+          console.error("[VacancyValidation] company validation failed", {
+            companyId,
+            itemId,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
+
+      pipeline.completeStep("vacancies", {
+        processed: vacancyValidationProcessed,
+        succeeded: vacancyApprovedCompanies.length,
+        skipped: vacancyValidationRejected,
+        message: plan.vacancy_required
+          ? `${vacancyApprovedCompanies.length}/${vacancyValidationProcessed} bedrijven met actuele vacature-match`
+          : "Vacaturevalidatie niet vereist",
+      });
+
       const qualifiedItems: Array<{
         itemId: string;
         companyId: string;
@@ -370,20 +474,20 @@ export class AiRecruiterOrchestrator {
         hiring: HiringIntelligenceProfile;
         opportunity: OpportunityAssessment;
         sales: SalesIntelligenceAssessment;
+        validatedVacancies: VacancyEvidence[];
       };
 
       const companyContactContexts: CompanyContactContext[] = [];
 
-      for (const { companyId, itemId, name } of savedCompanyIds) {
+      for (const entry of vacancyApprovedCompanies) {
         if (Date.now() - startedAt > timeoutMs) break;
 
         try {
-          const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
+          const { company, companyId, itemId, name, validatedVacancies } = entry;
           const hiring = computeHiringIntelligenceProfile(company, plan);
           const opportunity = computeOpportunityAssessment(company, plan);
           const sales = computeSalesIntelligence(company, hiring, plan);
 
-          if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
           console.info("[SalesIntelligence] assessment", {
@@ -413,13 +517,14 @@ export class AiRecruiterOrchestrator {
             hiring,
             opportunity,
             sales,
+            validatedVacancies,
           });
         } catch (error) {
           consecutiveFailures += 1;
           counters.failed += 1;
           console.error("[ContactFinder] company context failed", {
-            companyId,
-            itemId,
+            companyId: entry.companyId,
+            itemId: entry.itemId,
             error: error instanceof Error ? error.message : error,
           });
           if (consecutiveFailures >= config.consecutiveProviderFailuresKillSwitch) {
@@ -430,24 +535,31 @@ export class AiRecruiterOrchestrator {
 
       console.info("[ContactFinder] DEBUG overview — start", {
         companiesReceived: savedCompanyIds.length,
+        vacancyApproved: vacancyApprovedCompanies.length,
         validatedCounter: counters.validated,
         companiesPreparedForContactFinder: companyContactContexts.length,
       });
 
-      if (counters.validated > 0 && savedCompanyIds.length === 0) {
-        console.error("[ContactFinder] BUG: validated > 0 maar geen company_id op run items", {
-          validated: counters.validated,
-          savedCompanyIds: savedCompanyIds.length,
+      if (vacancyApprovedCompanies.length === 0 && savedCompanyIds.length > 0) {
+        skipEnrichmentAndDownstream(pipeline, "Geen bedrijven met actuele vacature-match");
+        pipeline.finalizeTerminalRun();
+        yield emitPipeline();
+
+        const outcome = resolveRunOutcome({ counters, diagnostics: runDiagnostics!, draftsCreated: 0 });
+        const finalRun = await this.repository.updateRun(context.organizationId, runId, {
+          status: outcome.status,
+          counters,
+          pipelineSteps: pipeline.getSnapshot(),
+          completedAt: new Date().toISOString(),
+          errorMessage: outcome.errorMessage,
+          settings: buildRunSettingsWithDiagnostics(run.settings, runDiagnostics!, finderJobId),
         });
+
+        yield { type: "counters", counters };
+        yield { type: "complete", run: finalRun };
+        return;
       }
 
-      if (companyContactContexts.length === 0 && savedCompanyIds.length > 0) {
-        console.error("[ContactFinder] BUG: geen company context — Contact Finder wordt niet uitgevoerd", {
-          savedCompanyIds: savedCompanyIds.length,
-        });
-      }
-
-      pipeline.completeStep("vacancies", { succeeded: counters.withVacancies });
       pipeline.completeStep("hiring_signals", { succeeded: counters.withSignals });
       yield emitPipeline();
 
@@ -458,7 +570,7 @@ export class AiRecruiterOrchestrator {
       const intelligenceEngine = await createRecruitmentIntelligenceEngine();
       const analysisByCompanyId = new Map<string, RecruitmentIntelligenceAnalysis>();
 
-      for (const { companyId, itemId } of savedCompanyIds) {
+      for (const { companyId, itemId } of vacancyApprovedCompanies) {
         try {
           const record = await intelligenceEngine.ensureFreshAnalysis(context, companyId, {
             runItemId: itemId,
@@ -477,10 +589,10 @@ export class AiRecruiterOrchestrator {
       }
 
       pipeline.completeStep("ai_analysis", {
-        processed: savedCompanyIds.length,
+        processed: vacancyApprovedCompanies.length,
         succeeded: aiAnalysisSucceeded,
-        errors: savedCompanyIds.length - aiAnalysisSucceeded,
-        message: `${aiAnalysisSucceeded}/${savedCompanyIds.length} recruitment intelligence analyses`,
+        errors: vacancyApprovedCompanies.length - aiAnalysisSucceeded,
+        message: `${aiAnalysisSucceeded}/${vacancyApprovedCompanies.length} recruitment intelligence analyses`,
       });
       yield emitPipeline();
 
@@ -624,7 +736,6 @@ export class AiRecruiterOrchestrator {
 
       pipeline.startStep("lead_score");
 
-      const recruiterConfig = getAiRecruiterConfig();
       const eligibilityDecisions: import("@/features/ai-recruiter/domain/concept-eligibility.types").ConceptEligibilityResult[] = [];
 
       for (const entry of companyContactContexts) {
@@ -659,6 +770,7 @@ export class AiRecruiterOrchestrator {
           contact: result.selected,
           contactStage: result.stage,
           contactRejectionReason: result.errorMessage,
+          validatedVacancies: entry.validatedVacancies,
         });
 
         const decisionFields = prospectDecisionToBreakdownFields(

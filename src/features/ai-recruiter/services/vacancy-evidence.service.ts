@@ -2,6 +2,18 @@ import type { Company } from "@/features/companies/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import type { ClassifiedSearchResult } from "@/features/company-finder/discovery/result-classifier.service";
+import { vacancyTitleMatchesDesiredRoles } from "@/features/ai-recruiter/services/desired-role-matching.service";
+import type { ParsedCareerVacancy } from "@/features/ai-recruiter/services/careers-vacancy-parser.service";
+
+const GENERIC_VACANCY_TITLES = new Set([
+  "careers pagina",
+  "open vacature",
+  "recruitment opportunity",
+  "vacatures",
+  "careers",
+  "jobs",
+  "werken bij",
+]);
 
 function extractDomain(url: string | null | undefined): string {
   if (!url) return "";
@@ -16,57 +28,64 @@ function normalizeTitle(title: string): string {
   return title.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+export function isGenericVacancyTitle(title: string): boolean {
+  return GENERIC_VACANCY_TITLES.has(normalizeTitle(title));
+}
+
+export function strictVacancyEvidence(evidence: VacancyEvidence): boolean {
+  return (
+    evidence.isActive
+    && evidence.title.trim().length > 2
+    && !isGenericVacancyTitle(evidence.title)
+    && Boolean(evidence.sourceUrl)
+    && Boolean(evidence.sourceDomain)
+    && Boolean(evidence.validationReason)
+  );
+}
+
+export function parsedVacanciesToEvidence(
+  parsed: ParsedCareerVacancy[],
+  company: Company,
+  evidenceSource: string,
+): VacancyEvidence[] {
+  const domain = extractDomain(company.website ?? company.sourceUrl);
+
+  return parsed.map((vacancy) => ({
+    title: vacancy.title,
+    companyName: company.name,
+    location: company.city,
+    sourceUrl: vacancy.url,
+    sourceDomain: extractDomain(vacancy.url) || domain,
+    publishedAt: null,
+    validThrough: null,
+    employmentType: null,
+    department: null,
+    hiringSignalStrength: 70,
+    isActive: vacancy.isActive,
+    validationReason: `${evidenceSource}: ${vacancy.inactiveReason ?? "Actieve vacature op careers-pagina"}`,
+    actuality: "known" as const,
+  }));
+}
+
+/** Returns only previously validated CRM evidence with concrete titles and URLs. */
 export function buildVacancyEvidenceFromCompany(
   company: Company,
-  plan: AiRecruiterSearchPlan,
+  _plan: AiRecruiterSearchPlan,
 ): VacancyEvidence[] {
   const evidence: VacancyEvidence[] = [];
   const domain = extractDomain(company.website ?? company.sourceUrl);
-  const vacancyCount = company.vacancyCount ?? 0;
-
-  if (vacancyCount > 0) {
-    evidence.push({
-      title: plan.desired_roles[0] ?? "Open vacature",
-      companyName: company.name,
-      location: company.city,
-      sourceUrl: company.website ?? company.sourceUrl ?? "",
-      sourceDomain: domain,
-      publishedAt: null,
-      validThrough: null,
-      employmentType: null,
-      department: null,
-      hiringSignalStrength: Math.min(100, vacancyCount * 20),
-      isActive: true,
-      validationReason: `${vacancyCount} vacature(s) bekend in CRM/signalen`,
-      actuality: "unknown",
-    });
-  }
-
-  if (company.careersUrl || company.vacancyPageUrl) {
-    evidence.push({
-      title: "Careers pagina",
-      companyName: company.name,
-      location: company.city,
-      sourceUrl: company.careersUrl ?? company.vacancyPageUrl ?? "",
-      sourceDomain: extractDomain(company.careersUrl ?? company.vacancyPageUrl),
-      publishedAt: null,
-      validThrough: null,
-      employmentType: null,
-      department: null,
-      hiringSignalStrength: 60,
-      isActive: true,
-      validationReason: "Werken-bij pagina gevonden",
-      actuality: "unknown",
-    });
-  }
 
   for (const signal of company.hiringSignals.slice(0, 5)) {
+    const title = signal.description.slice(0, 120).trim();
+    const sourceUrl = company.website ?? company.sourceUrl ?? "";
+    if (!title || !sourceUrl || isGenericVacancyTitle(title)) continue;
+
     evidence.push({
-      title: signal.description.slice(0, 120),
+      title,
       companyName: company.name,
       location: company.city,
-      sourceUrl: company.website ?? company.sourceUrl ?? "",
-      sourceDomain: domain,
+      sourceUrl,
+      sourceDomain: extractDomain(sourceUrl) || domain,
       publishedAt: null,
       validThrough: null,
       employmentType: null,
@@ -74,29 +93,11 @@ export function buildVacancyEvidenceFromCompany(
       hiringSignalStrength: Math.round(signal.confidence * 100),
       isActive: true,
       validationReason: `Hiring signal: ${signal.type}`,
-      actuality: "unknown",
+      actuality: "known",
     });
   }
 
-  if (evidence.length === 0 && company.discoveryReason?.toLowerCase().includes("vacature")) {
-    evidence.push({
-      title: plan.desired_roles[0] ?? "Recruitment opportunity",
-      companyName: company.name,
-      location: company.city,
-      sourceUrl: company.sourceUrl ?? company.website ?? "",
-      sourceDomain: domain,
-      publishedAt: null,
-      validThrough: null,
-      employmentType: null,
-      department: null,
-      hiringSignalStrength: 40,
-      isActive: true,
-      validationReason: "Aannemelijke vacature-intentie via discovery",
-      actuality: "unknown",
-    });
-  }
-
-  return evidence;
+  return evidence.filter(strictVacancyEvidence);
 }
 
 export function buildVacancyEvidenceFromClassification(
@@ -120,7 +121,7 @@ export function buildVacancyEvidenceFromClassification(
     hiringSignalStrength: 50,
     isActive: true,
     validationReason: classification.classificationReason,
-    actuality: "unknown",
+    actuality: "known",
   };
 }
 
@@ -128,9 +129,7 @@ export function desiredRoleMatchesVacancy(
   vacancyTitle: string,
   plan: AiRecruiterSearchPlan,
 ): boolean {
-  if (plan.desired_roles.length === 0) return false;
-  const normalized = normalizeTitle(vacancyTitle);
-  return plan.desired_roles.some((role) => normalized.includes(normalizeTitle(role)));
+  return vacancyTitleMatchesDesiredRoles(vacancyTitle, plan);
 }
 
 export function dedupeVacancyEvidence(items: VacancyEvidence[]): VacancyEvidence[] {
@@ -144,5 +143,9 @@ export function dedupeVacancyEvidence(items: VacancyEvidence[]): VacancyEvidence
 }
 
 export function primaryVacancyTitle(evidence: VacancyEvidence[]): string | null {
-  return evidence.find((v) => v.isActive)?.title ?? evidence[0]?.title ?? null;
+  return evidence.find((v) => v.isActive && strictVacancyEvidence(v))?.title ?? null;
+}
+
+export function countStrictActiveVacancies(evidence: VacancyEvidence[]): number {
+  return evidence.filter((item) => strictVacancyEvidence(item)).length;
 }

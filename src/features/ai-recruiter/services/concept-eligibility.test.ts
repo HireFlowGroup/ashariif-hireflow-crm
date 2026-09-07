@@ -378,6 +378,26 @@ describe("concept eligibility pipeline", () => {
     expect(result.reasonCode).toBe("no_active_vacancy");
   });
 
+  it("19b. vacancy_required blokkeert bij verkeerde functie", () => {
+    const wrongRoleVacancy: VacancyEvidence = {
+      ...activeVacancy,
+      title: "Backend Developer",
+      sourceUrl: "https://techflow.nl/vacatures/backend-developer",
+      validationReason: "careers_page_crawl",
+      actuality: "known",
+    };
+    const result = evaluateConceptEligibility({
+      company: makeCompany(),
+      plan: { ...basePlan, vacancy_required: true, desired_roles: ["Recruiter"] },
+      hiringScore: 10,
+      vacancyCount: 1,
+      vacancies: [wrongRoleVacancy],
+      contact: makeContact(),
+      contactStage: "general_mailbox_found",
+    });
+    expect(result.reasonCode).toBe("no_matching_role");
+  });
+
   it("20. software vacatures rotterdam titel is directory of vacancy, geen bedrijf", () => {
     const result = classifySearchResult({
       title: "Software vacatures Rotterdam",

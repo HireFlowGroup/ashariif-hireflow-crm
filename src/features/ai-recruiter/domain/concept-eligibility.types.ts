@@ -3,6 +3,7 @@ import { z } from "zod";
 export const conceptEligibilityReasonCodeSchema = z.enum([
   "eligible",
   "no_active_vacancy",
+  "no_matching_role",
   "no_contact",
   "invalid_contact",
   "suppressed_contact",

@@ -22,6 +22,7 @@ export type ProspectPipelineContext = {
   contactRejectionReason?: string | null;
   duplicateOutreach?: boolean;
   manualEligibilityOverride?: boolean;
+  validatedVacancies?: VacancyEvidence[];
 };
 
 export type ProspectPipelineDecision = {
@@ -32,8 +33,10 @@ export type ProspectPipelineDecision = {
 };
 
 export function evaluateProspectPipeline(context: ProspectPipelineContext): ProspectPipelineDecision {
-  const vacancies = dedupeVacancyEvidence(buildVacancyEvidenceFromCompany(context.company, context.plan));
-  const primaryTitle = vacancies[0]?.title ?? null;
+  const vacancies = dedupeVacancyEvidence(
+    context.validatedVacancies ?? buildVacancyEvidenceFromCompany(context.company, context.plan),
+  );
+  const primaryTitle = vacancies.find((vacancy) => vacancy.isActive)?.title ?? null;
   const desiredRoleMatch = primaryTitle
     ? desiredRoleMatchesVacancy(primaryTitle, context.plan)
     : context.plan.desired_roles.some((role) =>
@@ -46,7 +49,7 @@ export function evaluateProspectPipeline(context: ProspectPipelineContext): Pros
     company: context.company,
     plan: context.plan,
     hiringScore: context.hiring.hiringScore,
-    vacancyCount: context.hiring.vacancyCount,
+    vacancyCount: vacancies.filter((vacancy) => vacancy.isActive).length,
     vacancies,
     contact: context.contact,
     contactStage: context.contactStage,

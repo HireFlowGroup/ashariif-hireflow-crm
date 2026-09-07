@@ -10,6 +10,11 @@ import {
   computeDeterministicLeadScore,
   type DeterministicLeadScoreResult,
 } from "@/features/ai-recruiter/services/deterministic-lead-score.service";
+import {
+  countStrictActiveVacancies,
+  desiredRoleMatchesVacancy,
+  strictVacancyEvidence,
+} from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 
 export type ConceptEligibilityInput = {
@@ -40,7 +45,9 @@ function buildUserMessage(
     case "manual_override":
       return "Handmatige override — conceptgeneratie toegestaan.";
     case "no_active_vacancy":
-      return "Geen actuele of aannemelijke vacature gevonden.";
+      return "Geen actuele vacature gevonden.";
+    case "no_matching_role":
+      return "Wel vacatures gevonden, maar geen match met de gevraagde functies.";
     case "no_contact":
       return "Geen bruikbaar e-mailadres gevonden.";
     case "invalid_contact":
@@ -156,12 +163,10 @@ export function evaluateConceptEligibility(input: ConceptEligibilityInput): Conc
     };
   }
 
-  const activeVacancy =
-    input.vacancyCount > 0
-    || input.vacancies.some((v) => v.isActive)
-    || input.vacancies.length > 0;
+  const strictVacancies = input.vacancies.filter(strictVacancyEvidence);
+  const activeVacancyCount = countStrictActiveVacancies(input.vacancies);
 
-  if (input.plan.vacancy_required && !activeVacancy) {
+  if (input.plan.vacancy_required && activeVacancyCount === 0) {
     rejectedRules.push("no_active_vacancy");
     return {
       eligible: false,
@@ -175,14 +180,38 @@ export function evaluateConceptEligibility(input: ConceptEligibilityInput): Conc
     };
   }
 
+  const roleMatchedVacancies =
+    input.plan.desired_roles.length === 0
+      ? strictVacancies
+      : strictVacancies.filter((vacancy) => desiredRoleMatchesVacancy(vacancy.title, input.plan));
+
+  if (input.plan.vacancy_required && input.plan.desired_roles.length > 0 && roleMatchedVacancies.length === 0) {
+    rejectedRules.push("no_matching_role");
+    return {
+      eligible: false,
+      score: 0,
+      threshold,
+      priority: "reject",
+      acceptedRules,
+      rejectedRules,
+      reasonCode: "no_matching_role",
+      userMessage: buildUserMessage("no_matching_role", 0, threshold),
+    };
+  }
+
+  const desiredRoleMatch =
+    input.desiredRoleMatch
+    ?? (roleMatchedVacancies.length > 0
+      || (input.plan.desired_roles.length === 0 && activeVacancyCount > 0));
+
   const leadScore: DeterministicLeadScoreResult = computeDeterministicLeadScore({
     company: input.company,
     plan: input.plan,
-    vacancies: input.vacancies,
-    vacancyCount: input.vacancyCount,
+    vacancies: roleMatchedVacancies.length > 0 ? roleMatchedVacancies : strictVacancies,
+    vacancyCount: activeVacancyCount,
     hiringScore: input.hiringScore,
     contact: input.contact,
-    desiredRoleMatch: input.desiredRoleMatch ?? false,
+    desiredRoleMatch,
   });
 
   acceptedRules.push(...leadScore.acceptedRules);

@@ -44,8 +44,9 @@ function makeQualified(name: string, website: string): QualifiedDiscoveryCandida
     companyConfidence: 80,
     discoveryReason: "test",
     discoveryProvider: "tavily",
-    urlCategory: "company_website",
+    urlCategory: "company",
     homepageSignalCount: 1,
+    saveStatus: "company",
   };
 }
 
