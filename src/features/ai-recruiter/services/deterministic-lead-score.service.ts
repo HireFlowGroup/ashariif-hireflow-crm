@@ -4,6 +4,11 @@ import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eli
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 import { scoreMailboxPrefix } from "@/features/contact-finder/domain/contact-role-priority";
 import { matchContactRole } from "@/features/contact-finder/domain/contact-role-priority";
+import {
+  evaluateEmployeeRangeConstraint,
+  evaluateLocationConstraint,
+  evaluateSectorConstraint,
+} from "@/features/ai-recruiter/services/company-constraint-validation.service";
 
 export type DeterministicLeadScoreResult = {
   score: number;
@@ -17,37 +22,6 @@ export type DeterministicLeadScoreResult = {
   acceptedRules: string[];
   rejectedRules: string[];
 };
-
-function locationMatches(company: Company, plan: AiRecruiterSearchPlan): boolean {
-  if (plan.locations.length === 0 && plan.regions.length === 0) return true;
-  if (!company.city && !company.region) return true;
-  const city = (company.city ?? "").toLowerCase();
-  const region = (company.region ?? "").toLowerCase();
-  return (
-    plan.locations.some((loc) => city.includes(loc.toLowerCase()))
-    || plan.regions.some((reg) => region.includes(reg.toLowerCase()) || city.includes(reg.toLowerCase()))
-  );
-}
-
-function sectorMatches(company: Company, plan: AiRecruiterSearchPlan): boolean {
-  if (plan.sectors.length === 0) return true;
-  if (!company.sector) return true;
-  const sector = company.sector.toLowerCase();
-  return plan.sectors.some((s) => sector.includes(s.toLowerCase()));
-}
-
-function employeeRangeMatches(company: Company, plan: AiRecruiterSearchPlan): boolean {
-  const { min, max } = plan.employee_range;
-  if (min === null && max === null) return true;
-  const companyMin = company.employeeCountMin;
-  const companyMax = company.employeeCountMax;
-  if (companyMin === null && companyMax === null) return true;
-  const effectiveMin = companyMin ?? companyMax ?? 0;
-  const effectiveMax = companyMax ?? companyMin ?? 9999;
-  const planMin = min ?? 0;
-  const planMax = max ?? 9999;
-  return effectiveMax >= planMin && effectiveMin <= planMax;
-}
 
 function scoreContactability(contact: SelectedDiscoveredContact | null): {
   score: number;
@@ -97,9 +71,6 @@ export function computeDeterministicLeadScore(input: {
   if (activeVacancies.length > 0 || input.vacancyCount > 0) {
     vacancyIntent += 20;
     acceptedRules.push("active_vacancy_found");
-  } else if (input.vacancies.length > 0) {
-    vacancyIntent += 12;
-    acceptedRules.push("plausible_vacancy_found");
   }
 
   if (input.vacancyCount > 1 || activeVacancies.length > 1) {
@@ -115,23 +86,34 @@ export function computeDeterministicLeadScore(input: {
   vacancyIntent = Math.min(35, vacancyIntent);
 
   let companyFit = 0;
-  if (locationMatches(input.company, input.plan)) {
+  const locationStatus = evaluateLocationConstraint(input.company, input.plan);
+  if (locationStatus === "matched") {
     companyFit += 10;
     acceptedRules.push("location_match");
-  } else {
+  } else if (locationStatus === "mismatched") {
     rejectedRules.push("wrong_location");
+  } else {
+    acceptedRules.push("location_unknown");
   }
 
-  if (sectorMatches(input.company, input.plan)) {
+  const sectorStatus = evaluateSectorConstraint(input.company, input.plan);
+  if (sectorStatus === "matched") {
     companyFit += 10;
     acceptedRules.push("sector_match");
-  } else if (input.plan.sectors.length > 0) {
+  } else if (sectorStatus === "mismatched") {
     rejectedRules.push("wrong_sector");
+  } else if (input.plan.sectors.length > 0) {
+    acceptedRules.push("sector_unknown");
   }
 
-  if (employeeRangeMatches(input.company, input.plan)) {
+  const employeeStatus = evaluateEmployeeRangeConstraint(input.company, input.plan);
+  if (employeeStatus === "matched") {
     companyFit += 5;
     acceptedRules.push("employee_range_match");
+  } else if (employeeStatus === "unknown") {
+    acceptedRules.push("employee_range_unknown");
+  } else {
+    rejectedRules.push("employee_range_mismatch");
   }
 
   companyFit = Math.min(25, companyFit);

@@ -14,6 +14,7 @@ import {
 } from "@/features/ai-recruiter/services/prospect-decision.service";
 import { classifyBusinessModel, isExcludedBusinessModel } from "@/features/company-finder/discovery/business-model-classifier.service";
 import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
+import { selectContactWithMatchingDomain } from "@/features/ai-recruiter/services/contact-domain-validation.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import type {
   AiRecruiterEngineContext,
@@ -754,6 +755,12 @@ export class AiRecruiterOrchestrator {
         const analysis = analysisByCompanyId.get(entry.companyId) ?? null;
         const salesFields = salesToScoreBreakdownFields(sales);
 
+        const verifiedContact = selectContactWithMatchingDomain({
+          selected: result.selected,
+          alternatives: result.alternatives,
+          companyDomain: company.domain,
+        });
+
         const businessModel = classifyBusinessModel({
           name: company.name,
           url: company.website,
@@ -767,10 +774,13 @@ export class AiRecruiterOrchestrator {
           plan,
           hiring,
           analysis,
-          contact: result.selected,
-          contactStage: result.stage,
-          contactRejectionReason: result.errorMessage,
+          contact: verifiedContact.contact,
+          contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
+          contactRejectionReason: verifiedContact.invalidContact
+            ? "Contactdomein komt niet overeen met bedrijfsdomein."
+            : result.errorMessage,
           validatedVacancies: entry.validatedVacancies,
+          invalidContact: verifiedContact.invalidContact,
         });
 
         const decisionFields = prospectDecisionToBreakdownFields(
@@ -785,28 +795,34 @@ export class AiRecruiterOrchestrator {
 
         const contactDiscoveryPayload = {
           contactDiscovery: {
-            stage: result.stage,
-            selected: result.selected,
+            stage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
+            selected: verifiedContact.contact,
             alternatives: result.alternatives,
-            errorMessage: result.errorMessage,
+            errorMessage: verifiedContact.invalidContact
+              ? "Contactdomein komt niet overeen met bedrijfsdomein."
+              : result.errorMessage,
           },
           eligibility: pipelineDecision.eligibility,
           vacancyEvidence: pipelineDecision.vacancies,
         };
 
-        if (result.stage === "contact_found") {
+        if (verifiedContact.contact && result.stage === "contact_found") {
           counters.contactFound += 1;
-        } else if (result.stage === "general_mailbox_found") {
+        } else if (verifiedContact.contact && result.stage === "general_mailbox_found") {
           counters.generalMailboxFound += 1;
+        } else if (!verifiedContact.contact) {
+          counters.blockedMissingContact += 1;
         } else if (result.stage === "blocked_missing_contact") {
           counters.blockedMissingContact += 1;
         }
+
+        const selectedContact = verifiedContact.contact;
 
         const scoreBreakdown = {
           companyFit: pipelineDecision.eligibility.score,
           hiring: hiring.hiringScore,
           opportunity: pipelineDecision.aiOpportunityScore ?? opportunity.opportunityScore,
-          contact: result.selected ? (result.selected.isGeneralMailbox ? 12 : 20) : 0,
+          contact: selectedContact ? (selectedContact.isGeneralMailbox ? 12 : 20) : 0,
           personalization: 0,
           outreachReadiness: pipelineDecision.eligibility.eligible ? 50 : 0,
           explanations: [
@@ -834,14 +850,14 @@ export class AiRecruiterOrchestrator {
             stage: result.stage,
             status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
             hiringScore: hiring.hiringScore,
-            contactScore: result.selected ? 12 : 0,
+            contactScore: selectedContact ? 12 : 0,
             totalScore: pipelineDecision.eligibility.score,
             scoreBreakdown,
             rejectionReason: identityBlocked
               ? `Uitgesloten: ${businessModel.classification} / generieke identiteit`
               : pipelineDecision.eligibility.userMessage,
             warnings: hiring.warnings,
-            selectedContactId: result.selected?.contactId ?? null,
+            selectedContactId: selectedContact?.contactId ?? null,
             externalCompanyData: contactDiscoveryPayload,
           });
 
@@ -852,8 +868,8 @@ export class AiRecruiterOrchestrator {
             company,
             eligibility: pipelineDecision.eligibility,
             vacancies: pipelineDecision.vacancies,
-            contact: result.selected,
-            contactStage: result.stage,
+            contact: selectedContact,
+            contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
             conceptStatus: "skipped",
           });
 
@@ -869,13 +885,13 @@ export class AiRecruiterOrchestrator {
           stage: result.stage,
           status: "completed",
           hiringScore: hiring.hiringScore,
-          contactScore: result.selected?.isGeneralMailbox ? 12 : 20,
+          contactScore: selectedContact?.isGeneralMailbox ? 12 : 20,
           outreachScore: 50,
           totalScore: pipelineDecision.eligibility.score,
           scoreBreakdown,
           rejectionReason: null,
           warnings: hiring.warnings,
-          selectedContactId: result.selected?.contactId ?? null,
+          selectedContactId: selectedContact?.contactId ?? null,
           externalCompanyData: contactDiscoveryPayload,
         });
 
@@ -886,21 +902,21 @@ export class AiRecruiterOrchestrator {
           company,
           eligibility: pipelineDecision.eligibility,
           vacancies: pipelineDecision.vacancies,
-          contact: result.selected,
-          contactStage: result.stage,
+          contact: selectedContact,
+          contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
           conceptStatus: "pending",
         });
 
         yield { type: "item", item: updatedItem };
 
-        if (result.selected) {
+        if (selectedContact) {
           qualifiedItems.push({
             itemId: entry.itemId,
             companyId: entry.companyId,
             company,
             totalScore: pipelineDecision.eligibility.score,
             opportunity,
-            selected: result.selected,
+            selected: selectedContact,
             vacancies: pipelineDecision.vacancies,
             contactStage: result.stage,
             eligibility: pipelineDecision.eligibility,

@@ -69,7 +69,7 @@ export function assessParsedVacancies(input: {
 
   const activeParsed = parsedVacancies.filter((vacancy) => vacancy.isActive);
   const evidence = dedupeVacancyEvidence(
-    parsedVacanciesToEvidence(activeParsed, company, evidenceSource),
+    parsedVacanciesToEvidence(activeParsed, company, plan, "careers_page_crawl"),
   ).filter(strictVacancyEvidence);
 
   if (evidence.length === 0) {

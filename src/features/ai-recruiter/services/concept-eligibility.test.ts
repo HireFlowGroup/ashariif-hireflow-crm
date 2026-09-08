@@ -10,7 +10,7 @@ import {
 } from "@/features/ai-recruiter/services/discovery-query-builder.service";
 import { computeDeterministicLeadScore } from "@/features/ai-recruiter/services/deterministic-lead-score.service";
 import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/evaluate-concept-eligibility.service";
-import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
+import { createVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 
 const basePlan: AiRecruiterSearchPlan = {
@@ -106,21 +106,17 @@ function makeContact(overrides: Partial<SelectedDiscoveredContact> = {}): Select
   };
 }
 
-const activeVacancy: VacancyEvidence = {
-  title: "Recruiter",
+const activeVacancy = createVacancyEvidence({
   companyName: "TechFlow BV",
-  location: "Rotterdam",
+  companyDomain: "techflow.nl",
+  jobTitle: "Recruiter",
+  jobUrl: "https://techflow.nl/vacatures/recruiter",
   sourceUrl: "https://techflow.nl/vacatures/recruiter",
-  sourceDomain: "techflow.nl",
-  publishedAt: null,
-  validThrough: null,
-  employmentType: null,
-  department: null,
-  hiringSignalStrength: 80,
-  isActive: true,
+  sourceType: "careers_page_crawl",
+  location: "Rotterdam",
+  desiredRoleMatch: true,
   validationReason: "Actieve vacature",
-  actuality: "unknown",
-};
+});
 
 describe("concept eligibility pipeline", () => {
   it("1. bedrijf met vacature en recruitment@ krijgt concept", () => {
@@ -316,7 +312,7 @@ describe("concept eligibility pipeline", () => {
   });
 
   it("15. actieve vacature zonder publicatiedatum blijft eligible", () => {
-    const vacancy: VacancyEvidence = { ...activeVacancy, publishedAt: null, actuality: "unknown" };
+    const vacancy = { ...activeVacancy, publishedAt: null, actuality: "unknown" as const };
     const result = evaluateConceptEligibility({
       company: makeCompany(),
       plan: basePlan,
@@ -379,13 +375,17 @@ describe("concept eligibility pipeline", () => {
   });
 
   it("19b. vacancy_required blokkeert bij verkeerde functie", () => {
-    const wrongRoleVacancy: VacancyEvidence = {
-      ...activeVacancy,
-      title: "Backend Developer",
+    const wrongRoleVacancy = createVacancyEvidence({
+      companyName: activeVacancy.companyName,
+      companyDomain: activeVacancy.companyDomain,
+      jobTitle: "Backend Developer",
+      jobUrl: "https://techflow.nl/vacatures/backend-developer",
       sourceUrl: "https://techflow.nl/vacatures/backend-developer",
+      sourceType: "careers_page_crawl",
+      location: activeVacancy.location,
+      desiredRoleMatch: false,
       validationReason: "careers_page_crawl",
-      actuality: "known",
-    };
+    });
     const result = evaluateConceptEligibility({
       company: makeCompany(),
       plan: { ...basePlan, vacancy_required: true, desired_roles: ["Recruiter"] },

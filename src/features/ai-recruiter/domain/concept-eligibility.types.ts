@@ -44,11 +44,28 @@ export type ConceptEligibilityResult = {
   userMessage: string;
 };
 
+export type VacancyEvidenceSourceType =
+  | "careers_page_crawl"
+  | "discovery_classification"
+  | "crm_record";
+
+export type VacancyActiveStatus = "active" | "inactive" | "unknown";
+
+export type ConstraintMatchStatus = "matched" | "unknown" | "mismatched";
+
 export type VacancyEvidence = {
-  title: string;
   companyName: string | null;
-  location: string | null;
+  companyDomain: string;
+  jobTitle: string;
+  jobUrl: string;
   sourceUrl: string;
+  sourceType: VacancyEvidenceSourceType;
+  location: string | null;
+  observedAt: string;
+  activeStatus: VacancyActiveStatus;
+  desiredRoleMatch: boolean;
+  /** @deprecated Use jobTitle */
+  title: string;
   sourceDomain: string;
   publishedAt: string | null;
   validThrough: string | null;

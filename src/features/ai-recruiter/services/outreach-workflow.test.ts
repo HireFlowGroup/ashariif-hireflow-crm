@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import type { OutreachReadinessProspect } from "@/features/ai-recruiter/domain/outreach-readiness.types";
+import { createVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import { evaluateOutreachReadiness } from "@/features/ai-recruiter/services/evaluate-outreach-readiness.service";
 import {
   countRecruitmentOutreachWords,
@@ -86,21 +87,17 @@ function makeCompany(overrides: Partial<Company> = {}): Company {
   };
 }
 
-const vacancy: VacancyEvidence = {
-  title: "Customer Success Manager",
+const vacancy = createVacancyEvidence({
   companyName: "TechFlow BV",
+  companyDomain: "techflow.nl",
+  jobTitle: "Customer Success Manager",
+  jobUrl: "https://techflow.nl/vacatures/customer-success-manager",
+  sourceUrl: "https://techflow.nl/vacatures/customer-success-manager",
+  sourceType: "careers_page_crawl",
   location: "Rotterdam",
-  sourceUrl: "https://techflow.nl/vacatures/csm",
-  sourceDomain: "techflow.nl",
-  publishedAt: null,
-  validThrough: null,
-  employmentType: null,
-  department: null,
-  hiringSignalStrength: 90,
-  isActive: true,
+  desiredRoleMatch: true,
   validationReason: "active",
-  actuality: "known",
-};
+});
 
 function baseProspect(overrides: Partial<OutreachReadinessProspect> = {}): OutreachReadinessProspect {
   return {

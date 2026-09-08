@@ -205,8 +205,8 @@ describe("assessParsedVacancies", () => {
       evidenceSource: "careers_page_crawl",
     });
     expect(result.status).toBe("accepted");
-    expect(result.vacancies[0]?.title).toContain("Recruiter");
-    expect(result.vacancies[0]?.sourceUrl).toContain("corporate-recruiter");
+    expect(result.vacancies[0]?.jobTitle).toContain("Recruiter");
+    expect(result.vacancies[0]?.jobUrl).toContain("corporate-recruiter");
   });
 
   it("accepts active accountmanager vacancy", () => {

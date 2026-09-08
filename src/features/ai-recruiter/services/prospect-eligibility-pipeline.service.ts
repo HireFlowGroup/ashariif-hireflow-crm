@@ -4,9 +4,10 @@ import type { ConceptEligibilityResult } from "@/features/ai-recruiter/domain/co
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/evaluate-concept-eligibility.service";
 import {
-  buildVacancyEvidenceFromCompany,
   dedupeVacancyEvidence,
   desiredRoleMatchesVacancy,
+  filterStrictVacancyEvidence,
+  primaryVacancyTitle,
 } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { HiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
@@ -23,6 +24,7 @@ export type ProspectPipelineContext = {
   duplicateOutreach?: boolean;
   manualEligibilityOverride?: boolean;
   validatedVacancies?: VacancyEvidence[];
+  invalidContact?: boolean;
 };
 
 export type ProspectPipelineDecision = {
@@ -33,17 +35,12 @@ export type ProspectPipelineDecision = {
 };
 
 export function evaluateProspectPipeline(context: ProspectPipelineContext): ProspectPipelineDecision {
-  const vacancies = dedupeVacancyEvidence(
-    context.validatedVacancies ?? buildVacancyEvidenceFromCompany(context.company, context.plan),
-  );
-  const primaryTitle = vacancies.find((vacancy) => vacancy.isActive)?.title ?? null;
+  const rawVacancies = dedupeVacancyEvidence(context.validatedVacancies ?? []);
+  const vacancies = filterStrictVacancyEvidence(rawVacancies);
+  const primaryTitle = primaryVacancyTitle(vacancies);
   const desiredRoleMatch = primaryTitle
     ? desiredRoleMatchesVacancy(primaryTitle, context.plan)
-    : context.plan.desired_roles.some((role) =>
-        context.hiring.signals.some((signal) =>
-          (signal.description ?? "").toLowerCase().includes(role.toLowerCase()),
-        ),
-      );
+    : false;
 
   const eligibility = evaluateConceptEligibility({
     company: context.company,
@@ -57,6 +54,7 @@ export function evaluateProspectPipeline(context: ProspectPipelineContext): Pros
     desiredRoleMatch,
     duplicateOutreach: context.duplicateOutreach,
     manualEligibilityOverride: context.manualEligibilityOverride,
+    invalidContact: context.invalidContact,
   });
 
   return {

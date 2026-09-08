@@ -19,6 +19,7 @@ import {
   logConceptGenerationStart,
 } from "@/features/ai-recruiter/services/concept-generation-trace.service";
 import { buildDeterministicOutreachFallback } from "@/features/ai-recruiter/services/deterministic-outreach-fallback.service";
+import { filterStrictVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
 import { generateRecruitmentOutreachDraftWithValidation } from "@/features/ai-recruiter/services/recruitment-outreach-writer.service";
 import { evaluateOutreachReadiness } from "@/features/ai-recruiter/services/evaluate-outreach-readiness.service";
@@ -109,7 +110,29 @@ async function processEligibleProspect(
   conceptTimeoutMs: number,
 ): Promise<ConceptGenerationProspectResult> {
   const { itemId, companyId, company, selected, vacancies, contactStage, opportunity, eligibility } = prospect;
+  const strictVacancies = filterStrictVacancyEvidence(vacancies);
   const hiring = computeHiringIntelligenceProfile(company, plan);
+
+  if (strictVacancies.length === 0) {
+    await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
+      conceptStatus: "skipped",
+      finalReason: "Geen concrete vacature-evidence voor concept.",
+      reasonCode: "no_active_vacancy",
+    });
+    return {
+      itemId,
+      companyId,
+      companyName: company.name,
+      success: false,
+      outreachMessageId: null,
+      conceptStatus: "skipped",
+      errorCode: "no_active_vacancy",
+      errorMessage: "Geen concrete vacature-evidence voor recruitmentclaim.",
+      usedFallback: false,
+      warnings: ["blocked_no_vacancy_evidence_for_hiring_claim"],
+    };
+  }
+
   const readiness = evaluateOutreachReadiness({
     companyId,
     companyName: company.name,
@@ -128,8 +151,8 @@ async function processEligibleProspect(
     suppressedContact: false,
     bouncedContact: false,
     invalidContact: false,
-    hasVacancyEvidence: vacancies.length > 0,
-    vacancies,
+    hasVacancyEvidence: strictVacancies.length > 0,
+    vacancies: strictVacancies,
     hiringSignalCount: hiring.signals.length,
     reasonCode: eligibility.reasonCode,
     userMessage: eligibility.userMessage,
@@ -144,12 +167,32 @@ async function processEligibleProspect(
     eligibilityStatus: eligibility.eligible ? "eligible" : "ineligible",
     opportunityScore: opportunity.opportunityScore,
     vacancyId: prospect.vacancyId ?? null,
-    vacancyTitle: vacancies[0]?.title ?? null,
+    vacancyTitle: strictVacancies[0]?.jobTitle ?? null,
     contactId: selected.contactId,
     recipientEmail: selected.email,
     recipientType: readiness.recipientType,
     evidenceCount: readiness.evidence.length,
   });
+
+  if (!readiness.ready) {
+    await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
+      conceptStatus: "skipped",
+      finalReason: readiness.blockingReasons.join(", "),
+      reasonCode: readiness.blockingReasons[0] ?? "missing_required_data",
+    });
+    return {
+      itemId,
+      companyId,
+      companyName: company.name,
+      success: false,
+      outreachMessageId: null,
+      conceptStatus: "skipped",
+      errorCode: readiness.blockingReasons[0] ?? "missing_required_data",
+      errorMessage: readiness.blockingReasons.join(", "),
+      usedFallback: false,
+      warnings: readiness.warnings,
+    };
+  }
 
   await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
     conceptStatus: "generating",
@@ -170,8 +213,8 @@ async function processEligibleProspect(
     const generation = await withTimeout(
       generateRecruitmentOutreachDraftWithValidation({
         company,
-        vacancy: vacancies[0]
-          ? { id: prospect.vacancyId ?? "unknown", title: vacancies[0].title }
+        vacancy: strictVacancies[0]
+          ? { id: prospect.vacancyId ?? "unknown", title: strictVacancies[0].jobTitle }
           : null,
         hiringSignals: hiring,
         companyAnalysis: opportunity,
@@ -183,7 +226,7 @@ async function processEligibleProspect(
           reliability: selected.reliability,
         },
         opportunityScore: opportunity.opportunityScore,
-        vacancies,
+        vacancies: strictVacancies,
       }),
       conceptTimeoutMs,
       itemId,
@@ -210,12 +253,31 @@ async function processEligibleProspect(
     if (!generation.meta.schemaValid) {
       const fallback = buildDeterministicOutreachFallback({
         company,
-        vacancies,
+        vacancies: strictVacancies,
         recipientEmail: selected.email,
         recipientName: selected.recipientName,
         isGeneralMailbox: selected.isGeneralMailbox,
         senderName: getOutreachSendConfig().senderName ?? undefined,
       });
+      if (fallback.blocked) {
+        await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
+          conceptStatus: "skipped",
+          finalReason: fallback.blockReason ?? "Geen vacature-evidence",
+          reasonCode: "no_active_vacancy",
+        });
+        return {
+          itemId,
+          companyId,
+          companyName: company.name,
+          success: false,
+          outreachMessageId: null,
+          conceptStatus: "skipped",
+          errorCode: "no_active_vacancy",
+          errorMessage: fallback.blockReason,
+          usedFallback: false,
+          warnings: fallback.warnings,
+        };
+      }
       draft = {
         ...draft,
         recommendedSubject: fallback.subject,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
-import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
+import { createVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import { toCompanyId } from "@/features/companies/domain";
 import type { Company } from "@/features/companies/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
@@ -121,21 +121,17 @@ const eligibility: ConceptEligibilityResult = {
   userMessage: "Prospect is eligible voor conceptgeneratie.",
 };
 
-const vacancy: VacancyEvidence = {
-  title: "recruiters",
+const vacancy = createVacancyEvidence({
   companyName: "Enigmatry",
+  companyDomain: "enigmatry.com",
+  jobTitle: "Corporate Recruiter",
+  jobUrl: "https://enigmatry.com/jobs/corporate-recruiter",
+  sourceUrl: "https://enigmatry.com/jobs/corporate-recruiter",
+  sourceType: "careers_page_crawl",
   location: "Rotterdam",
-  sourceUrl: "https://enigmatry.com/jobs/recruiters",
-  sourceDomain: "enigmatry.com",
-  publishedAt: null,
-  validThrough: null,
-  employmentType: null,
-  department: null,
-  hiringSignalStrength: 90,
-  isActive: true,
+  desiredRoleMatch: true,
   validationReason: "active",
-  actuality: "known",
-};
+});
 
 describe("filterEligibleProspectsForConceptGeneration", () => {
   it("includes eligible general mailbox prospects", () => {
@@ -252,8 +248,9 @@ describe("deterministic Enigmatry fallback", () => {
     });
 
     expect(draft.salutation).toBe("Beste recruitmentteam,");
-    expect(draft.bodyText.toLowerCase()).toContain("enigmatry");
-    expect(draft.cta.toLowerCase()).toContain("kandidaten");
+    expect(draft.bodyText.toLowerCase()).toContain("corporate recruiter");
+    expect(draft.sourceEvidence[0]?.sourceUrl).toBe(vacancy.jobUrl);
+    expect(draft.cta.toLowerCase()).toContain("profielen");
     expect(draft.warnings).toContain("ai_generation_failed_fallback_used");
   });
 

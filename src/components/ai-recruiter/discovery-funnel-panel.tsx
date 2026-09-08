@@ -12,10 +12,10 @@ export type DiscoveryFunnelSummary = {
   rawResults: number;
   uniqueUrls: number;
   realCompanies: number;
-  withVacancyEvidence: number;
+  withDiscoveryVacancyTitle: number;
   competitorsExcluded: number;
   directoriesAndArticles: number;
-  saved: number;
+  companiesPassedToGate: number;
   rejected: number;
 };
 
@@ -55,18 +55,18 @@ export function DiscoveryFunnelPanel({ funnel, results, providerId }: DiscoveryF
           Discovery
         </CardTitle>
         <CardDescription>
-          {providerId ? `Provider: ${providerId}` : "Zoekresultaten en classificatie"}
+          {providerId ? `Provider: ${providerId}` : "Zoekresultaten en classificatie (hints ≠ vacancy evidence)"}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
           <Metric label="Zoekqueries uitgevoerd" value={funnel.queriesExecuted} />
-          <Metric label="Resultaten ontvangen" value={funnel.rawResults} />
-          <Metric label="Echte bedrijven geïdentificeerd" value={funnel.realCompanies} />
-          <Metric label="Met vacature-evidence" value={funnel.withVacancyEvidence} />
+          <Metric label="Zoekresultaten ontvangen" value={funnel.rawResults} />
+          <Metric label="Bedrijven geïdentificeerd" value={funnel.realCompanies} />
+          <Metric label="Vacaturetitel in snippet (hint)" value={funnel.withDiscoveryVacancyTitle} />
           <Metric label="Concurrenten uitgesloten" value={funnel.competitorsExcluded} />
           <Metric label="Directories/artikelen afgewezen" value={directoriesAndArticles} />
-          <Metric label="Opgeslagen" value={funnel.saved} />
+          <Metric label="Doorgegeven aan quality gate" value={funnel.companiesPassedToGate} />
           <Metric label="Afgewezen" value={funnel.rejected} />
         </div>
 
@@ -89,7 +89,7 @@ export function DiscoveryFunnelPanel({ funnel, results, providerId }: DiscoveryF
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Werkgever</th>
                   <th className="px-3 py-2">Domein</th>
-                  <th className="px-3 py-2">Vacature</th>
+                  <th className="px-3 py-2">Vacature-hint</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Reden</th>
                 </tr>
@@ -149,12 +149,14 @@ export function buildFunnelSummary(
     rawResults: number;
     uniqueUrls: number;
     realCompanies: number;
-    withVacancyEvidence: number;
+    withDiscoveryVacancyTitle?: number;
+    withVacancyEvidence?: number;
     competitorsExcluded: number;
     directories: number;
     listArticles: number;
     newsArticles: number;
-    saved: number;
+    companiesPassedToGate?: number;
+    saved?: number;
     rejected: number;
   },
 ): DiscoveryFunnelSummary {
@@ -163,10 +165,11 @@ export function buildFunnelSummary(
     rawResults: funnel.rawResults,
     uniqueUrls: funnel.uniqueUrls,
     realCompanies: funnel.realCompanies,
-    withVacancyEvidence: funnel.withVacancyEvidence,
+    withDiscoveryVacancyTitle:
+      funnel.withDiscoveryVacancyTitle ?? funnel.withVacancyEvidence ?? 0,
     competitorsExcluded: funnel.competitorsExcluded,
     directoriesAndArticles: funnel.directories + funnel.listArticles + funnel.newsArticles,
-    saved: funnel.saved,
+    companiesPassedToGate: funnel.companiesPassedToGate ?? funnel.saved ?? 0,
     rejected: funnel.rejected,
   };
 }
