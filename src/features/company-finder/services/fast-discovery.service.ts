@@ -17,25 +17,42 @@ import type {
   DiscoveryResultType,
   EnrichedDiscoveryResult,
 } from "@/features/company-finder/discovery/discovery-result.types";
+import { dedupeEnrichedDiscoveryResults } from "@/features/company-finder/discovery/discovery-result-dedupe.service";
+import { executeQualityAwareDiscoveryQuery } from "@/features/company-finder/discovery/discovery-provider-runner.service";
+import {
+  evaluateUsefulRecall,
+  isConcreteVacancyDiscoveryResult,
+  isEmployerHostedDiscoveryResult,
+} from "@/features/company-finder/discovery/discovery-useful-recall.service";
 import {
   buildVacancyDrivenDiscoveryQueries,
   selectDiscoveryQueries,
   type DiscoveryQueryVariant,
 } from "@/features/ai-recruiter/services/discovery-query-builder.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
-import { getProviderManager } from "@/features/lead-intelligence/providers/manager";
-import { withTimeout } from "@/features/lead-intelligence/config/providers.config";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
+import type { SearchResultItem } from "@/features/lead-intelligence/providers/manager/types";
 
 export type DiscoveryQueryDiagnostic = {
   query: string;
   intent: DiscoveryQueryVariant["intent"];
   label: string;
+  location: string;
+  role: string;
   rawResultCount: number;
+  uniqueResultCount: number;
   companyResults: number;
   vacancyResults: number;
   directoryResults: number;
   rejectedResults: number;
+  employerHostedResults: number;
+  concreteVacancyResults: number;
+  desiredRoleVacancyResults: number;
+  provider: string;
+  providersUsed: string[];
+  tavilyUsefulRecall: boolean;
+  serpApiFallbackTriggered: boolean;
+  serpApiFallbackReason: string | null;
   durationMs: number;
   error: string | null;
 };
@@ -47,8 +64,12 @@ export type MultiQueryDiscoveryResult = {
   funnel: DiscoveryFunnelMetrics;
   providerId: string;
   queries: DiscoveryQueryDiagnostic[];
+  queriesGenerated: string[];
   totalRawResults: number;
   classifiedCounts: Record<DiscoveryResultType | "accepted" | "rejected", number>;
+  serpApiFallbackTriggered: boolean;
+  serpApiFallbackReason: string | null;
+  tavilyUsefulRecall: boolean;
 };
 
 function canonicalUrl(url: string): string {
@@ -60,16 +81,6 @@ function canonicalUrl(url: string): string {
   } catch {
     return url.toLowerCase().trim();
   }
-}
-
-function dedupeEnriched(results: EnrichedDiscoveryResult[]): EnrichedDiscoveryResult[] {
-  const seen = new Set<string>();
-  return results.filter((result) => {
-    const key = canonicalUrl(result.url);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function mapRejectionReason(
@@ -202,6 +213,24 @@ function processRawResult(input: {
   };
 }
 
+function processHits(
+  hits: SearchResultItem[],
+  providerId: string,
+  query: string,
+  excludeRecruitmentAgencies: boolean,
+): EnrichedDiscoveryResult[] {
+  return hits.map((result) =>
+    processRawResult({
+      title: result.title,
+      url: result.url,
+      description: result.description ?? null,
+      query,
+      providerId,
+      excludeRecruitmentAgencies,
+    }),
+  );
+}
+
 function toTavilyResult(enriched: EnrichedDiscoveryResult): TavilyDiscoveryResult | null {
   if (!enriched.accepted || !enriched.extractedCompanyName || !enriched.officialDomain) return null;
   if (isGenericCompanyLabel(enriched.extractedCompanyName)) return null;
@@ -220,9 +249,22 @@ function buildFunnel(
   logs: DiscoveryResultLogEntry[],
   queries: DiscoveryQueryDiagnostic[],
   companiesPassedToGate: number,
+  providerSummary: {
+    serpApiFallbackTriggered: boolean;
+    serpApiFallbackReason: string | null;
+    tavilyUsefulRecall: boolean;
+    queriesGenerated: string[];
+  },
 ): DiscoveryFunnelMetrics {
   const uniqueUrls = new Set(logs.map((l) => canonicalUrl(l.resultUrl))).size;
   const withDiscoveryVacancyTitle = logs.filter((l) => l.accepted && l.vacancyTitle).length;
+  const employerHostedResults = logs.filter((l) =>
+    l.accepted
+    && (l.classifiedType === "individual_vacancy"
+      || l.classifiedType === "company_careers_page"
+      || l.classifiedType === "official_company_site"),
+  ).length;
+
   return {
     queriesExecuted: queries.length,
     rawResults: logs.length,
@@ -244,6 +286,13 @@ function buildFunnel(
     saved: companiesPassedToGate,
     withVacancyEvidence: withDiscoveryVacancyTitle,
     rejected: logs.filter((l) => !l.accepted).length,
+    employerHostedResults,
+    concreteVacancyResults: logs.filter((l) => l.accepted && l.classifiedType === "individual_vacancy").length,
+    desiredRoleVacancyResults: queries.reduce((sum, q) => sum + q.desiredRoleVacancyResults, 0),
+    tavilyUsefulRecall: providerSummary.tavilyUsefulRecall,
+    serpApiFallbackTriggered: providerSummary.serpApiFallbackTriggered,
+    serpApiFallbackReason: providerSummary.serpApiFallbackReason,
+    queriesGenerated: providerSummary.queriesGenerated,
   };
 }
 
@@ -260,6 +309,11 @@ export async function runFastTavilySearch(
     buildVacancyDrivenDiscoveryQueries(criteria, options.searchPlan),
     options.searchPlan?.maximum_companies ?? options.maxResults,
   );
+  const queriesGenerated = queryVariants.map((variant) => variant.query);
+  const desiredRoles = options.searchPlan?.desired_roles
+    ?? criteria.desiredRoles
+    ?? criteria.vacancyTitles
+    ?? [];
 
   const perQueryMax = config.resultsPerQuery;
   const globalMax = Math.max(options.maxResults, queryVariants.length * perQueryMax);
@@ -268,6 +322,9 @@ export async function runFastTavilySearch(
   const allEnriched: EnrichedDiscoveryResult[] = [];
   const resultLogs: DiscoveryResultLogEntry[] = [];
   const diagnostics: DiscoveryQueryDiagnostic[] = [];
+  let serpApiFallbackTriggered = false;
+  let serpApiFallbackReason: string | null = null;
+  let tavilyUsefulRecall = false;
   const classifiedCounts: MultiQueryDiscoveryResult["classifiedCounts"] = {
     official_company_site: 0,
     company_profile: 0,
@@ -286,33 +343,48 @@ export async function runFastTavilySearch(
 
   const queryTasks = queryVariants.map((variant) => async () => {
     const started = Date.now();
-    let rawResultCount = 0;
     let error: string | null = null;
+    let rawResultCount = 0;
     let companyResults = 0;
     let vacancyResults = 0;
     let directoryResults = 0;
     let rejectedResults = 0;
+    let employerHostedResults = 0;
+    let concreteVacancyResults = 0;
+    let queryProvider = "tavily";
+    let providersUsed: string[] = ["tavily"];
+    let queryTavilyUsefulRecall = false;
+    let querySerpFallback = false;
+    let querySerpFallbackReason: string | null = null;
 
     try {
-      const chain = await withTimeout(
-        getProviderManager().executeSearchChain(variant.query, perQueryMax),
-        options.timeoutMs,
-        `Discovery query: ${variant.label}`,
-      );
+      const execution = await executeQualityAwareDiscoveryQuery({
+        query: variant.query,
+        intent: variant.intent,
+        maxResults: perQueryMax,
+        timeoutMs: options.timeoutMs,
+        desiredRoles,
+        processHits: (hits, hitProviderId) =>
+          processHits(hits, hitProviderId, variant.query, config.excludeRecruitmentAgencies),
+      });
 
-      providerId = chain.meta?.providerId ?? providerId;
-      rawResultCount = chain.results.length;
+      providerId = execution.providerId;
+      queryProvider = execution.providerId;
+      providersUsed = execution.providersUsed;
+      rawResultCount = execution.rawResults.length;
+      queryTavilyUsefulRecall = execution.tavilyUsefulRecall;
+      querySerpFallback = execution.serpApiFallbackTriggered;
+      querySerpFallbackReason = execution.serpApiFallbackReason;
 
-      for (const result of chain.results) {
-        const enriched = processRawResult({
-          title: result.title,
-          url: result.url,
-          description: result.description ?? null,
-          query: variant.query,
-          providerId,
-          excludeRecruitmentAgencies: config.excludeRecruitmentAgencies,
-        });
+      if (execution.serpApiFallbackTriggered) {
+        serpApiFallbackTriggered = true;
+        serpApiFallbackReason = execution.serpApiFallbackReason;
+      }
+      if (execution.tavilyUsefulRecall) {
+        tavilyUsefulRecall = true;
+      }
 
+      for (const enriched of execution.enrichedResults) {
         allEnriched.push(enriched);
         classifiedCounts[enriched.resultType] += 1;
         if (enriched.accepted) {
@@ -333,13 +405,16 @@ export async function runFastTavilySearch(
           }
         }
 
+        if (isEmployerHostedDiscoveryResult(enriched)) employerHostedResults += 1;
+        if (isConcreteVacancyDiscoveryResult(enriched)) concreteVacancyResults += 1;
+
         resultLogs.push({
           query: variant.query,
-          provider: providerId,
-          resultTitle: result.title,
-          resultUrl: result.url,
+          provider: queryProvider,
+          resultTitle: enriched.title,
+          resultUrl: enriched.url,
           resultDomain: enriched.officialDomain ?? "",
-          snippet: (result.description ?? "").slice(0, 300),
+          snippet: (enriched.description ?? "").slice(0, 300),
           classifiedType: enriched.resultType,
           classificationConfidence: enriched.classificationConfidence,
           classificationReason: enriched.classificationReason,
@@ -359,15 +434,33 @@ export async function runFastTavilySearch(
       error = cause instanceof Error ? cause.message : "Query mislukt";
     }
 
+    const uniqueResultCount = new Set(
+      allEnriched.filter((entry) => entry.query === variant.query).map((entry) => canonicalUrl(entry.url)),
+    ).size;
+
     return {
       query: variant.query,
       intent: variant.intent,
       label: variant.label,
+      location: variant.location,
+      role: variant.role,
       rawResultCount,
+      uniqueResultCount,
       companyResults,
       vacancyResults,
       directoryResults,
       rejectedResults,
+      employerHostedResults,
+      concreteVacancyResults,
+      desiredRoleVacancyResults: evaluateUsefulRecall(
+        allEnriched.filter((entry) => entry.query === variant.query),
+        desiredRoles,
+      ).desiredRoleVacancyMatches,
+      provider: queryProvider,
+      providersUsed,
+      tavilyUsefulRecall: queryTavilyUsefulRecall,
+      serpApiFallbackTriggered: querySerpFallback,
+      serpApiFallbackReason: querySerpFallbackReason,
       durationMs: Date.now() - started,
       error,
     } satisfies DiscoveryQueryDiagnostic;
@@ -379,20 +472,31 @@ export async function runFastTavilySearch(
     else {
       diagnostics.push({
         query: "unknown",
-        intent: "company_discovery",
+        intent: "role_specific",
         label: "Query mislukt",
+        location: "",
+        role: "",
         rawResultCount: 0,
+        uniqueResultCount: 0,
         companyResults: 0,
         vacancyResults: 0,
         directoryResults: 0,
         rejectedResults: 0,
+        employerHostedResults: 0,
+        concreteVacancyResults: 0,
+        desiredRoleVacancyResults: 0,
+        provider: "tavily",
+        providersUsed: [],
+        tavilyUsefulRecall: false,
+        serpApiFallbackTriggered: false,
+        serpApiFallbackReason: null,
         durationMs: 0,
         error: entry.reason instanceof Error ? entry.reason.message : "Query mislukt",
       });
     }
   }
 
-  const deduped = dedupeEnriched(allEnriched);
+  const deduped = dedupeEnrichedDiscoveryResults(allEnriched);
   const seenCompanies = new Set<string>();
   const results: TavilyDiscoveryResult[] = [];
 
@@ -410,7 +514,12 @@ export async function runFastTavilySearch(
     if (results.length >= globalMax) break;
   }
 
-  const funnel = buildFunnel(resultLogs, diagnostics, results.length);
+  const funnel = buildFunnel(resultLogs, diagnostics, results.length, {
+    serpApiFallbackTriggered,
+    serpApiFallbackReason,
+    tavilyUsefulRecall,
+    queriesGenerated,
+  });
 
   return {
     results: results.slice(0, globalMax),
@@ -419,8 +528,12 @@ export async function runFastTavilySearch(
     funnel,
     providerId,
     queries: diagnostics,
+    queriesGenerated,
     totalRawResults: diagnostics.reduce((sum, q) => sum + q.rawResultCount, 0),
     classifiedCounts,
+    serpApiFallbackTriggered,
+    serpApiFallbackReason,
+    tavilyUsefulRecall,
   };
 }
 

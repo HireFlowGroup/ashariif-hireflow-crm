@@ -11,15 +11,15 @@ export type DiscoveryQueryVariant = {
     | "company"
     | "job_board"
     | "role_specific"
-    | "vacancy_source";
+    | "vacancy_source"
+    | "vacancy_detail";
   label: string;
+  location: string;
+  role: string;
 };
 
-const SECTOR_SYNONYMS: Record<string, string[]> = {
-  software: ["software", "IT", "SaaS", "tech", "software development"],
-  it: ["IT", "software", "tech", "informatietechnologie"],
-  saas: ["SaaS", "software", "cloud software"],
-};
+const NEGATIVE_AGGREGATOR_TERMS =
+  "-indeed -linkedin -jooble -glassdoor -werkenbij -monster -stepstone -nationalevacaturebank -jobbird";
 
 const ROLE_SYNONYMS: Record<string, string[]> = {
   recruiter: ["recruiter", "recruitment", "HR recruiter"],
@@ -46,13 +46,69 @@ function expandSynonyms(value: string, map: Record<string, string[]>): string[] 
   return map[key] ?? [value];
 }
 
+/** Map user desired roles to canonical vacancy search roles. */
+export function primaryDesiredRoles(roles: string[]): string[] {
+  const canonical: string[] = [];
+  for (const role of roles) {
+    const normalized = role.toLowerCase().trim();
+    if (/recruit/.test(normalized)) canonical.push("recruiter");
+    else if (/account/.test(normalized)) canonical.push("accountmanager");
+    else if (/customer|csm/.test(normalized)) canonical.push("customer success manager");
+    else canonical.push(role);
+  }
+  return [...new Set(canonical)];
+}
+
+function vacancyQueryTemplates(input: {
+  sector: string;
+  location: string;
+  role: string;
+}): DiscoveryQueryVariant[] {
+  const { sector, location, role } = input;
+  return [
+    {
+      query: joinParts([role, "vacature", location, sector, "bedrijf", NEGATIVE_AGGREGATOR_TERMS]),
+      intent: "role_specific",
+      label: `${role} vacature ${location}`,
+      location,
+      role,
+    },
+    {
+      query: joinParts([
+        "vacature",
+        role,
+        location,
+        sector,
+        "inurl:vacatures OR inurl:careers OR inurl:jobs",
+        NEGATIVE_AGGREGATOR_TERMS,
+      ]),
+      intent: "vacancy_detail",
+      label: `Employer vacature ${role} ${location}`,
+      location,
+      role,
+    },
+    {
+      query: joinParts(['"werken bij"', role, location, sector, NEGATIVE_AGGREGATOR_TERMS]),
+      intent: "careers",
+      label: `Werken bij ${role} ${location}`,
+      location,
+      role,
+    },
+    {
+      query: joinParts(["softwarebedrijf", location, "vacature", role, NEGATIVE_AGGREGATOR_TERMS]),
+      intent: "vacancy",
+      label: `Software vacature ${role} ${location}`,
+      location,
+      role,
+    },
+  ];
+}
+
 export function buildVacancyDrivenDiscoveryQueries(
   criteria: CompanySearchCriteria,
   plan?: AiRecruiterSearchPlan,
 ): DiscoveryQueryVariant[] {
-  const config = getAiRecruiterConfig();
   const sector = criteria.sector ?? plan?.sectors?.[0] ?? criteria.sectors?.[0] ?? "software";
-  const sectorTerms = expandSynonyms(sector, SECTOR_SYNONYMS).slice(0, 2);
 
   const locations = [
     ...(criteria.locations ?? []),
@@ -69,153 +125,51 @@ export function buildVacancyDrivenDiscoveryQueries(
         ? criteria.vacancyTitles
         : ["recruiter", "accountmanager", "customer success manager"];
 
-  const normalizedRoles = roles.flatMap((role) => expandSynonyms(role, ROLE_SYNONYMS)).slice(0, 6);
+  const canonicalRoles = primaryDesiredRoles(roles);
   const queries: DiscoveryQueryVariant[] = [];
 
-  // --- BEDRIJFSDISCOVERY ---
-  for (const loc of allLocations.slice(0, 4)) {
-    for (const term of sectorTerms) {
-      queries.push(
-        {
-          query: joinParts([`${term}bedrijven`, loc]),
-          intent: "company_discovery",
-          label: `${term} bedrijven ${loc}`,
-        },
-        {
-          query: joinParts(["IT bedrijven", loc]),
-          intent: "company_discovery",
-          label: `IT bedrijven ${loc}`,
-        },
-        {
-          query: joinParts(["SaaS bedrijven", loc]),
-          intent: "company_discovery",
-          label: `SaaS bedrijven ${loc}`,
-        },
-        {
-          query: joinParts(["software development bedrijven", loc]),
-          intent: "company_discovery",
-          label: `Software development ${loc}`,
-        },
-        {
-          query: joinParts(["tech bedrijven", loc, "vacatures"]),
-          intent: "company_discovery",
-          label: `Tech vacatures ${loc}`,
-        },
-      );
+  for (const location of allLocations.slice(0, 6)) {
+    for (const role of canonicalRoles) {
+      queries.push(...vacancyQueryTemplates({ sector, location, role }));
     }
-  }
-
-  // --- VACATUREGEDREVEN ---
-  for (const loc of allLocations.slice(0, 4)) {
-    for (const role of normalizedRoles.slice(0, 3)) {
-      queries.push({
-        query: joinParts(["softwarebedrijf", loc, "vacatures", role]),
-        intent: "vacancy",
-        label: `Vacature ${role} ${loc}`,
-      });
-    }
-    queries.push(
-      {
-        query: joinParts(['"werken bij"', "software", loc]),
-        intent: "careers",
-        label: `Werken bij software ${loc}`,
-      },
-      {
-        query: joinParts(['"careers"', "SaaS", loc]),
-        intent: "careers",
-        label: `Careers SaaS ${loc}`,
-      },
-    );
-  }
-
-  // --- VACATUREBRONNEN ---
-  if (config.includeVacancySources) {
-    for (const loc of allLocations.slice(0, 3)) {
-      const role = normalizedRoles[0] ?? "vacature";
-      queries.push(
-        {
-          query: `site:indeed.com ${sector} ${loc} ${role}`,
-          intent: "vacancy_source",
-          label: `Indeed ${loc}`,
-        },
-        {
-          query: `site:linkedin.com/jobs ${sector} ${loc} ${normalizedRoles[1] ?? "customer success"}`,
-          intent: "vacancy_source",
-          label: `LinkedIn Jobs ${loc}`,
-        },
-        {
-          query: `site:nationalevacaturebank.nl ${sector} ${loc}`,
-          intent: "vacancy_source",
-          label: `NVB ${loc}`,
-        },
-        {
-          query: `site:werkenbij.nl ${sector} ${loc}`,
-          intent: "vacancy_source",
-          label: `Werkenbij.nl ${loc}`,
-        },
-        {
-          query: `site:company.info ${sector} ${loc}`,
-          intent: "vacancy_source",
-          label: `Company.info ${loc}`,
-        },
-        {
-          query: `site:glassdoor.nl ${sector} ${loc} vacatures`,
-          intent: "vacancy_source",
-          label: `Glassdoor ${loc}`,
-        },
-      );
-    }
-  }
-
-  // --- ROL-SPECIFIEK ---
-  for (const role of normalizedRoles.slice(0, 4)) {
-    queries.push({
-      query: joinParts([role, allLocations[0] ?? "Nederland", sector, "vacature"]),
-      intent: "role_specific",
-      label: `Rol ${role}`,
-    });
   }
 
   return uniqueQueries(queries);
 }
 
-/** Select a balanced mix of queries up to configured count. */
+/**
+ * Select queries with guaranteed location × role coverage.
+ * Vacancy-focused intents are prioritized; generic company lists are excluded.
+ */
 export function selectDiscoveryQueries(
   queries: DiscoveryQueryVariant[],
   _maximumCompanies?: number,
 ): DiscoveryQueryVariant[] {
   const config = getAiRecruiterConfig();
   const target = config.discoveryQueryCount;
-  const intentOrder: DiscoveryQueryVariant["intent"][] = [
-    "company_discovery",
-    "vacancy",
-    "careers",
-    "vacancy_source",
-    "role_specific",
-    "company",
-    "job_board",
-  ];
 
-  const buckets = new Map<DiscoveryQueryVariant["intent"], DiscoveryQueryVariant[]>();
+  const buckets = new Map<string, DiscoveryQueryVariant[]>();
   for (const query of queries) {
-    const list = buckets.get(query.intent) ?? [];
+    const key = `${query.location}|${query.role}`;
+    const list = buckets.get(key) ?? [];
     list.push(query);
-    buckets.set(query.intent, list);
+    buckets.set(key, list);
   }
 
+  const pairKeys = [...buckets.keys()];
   const selected: DiscoveryQueryVariant[] = [];
   const seen = new Set<string>();
 
   while (selected.length < target) {
     let added = false;
-    for (const intent of intentOrder) {
+    for (const key of pairKeys) {
       if (selected.length >= target) break;
-      const bucket = buckets.get(intent);
+      const bucket = buckets.get(key);
       if (!bucket?.length) continue;
       const next = bucket.shift()!;
-      const key = next.query.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const dedupeKey = next.query.toLowerCase();
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
       selected.push(next);
       added = true;
     }

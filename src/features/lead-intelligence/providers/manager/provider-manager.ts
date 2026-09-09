@@ -87,6 +87,47 @@ export class ProviderManager {
     return this.getAvailableProviders();
   }
 
+  async executeSingleProviderSearch(
+    providerId: string,
+    query: string,
+    maxResults: number,
+    timeoutMs?: number,
+  ): Promise<{
+    results: SearchResultItem[];
+    durationMs: number;
+    fromCache: boolean;
+    attempt: number;
+  }> {
+    const adapter = this.registry.get(providerId);
+    if (!adapter?.definition.enabled || !adapter.executeSearch) {
+      throw new Error(`Provider ${providerId} niet beschikbaar`);
+    }
+
+    const provider = adapter.definition;
+    const execution = await executeWithResilience(
+      {
+        providerId: provider.id,
+        timeoutMs: timeoutMs ?? provider.timeoutMs,
+        maxRetries: provider.maxRetries,
+        rateLimitPerMinute: provider.rateLimitPerMinute,
+        cacheKey: `${provider.id}:${query}:${maxResults}`,
+        useCache: provider.cacheEnabled,
+        cacheTtlMs: provider.cacheTtlMs,
+      },
+      () => adapter.executeSearch!(query, maxResults),
+    );
+
+    return {
+      results: execution.data.map((hit) => ({
+        ...hit,
+        description: hit.description ?? "",
+      })),
+      durationMs: execution.durationMs,
+      fromCache: execution.fromCache,
+      attempt: execution.attempt,
+    };
+  }
+
   async executeSearchChain(query: string, maxResults: number): Promise<SearchChainResult> {
     const enabled = this.registry
       .getByCategory("search")

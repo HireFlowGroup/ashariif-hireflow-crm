@@ -14,6 +14,13 @@ export type StoredDiscoveryQueryRun = {
   funnel?: DiscoveryFunnelMetrics;
   resultLogs?: DiscoveryResultLogEntry[];
   recordedAt: string;
+  queriesGenerated?: string[];
+  serpApiFallbackTriggered?: boolean;
+  serpApiFallbackReason?: string | null;
+  tavilyUsefulRecall?: boolean;
+  employerHostedResults?: number;
+  concreteVacancyResults?: number;
+  desiredRoleVacancyResults?: number;
 };
 
 const MAX_ENTRIES = 50;

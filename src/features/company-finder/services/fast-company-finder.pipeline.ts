@@ -158,6 +158,13 @@ export async function* runFastCompanyFinderPipeline(input: {
       funnel: tavily.funnel,
       resultLogs: tavily.resultLogs,
       recordedAt: new Date().toISOString(),
+      queriesGenerated: tavily.queriesGenerated,
+      serpApiFallbackTriggered: tavily.serpApiFallbackTriggered,
+      serpApiFallbackReason: tavily.serpApiFallbackReason,
+      tavilyUsefulRecall: tavily.tavilyUsefulRecall,
+      employerHostedResults: tavily.funnel.employerHostedResults,
+      concreteVacancyResults: tavily.funnel.concreteVacancyResults,
+      desiredRoleVacancyResults: tavily.funnel.desiredRoleVacancyResults,
     });
 
     timer.start("discovery_quality_gate", "quality");

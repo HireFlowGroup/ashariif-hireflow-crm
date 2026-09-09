@@ -301,9 +301,9 @@ describe("concept eligibility pipeline", () => {
       ),
     );
     expect(queries.length).toBeGreaterThanOrEqual(12);
-    expect(queries.some((q) => q.query.includes("indeed"))).toBe(true);
-    expect(queries.some((q) => q.query.includes("vacatures"))).toBe(true);
-    expect(queries.some((q) => q.intent === "company_discovery")).toBe(true);
+    expect(queries.some((q) => q.query.includes("vacature"))).toBe(true);
+    expect(queries.some((q) => q.location === "Den Haag")).toBe(true);
+    expect(queries.every((q) => q.intent !== "company_discovery")).toBe(true);
   });
 
   it("14. no-results onderscheiden van providerfout via classify unknown", () => {

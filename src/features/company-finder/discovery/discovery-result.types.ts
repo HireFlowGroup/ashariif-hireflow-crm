@@ -79,6 +79,13 @@ export type DiscoveryFunnelMetrics = {
   /** @deprecated Use withDiscoveryVacancyTitle */
   withVacancyEvidence: number;
   rejected: number;
+  employerHostedResults?: number;
+  concreteVacancyResults?: number;
+  desiredRoleVacancyResults?: number;
+  tavilyUsefulRecall?: boolean;
+  serpApiFallbackTriggered?: boolean;
+  serpApiFallbackReason?: string | null;
+  queriesGenerated?: string[];
 };
 
 export type EnrichedDiscoveryResult = {
