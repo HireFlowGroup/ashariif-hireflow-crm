@@ -129,6 +129,15 @@ describe("synthetic vacancy evidence removed", () => {
     expect(desiredRoleMatchesVacancy("recruiters", plan)).toBe(false);
   });
 
+  it("rejects careers listing URL as vacancy evidence", () => {
+    expect(hasConcreteJobUrl("https://techflow.nl/vacatures")).toBe(false);
+    expect(hasConcreteJobUrl("https://techflow.nl/careers")).toBe(false);
+  });
+
+  it("accepts job detail URL as vacancy evidence", () => {
+    expect(hasConcreteJobUrl("https://techflow.nl/vacatures/corporate-recruiter")).toBe(true);
+  });
+
   it("rejects homepage-only URL as vacancy evidence", () => {
     const evidence = makeEvidence({
       jobTitle: "Corporate Recruiter",

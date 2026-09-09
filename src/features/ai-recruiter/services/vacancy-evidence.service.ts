@@ -8,6 +8,9 @@ import type {
 import type { ClassifiedSearchResult } from "@/features/company-finder/discovery/result-classifier.service";
 import { vacancyTitleMatchesDesiredRoles } from "@/features/ai-recruiter/services/desired-role-matching.service";
 import type { ParsedCareerVacancy } from "@/features/ai-recruiter/services/careers-vacancy-parser.service";
+import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
+
+export { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 
 const GENERIC_VACANCY_TITLES = new Set([
   "careers pagina",
@@ -25,9 +28,6 @@ const GENERIC_VACANCY_TITLES = new Set([
   "customer success managers",
 ]);
 
-const JOB_URL_PATH_PATTERN =
-  /\/(vacatures?|careers?|jobs?|werken-bij|positions?|opening|role|functie)[/\-_a-z0-9]*/i;
-
 function extractDomain(url: string | null | undefined): string {
   if (!url) return "";
   try {
@@ -43,29 +43,6 @@ function normalizeTitle(title: string): string {
 
 export function isGenericVacancyTitle(title: string): boolean {
   return GENERIC_VACANCY_TITLES.has(normalizeTitle(title));
-}
-
-function isHomepageOnlyUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
-    const path = parsed.pathname.replace(/\/$/, "");
-    return path === "" || path === "/";
-  } catch {
-    return true;
-  }
-}
-
-export function hasConcreteJobUrl(jobUrl: string): boolean {
-  if (!jobUrl.trim()) return false;
-  if (isHomepageOnlyUrl(jobUrl)) return false;
-  try {
-    const path = new URL(jobUrl.startsWith("http") ? jobUrl : `https://${jobUrl}`).pathname;
-    if (JOB_URL_PATH_PATTERN.test(path)) return true;
-    const segments = path.split("/").filter(Boolean);
-    return segments.length >= 2;
-  } catch {
-    return false;
-  }
 }
 
 export function createVacancyEvidence(input: {

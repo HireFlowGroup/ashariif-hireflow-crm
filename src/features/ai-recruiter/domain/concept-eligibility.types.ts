@@ -14,6 +14,8 @@ export const conceptEligibilityReasonCodeSchema = z.enum([
   "duplicate_outreach",
   "cooldown_active",
   "missing_required_data",
+  "employee_range_unknown",
+  "employee_range_mismatch",
   "manual_override",
   "unknown",
 ]);

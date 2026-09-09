@@ -215,19 +215,20 @@ describe("concept eligibility pipeline", () => {
     expect(result.shouldSaveAsCompany).toBe(false);
   });
 
-  it("8. score onder drempel toont exacte afwijsreden", () => {
+  it("8. verkeerde locatie toont exacte afwijsreden", () => {
     const result = evaluateConceptEligibility({
-      company: makeCompany({ vacancyCount: 0, careersUrl: null, city: "Groningen" }),
+      company: makeCompany({ city: "Groningen" }),
       plan: basePlan,
-      hiringScore: 5,
-      vacancyCount: 0,
-      vacancies: [],
+      hiringScore: 50,
+      vacancyCount: 1,
+      vacancies: [activeVacancy],
       contact: makeContact(),
       contactStage: "general_mailbox_found",
+      desiredRoleMatch: true,
     });
     expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("score_below_threshold");
-    expect(result.userMessage).toContain("drempel");
+    expect(result.reasonCode).toBe("wrong_location");
+    expect(result.userMessage).toContain("regio");
   });
 
   it("9. algemene mailbox wordt niet automatisch afgewezen", () => {

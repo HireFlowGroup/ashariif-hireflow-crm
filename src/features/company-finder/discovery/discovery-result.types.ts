@@ -69,9 +69,15 @@ export type DiscoveryFunnelMetrics = {
   realCompanies: number;
   companiesInRegion: number;
   companiesInSector: number;
-  withVacancyEvidence: number;
+  /** Vacancy title present in search snippet — hint only, not validated evidence */
+  withDiscoveryVacancyTitle: number;
   withoutVacancyEvidence: number;
+  /** Deduplicated companies passed to quality gate (not vacancy-qualified) */
+  companiesPassedToGate: number;
+  /** @deprecated Use companiesPassedToGate */
   saved: number;
+  /** @deprecated Use withDiscoveryVacancyTitle */
+  withVacancyEvidence: number;
   rejected: number;
 };
 

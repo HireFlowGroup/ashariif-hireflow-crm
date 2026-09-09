@@ -11,6 +11,11 @@ import {
   type DeterministicLeadScoreResult,
 } from "@/features/ai-recruiter/services/deterministic-lead-score.service";
 import {
+  evaluateEmployeeRangeConstraint,
+  evaluateLocationConstraint,
+  evaluateSectorConstraint,
+} from "@/features/ai-recruiter/services/company-constraint-validation.service";
+import {
   countStrictActiveVacancies,
   desiredRoleMatchesVacancy,
   strictVacancyEvidence,
@@ -66,6 +71,10 @@ function buildUserMessage(
       return "Cooldown actief — recent al benaderd.";
     case "missing_required_data":
       return "Onvoldoende gegevens om een concept te maken.";
+    case "employee_range_unknown":
+      return "Medewerkersaantal onbekend — voldoet niet aan de vereiste range.";
+    case "employee_range_mismatch":
+      return "Medewerkersaantal valt buiten de gevraagde range.";
     default:
       return "Prospect niet eligible voor conceptgeneratie.";
   }
@@ -203,6 +212,68 @@ export function evaluateConceptEligibility(input: ConceptEligibilityInput): Conc
     input.desiredRoleMatch
     ?? (roleMatchedVacancies.length > 0
       || (input.plan.desired_roles.length === 0 && activeVacancyCount > 0));
+
+  const employeeRequired =
+    input.plan.employee_range.min !== null || input.plan.employee_range.max !== null;
+  const employeeStatus = evaluateEmployeeRangeConstraint(input.company, input.plan);
+
+  if (employeeRequired && employeeStatus === "unknown") {
+    rejectedRules.push("employee_range_unknown");
+    return {
+      eligible: false,
+      score: 0,
+      threshold,
+      priority: "reject",
+      acceptedRules,
+      rejectedRules,
+      reasonCode: "employee_range_unknown",
+      userMessage: buildUserMessage("employee_range_unknown", 0, threshold),
+    };
+  }
+
+  if (employeeStatus === "mismatched") {
+    rejectedRules.push("employee_range_mismatch");
+    return {
+      eligible: false,
+      score: 0,
+      threshold,
+      priority: "reject",
+      acceptedRules,
+      rejectedRules,
+      reasonCode: "employee_range_mismatch",
+      userMessage: buildUserMessage("employee_range_mismatch", 0, threshold),
+    };
+  }
+
+  const locationStatus = evaluateLocationConstraint(input.company, input.plan);
+  if (locationStatus === "mismatched") {
+    rejectedRules.push("wrong_location");
+    return {
+      eligible: false,
+      score: 0,
+      threshold,
+      priority: "reject",
+      acceptedRules,
+      rejectedRules,
+      reasonCode: "wrong_location",
+      userMessage: buildUserMessage("wrong_location", 0, threshold),
+    };
+  }
+
+  const sectorStatus = evaluateSectorConstraint(input.company, input.plan);
+  if (sectorStatus === "mismatched") {
+    rejectedRules.push("wrong_sector");
+    return {
+      eligible: false,
+      score: 0,
+      threshold,
+      priority: "reject",
+      acceptedRules,
+      rejectedRules,
+      reasonCode: "wrong_sector",
+      userMessage: buildUserMessage("wrong_sector", 0, threshold),
+    };
+  }
 
   const leadScore: DeterministicLeadScoreResult = computeDeterministicLeadScore({
     company: input.company,

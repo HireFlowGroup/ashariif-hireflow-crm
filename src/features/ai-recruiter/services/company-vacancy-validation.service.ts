@@ -17,6 +17,7 @@ import {
   parsedVacanciesToEvidence,
   strictVacancyEvidence,
 } from "@/features/ai-recruiter/services/vacancy-evidence.service";
+import type { VacancyAuditStatus } from "@/features/ai-recruiter/services/vacancy-audit-status.service";
 import { fetchHomepageHtml } from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
 
@@ -31,6 +32,8 @@ export type VacancyValidationResult = {
   vacancies: VacancyEvidence[];
   message: string;
   careersUrlsChecked: string[];
+  auditStatus: VacancyAuditStatus;
+  parsedVacancyCount: number;
 };
 
 function companyDomain(company: Company): string {
@@ -64,10 +67,13 @@ export function assessParsedVacancies(input: {
       vacancies: [],
       message: "Vacaturevalidatie niet vereist voor deze run.",
       careersUrlsChecked: [],
+      auditStatus: "none",
+      parsedVacancyCount: 0,
     };
   }
 
   const activeParsed = parsedVacancies.filter((vacancy) => vacancy.isActive);
+  const parsedVacancyCount = activeParsed.length;
   const evidence = dedupeVacancyEvidence(
     parsedVacanciesToEvidence(activeParsed, company, plan, "careers_page_crawl"),
   ).filter(strictVacancyEvidence);
@@ -76,8 +82,12 @@ export function assessParsedVacancies(input: {
     return {
       status: "no_active_vacancy",
       vacancies: [],
-      message: "Geen actuele vacature gevonden op de careers-pagina.",
+      message: parsedVacancyCount > 0
+        ? "Alleen careers-navigatie of marketingtekst gevonden — geen concrete vacature."
+        : "Geen actuele vacature gevonden op de careers-pagina.",
       careersUrlsChecked: [],
+      auditStatus: parsedVacancyCount > 0 ? "noise" : "none",
+      parsedVacancyCount,
     };
   }
 
@@ -90,6 +100,8 @@ export function assessParsedVacancies(input: {
         vacancies: evidence,
         message: `Vacatures gevonden (${foundTitles}), maar geen match met gewenste rollen.`,
         careersUrlsChecked: [],
+        auditStatus: "no_matching_role",
+        parsedVacancyCount,
       };
     }
 
@@ -98,6 +110,8 @@ export function assessParsedVacancies(input: {
       vacancies: matching,
       message: `Actieve vacature(s) gevonden: ${matching.map((vacancy) => vacancy.title).join(", ")}.`,
       careersUrlsChecked: [],
+      auditStatus: "matched",
+      parsedVacancyCount,
     };
   }
 
@@ -106,6 +120,8 @@ export function assessParsedVacancies(input: {
     vacancies: evidence,
     message: `Actieve vacature(s) gevonden: ${evidence.map((vacancy) => vacancy.title).join(", ")}.`,
     careersUrlsChecked: [],
+    auditStatus: "found",
+    parsedVacancyCount,
   };
 }
 
@@ -141,6 +157,8 @@ export async function validateCompanyVacancies(input: {
       vacancies: [],
       message: "Geen bedrijfswebsite beschikbaar voor vacaturevalidatie.",
       careersUrlsChecked: [],
+      auditStatus: "none",
+      parsedVacancyCount: 0,
     };
   }
 

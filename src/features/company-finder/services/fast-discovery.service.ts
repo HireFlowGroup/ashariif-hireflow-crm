@@ -159,6 +159,16 @@ function processRawResult(input: {
     rejectionReason = "not_a_company";
   }
 
+  if (accepted && !officialDomain) {
+    accepted = false;
+    rejectionReason = "no_official_domain";
+  }
+
+  if (accepted && isGenericCompanyLabel(input.title) && !resolvedName) {
+    accepted = false;
+    rejectionReason = "not_a_company";
+  }
+
   const businessModel = classifyBusinessModel({
     name: resolvedName ?? input.title,
     url: input.url,
@@ -193,7 +203,8 @@ function processRawResult(input: {
 }
 
 function toTavilyResult(enriched: EnrichedDiscoveryResult): TavilyDiscoveryResult | null {
-  if (!enriched.accepted || !enriched.extractedCompanyName) return null;
+  if (!enriched.accepted || !enriched.extractedCompanyName || !enriched.officialDomain) return null;
+  if (isGenericCompanyLabel(enriched.extractedCompanyName)) return null;
   const website = enriched.officialDomain
     ? `https://${enriched.officialDomain}`
     : enriched.url;
@@ -208,9 +219,10 @@ function toTavilyResult(enriched: EnrichedDiscoveryResult): TavilyDiscoveryResul
 function buildFunnel(
   logs: DiscoveryResultLogEntry[],
   queries: DiscoveryQueryDiagnostic[],
-  saved: number,
+  companiesPassedToGate: number,
 ): DiscoveryFunnelMetrics {
   const uniqueUrls = new Set(logs.map((l) => canonicalUrl(l.resultUrl))).size;
+  const withDiscoveryVacancyTitle = logs.filter((l) => l.accepted && l.vacancyTitle).length;
   return {
     queriesExecuted: queries.length,
     rawResults: logs.length,
@@ -226,9 +238,11 @@ function buildFunnel(
     realCompanies: logs.filter((l) => l.accepted).length,
     companiesInRegion: logs.filter((l) => l.accepted).length,
     companiesInSector: logs.filter((l) => l.accepted).length,
-    withVacancyEvidence: logs.filter((l) => l.accepted && l.vacancyTitle).length,
+    withDiscoveryVacancyTitle,
     withoutVacancyEvidence: logs.filter((l) => l.accepted && !l.vacancyTitle).length,
-    saved,
+    companiesPassedToGate,
+    saved: companiesPassedToGate,
+    withVacancyEvidence: withDiscoveryVacancyTitle,
     rejected: logs.filter((l) => !l.accepted).length,
   };
 }

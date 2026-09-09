@@ -4,6 +4,7 @@ import type { Company, UpdateCompanyInput } from "@/features/companies/domain";
 import type { CompaniesService } from "@/features/companies/services/companies.service";
 import type { QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
+import { validateDiscoveryCompanyForSave } from "@/features/company-finder/discovery/discovery-company-save-validation";
 import { mergeLeadFields } from "@/features/companies/repositories/company.mapper";
 import type { ExternalCompanyCandidate } from "@/features/lead-intelligence/domain";
 import { matchAgainstExisting } from "@/features/lead-intelligence/services/dedupe";
@@ -50,6 +51,16 @@ export async function saveDiscoveryCompanyWithDedupe(input: {
 }): Promise<DiscoveryCompanySaveResult> {
   const { companiesService, context, qualified, existingCompanies } = input;
   const candidate = qualified.candidate;
+
+  const saveValidation = validateDiscoveryCompanyForSave({
+    name: candidate.name,
+    domain: candidate.domain,
+    website: candidate.website,
+  });
+  if (!saveValidation.acceptable) {
+    return { type: "skipped", candidate };
+  }
+
   const match = matchAgainstExisting(candidate, existingCompanies);
 
   if (match.isDuplicate && match.matchedCompanyId) {

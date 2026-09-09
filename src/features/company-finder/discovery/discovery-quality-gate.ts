@@ -380,44 +380,46 @@ export async function runDiscoveryQualityGate(input: {
       continue;
     }
 
-    if (identity.unresolved || !identity.officialName || isGenericCompanyLabel(candidate.name)) {
-      if (identity.officialName && identity.confidence >= 0.5) {
-        candidate = {
-          ...candidate,
-          name: identity.officialName,
-          normalizedName: normalizeCompanyName(identity.officialName),
-          confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
-        };
-      } else {
-        report.rejectedByHeuristics += 1;
-        reject(
-          report,
-          rejected,
-          {
-            url: result.url,
-            title: result.title,
-            category: "unknown",
-            reason: "heuristic_title",
-            detail: identity.unresolved
-              ? "Bedrijfsidentiteit niet betrouwbaar vastgesteld (unresolved_company_identity)"
+    const resolvedName = identity.officialName ?? candidate.name;
+    const resolvedDomain = candidate.domain ?? candidate.website ?? result.url;
+
+    if (
+      identity.unresolved
+      || !resolvedName
+      || isGenericCompanyLabel(resolvedName)
+      || isGenericCompanyLabel(result.title)
+      || !resolvedDomain
+    ) {
+      report.rejectedByHeuristics += 1;
+      reject(
+        report,
+        rejected,
+        {
+          url: result.url,
+          title: result.title,
+          category: "unknown",
+          reason: "heuristic_title",
+          detail: identity.unresolved
+            ? "Bedrijfsidentiteit niet betrouwbaar vastgesteld (unresolved_company_identity)"
+            : isGenericCompanyLabel(resolvedName)
+              ? `Generieke bedrijfslabel afgewezen: ${resolvedName}`
               : `Generieke titel afgewezen: ${result.title}`,
-          },
-          input.jobId,
-        );
-        continue;
-      }
-    } else {
-      candidate = {
-        ...candidate,
-        name: identity.officialName,
-        normalizedName: normalizeCompanyName(identity.officialName),
-        confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
-        description: [
-          candidate.description,
-          `Identity: ${identity.source} (${Math.round(identity.confidence * 100)}%)`,
-        ].filter(Boolean).join(" · "),
-      };
+        },
+        input.jobId,
+      );
+      continue;
     }
+
+    candidate = {
+      ...candidate,
+      name: resolvedName,
+      normalizedName: normalizeCompanyName(resolvedName),
+      confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
+      description: [
+        candidate.description,
+        `Identity: ${identity.source} (${Math.round(identity.confidence * 100)}%)`,
+      ].filter(Boolean).join(" · "),
+    };
 
     signalPassed.push({
       result,

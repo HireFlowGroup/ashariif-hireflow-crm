@@ -411,6 +411,9 @@ export class AiRecruiterOrchestrator {
                 contact: null,
                 contactStage: reasonCode,
                 conceptStatus: "skipped",
+                vacancyAuditStatus: validation.auditStatus,
+                parsedVacancyCount: validation.parsedVacancyCount,
+                searchPlan: plan,
               });
 
               yield { type: "item", item: updatedItem };
@@ -871,6 +874,7 @@ export class AiRecruiterOrchestrator {
             contact: selectedContact,
             contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
             conceptStatus: "skipped",
+            searchPlan: plan,
           });
 
           if (result.stage !== "contact_lookup_failed") {
@@ -905,6 +909,7 @@ export class AiRecruiterOrchestrator {
           contact: selectedContact,
           contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
           conceptStatus: "pending",
+          searchPlan: plan,
         });
 
         yield { type: "item", item: updatedItem };
