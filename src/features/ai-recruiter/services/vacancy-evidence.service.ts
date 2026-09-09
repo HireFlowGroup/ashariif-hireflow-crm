@@ -128,12 +128,48 @@ export function parsedVacanciesToEvidence(
   );
 }
 
+function discoveryVacancyTitleFromCompany(company: Company): string | null {
+  const signalTitle = company.hiringSignals.find(
+    (signal) => signal.type === "active_vacancy" || signal.type === "vacancy",
+  )?.description;
+  if (signalTitle?.trim()) return signalTitle.trim();
+  return null;
+}
+
+/** Build strict discovery evidence preserved on the company record from discovery. */
+export function buildDiscoveryVacancyEvidenceFromCompany(
+  company: Company,
+  plan: AiRecruiterSearchPlan,
+): VacancyEvidence[] {
+  const domain = company.domain ?? extractDomain(company.website ?? company.sourceUrl);
+  const jobUrl = company.vacancyPageUrl ?? null;
+  if (!jobUrl || !hasConcreteJobUrl(jobUrl) || !domain) return [];
+
+  const jobTitle = discoveryVacancyTitleFromCompany(company);
+  if (!jobTitle || isGenericVacancyTitle(jobTitle)) return [];
+
+  const evidence = createVacancyEvidence({
+    companyName: company.name,
+    companyDomain: domain,
+    jobTitle,
+    jobUrl,
+    sourceUrl: jobUrl,
+    sourceType: "discovery_classification",
+    location: company.city,
+    desiredRoleMatch: vacancyTitleMatchesDesiredRoles(jobTitle, plan),
+    validationReason: "discovery_classification: Concrete vacature gevonden tijdens discovery",
+    hiringSignalStrength: 65,
+  });
+
+  return strictVacancyEvidence(evidence) ? [evidence] : [];
+}
+
 /** Returns only previously validated CRM evidence — never from discovery hints or nav labels. */
 export function buildVacancyEvidenceFromCompany(
-  _company: Company,
-  _plan: AiRecruiterSearchPlan,
+  company: Company,
+  plan: AiRecruiterSearchPlan,
 ): VacancyEvidence[] {
-  return [];
+  return buildDiscoveryVacancyEvidenceFromCompany(company, plan);
 }
 
 export function buildVacancyEvidenceFromClassification(

@@ -24,6 +24,10 @@ function hasSearchDimensions(value: {
   keywords?: string;
   vacancyTitles?: string[];
   hiringSignalTypes?: string[];
+  locations?: string[];
+  regions?: string[];
+  sectors?: string[];
+  desiredRoles?: string[];
 }): boolean {
   return Boolean(
     value.city?.trim()
@@ -31,7 +35,11 @@ function hasSearchDimensions(value: {
     || value.sector?.trim()
     || value.keywords?.trim()
     || (value.vacancyTitles?.length ?? 0) > 0
-    || (value.hiringSignalTypes?.length ?? 0) > 0,
+    || (value.hiringSignalTypes?.length ?? 0) > 0
+    || (value.locations?.length ?? 0) > 0
+    || (value.regions?.length ?? 0) > 0
+    || (value.sectors?.length ?? 0) > 0
+    || (value.desiredRoles?.length ?? 0) > 0,
   );
 }
 
@@ -52,6 +60,11 @@ export const companyFinderCriteriaSchema = z.object({
   excludedSectors: z.array(z.string().trim().max(120)).max(20).optional(),
   sourceQuery: z.string().trim().max(500).optional(),
   fastMode: z.boolean().optional().default(true),
+  /** Multi-location discovery (AI Recruiter) — preserved end-to-end */
+  locations: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  regions: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  sectors: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  desiredRoles: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
 }).refine(hasSearchDimensions, {
   message: "Vul minimaal plaats, regio, branche, zoekwoorden, vacaturetitels of hiring signals in.",
 });

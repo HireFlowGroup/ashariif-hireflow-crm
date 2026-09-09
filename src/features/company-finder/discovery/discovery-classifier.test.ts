@@ -123,8 +123,9 @@ describe("discovery classifier and pipeline", () => {
       buildVacancyDrivenDiscoveryQueries(criteria, basePlan),
     );
     expect(queries.length).toBeGreaterThanOrEqual(12);
-    expect(queries.some((q) => q.intent === "company_discovery")).toBe(true);
-    expect(queries.some((q) => q.intent === "vacancy_source")).toBe(true);
+    expect(queries.some((q) => q.location === "Rotterdam")).toBe(true);
+    expect(queries.some((q) => q.location === "Den Haag")).toBe(true);
+    expect(queries.every((q) => q.intent !== "company_discovery")).toBe(true);
   });
 
   it("10. queryvarianten zijn uniek", () => {

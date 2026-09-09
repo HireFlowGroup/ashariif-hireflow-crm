@@ -2,6 +2,8 @@ import "server-only";
 
 import type { CompanySearchCriteria } from "@/features/lead-intelligence/domain";
 import type { TavilyDiscoveryResult } from "@/features/company-finder/discovery/discovery-quality-gate";
+import { evaluateDiscoveryEmployerForSave } from "@/features/company-finder/discovery/discovery-employer-criteria.service";
+import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
 import { brandNameFromDomain } from "@/features/company-finder/discovery/parse-website-identity";
 import {
@@ -231,17 +233,107 @@ function processHits(
   );
 }
 
-function toTavilyResult(enriched: EnrichedDiscoveryResult): TavilyDiscoveryResult | null {
+function extractLocationFromQuery(query: string, locations: string[]): string | null {
+  const normalizedQuery = query.toLowerCase();
+  for (const location of locations) {
+    if (normalizedQuery.includes(location.toLowerCase())) return location;
+  }
+  return null;
+}
+
+function matchesDesiredRoleTitle(title: string | null | undefined, desiredRoles: string[]): boolean {
+  if (!title?.trim() || desiredRoles.length === 0) return false;
+  const normalizedTitle = title.toLowerCase();
+  for (const role of desiredRoles) {
+    const normalizedRole = role.toLowerCase();
+    if (normalizedRole.includes("recruit") && /\brecruit/.test(normalizedTitle)) return true;
+    if (normalizedRole.includes("account") && /\baccount\s?manager\b/.test(normalizedTitle)) return true;
+    if ((normalizedRole.includes("customer") || normalizedRole.includes("csm"))
+      && /\bcustomer success\b/.test(normalizedTitle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function pickBestEnrichedPerDomain(enriched: EnrichedDiscoveryResult[]): EnrichedDiscoveryResult[] {
+  const byDomain = new Map<string, EnrichedDiscoveryResult>();
+
+  for (const entry of enriched) {
+    if (!entry.accepted || !entry.officialDomain) continue;
+    const key = entry.officialDomain.toLowerCase();
+    const existing = byDomain.get(key);
+    if (!existing) {
+      byDomain.set(key, entry);
+      continue;
+    }
+
+    const existingConcrete = isConcreteVacancyDiscoveryResult(existing);
+    const entryConcrete = isConcreteVacancyDiscoveryResult(entry);
+    if (entryConcrete && !existingConcrete) {
+      byDomain.set(key, entry);
+      continue;
+    }
+
+    if (entryConcrete && existingConcrete && entry.vacancyTitle && !existing.vacancyTitle) {
+      byDomain.set(key, entry);
+    }
+  }
+
+  return [...byDomain.values()];
+}
+
+function toTavilyResult(
+  enriched: EnrichedDiscoveryResult,
+  desiredRoles: string[],
+  locations: string[],
+  excludeRecruitmentAgencies: boolean,
+  planLocations: string[],
+): TavilyDiscoveryResult | null {
   if (!enriched.accepted || !enriched.extractedCompanyName || !enriched.officialDomain) return null;
   if (isGenericCompanyLabel(enriched.extractedCompanyName)) return null;
+
+  const employerGate = evaluateDiscoveryEmployerForSave({
+    name: enriched.extractedCompanyName,
+    domain: enriched.officialDomain,
+    url: enriched.url,
+    resultType: enriched.resultType,
+    excludeRecruitmentAgencies,
+    plan: {
+      sectors: [],
+      desired_roles: desiredRoles,
+      reasoning: "",
+    },
+  });
+  if (!employerGate.acceptable) {
+    enriched.accepted = false;
+    enriched.rejectionReason = employerGate.reason === "recruitment_agency_excluded"
+      ? "competitor"
+      : employerGate.reason === "directory"
+        ? "directory"
+        : "not_a_company";
+    return null;
+  }
+
   const website = enriched.officialDomain
     ? `https://${enriched.officialDomain}`
     : enriched.url;
+  const concreteVacancyUrl = enriched.vacancyUrl && hasConcreteJobUrl(enriched.vacancyUrl)
+    ? enriched.vacancyUrl
+    : enriched.resultType === "individual_vacancy" && hasConcreteJobUrl(enriched.url)
+      ? enriched.url
+      : null;
 
   return {
     title: enriched.extractedCompanyName,
     url: website,
     description: enriched.description,
+    discoveryVacancyUrl: concreteVacancyUrl,
+    discoveryVacancyTitle: enriched.vacancyTitle,
+    discoveryVacancySource: enriched.vacancySource,
+    discoveryLocation: extractLocationFromQuery(enriched.query, planLocations.length ? planLocations : locations),
+    discoveryResultType: enriched.resultType,
+    discoveryDesiredRoleMatch: matchesDesiredRoleTitle(enriched.vacancyTitle, desiredRoles),
   };
 }
 
@@ -497,19 +589,23 @@ export async function runFastTavilySearch(
   }
 
   const deduped = dedupeEnrichedDiscoveryResults(allEnriched);
-  const seenCompanies = new Set<string>();
+  const planLocations = options.searchPlan?.locations ?? criteria.locations ?? [];
+  const searchLocations = planLocations.length
+    ? planLocations
+    : criteria.city
+      ? [criteria.city]
+      : [];
+  const domainBest = pickBestEnrichedPerDomain(deduped);
   const results: TavilyDiscoveryResult[] = [];
 
-  for (const enriched of deduped) {
-    if (!enriched.accepted) continue;
-    const key = (enriched.officialDomain ?? enriched.extractedCompanyName ?? "").toLowerCase();
-    if (key && seenCompanies.has(key)) {
-      enriched.rejectionReason = "duplicate";
-      enriched.accepted = false;
-      continue;
-    }
-    if (key) seenCompanies.add(key);
-    const tavily = toTavilyResult(enriched);
+  for (const enriched of domainBest) {
+    const tavily = toTavilyResult(
+      enriched,
+      desiredRoles,
+      searchLocations,
+      config.excludeRecruitmentAgencies,
+      planLocations,
+    );
     if (tavily) results.push(tavily);
     if (results.length >= globalMax) break;
   }

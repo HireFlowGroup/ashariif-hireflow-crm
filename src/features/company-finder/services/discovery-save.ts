@@ -23,6 +23,16 @@ export function buildDiscoveryCreateInput(
   const sourceUrl = sanitizeDiscoveryUrl(candidate.sourceUrl);
   const status = metadata?.saveStatus === "review" ? "review" : "prospect";
 
+  const vacancyTitles = candidate.vacancyTitles ?? [];
+  const hiringSignals = vacancyTitles.length
+    ? vacancyTitles.map((title) => ({
+        type: "active_vacancy",
+        description: title,
+        source: sourceOverride ?? candidate.source ?? "discovery",
+        confidence: 0.75,
+      }))
+    : undefined;
+
   return {
     name: candidate.name,
     website,
@@ -40,6 +50,10 @@ export function buildDiscoveryCreateInput(
     discoveryProvider: metadata?.discoveryProvider ?? sourceOverride ?? candidate.source ?? "tavily",
     status,
     notes: discoveryUrlFallbackNote(candidate.website ?? candidate.sourceUrl, candidate.description),
+    vacancyPageUrl: sanitizeDiscoveryUrl(candidate.vacancyPageUrl),
+    careersUrl: sanitizeDiscoveryUrl(candidate.careersUrl),
+    vacancyCount: vacancyTitles.length,
+    hiringSignals,
   };
 }
 

@@ -66,6 +66,10 @@ import {
 } from "@/features/ai-recruiter/services/run-session.helpers";
 import type { CompanySearchJob } from "@/features/company-finder/domain";
 import {
+  enrichEmployeeRangeBeforeQualification,
+  employeeRangeEnrichmentRequired,
+} from "@/features/ai-recruiter/services/employee-range-enrichment.service";
+import {
   parseAiRecruiterSearchPlan,
   searchPlanToCompanyFinderCriteria,
 } from "@/features/ai-recruiter/services/search-plan-parser.service";
@@ -772,8 +776,25 @@ export class AiRecruiterOrchestrator {
           excludeRecruitmentAgencies: recruiterConfig.excludeRecruitmentAgencies,
         });
 
+        let companyForQualification = company;
+        if (employeeRangeEnrichmentRequired(plan)) {
+          const employeeEnrichment = await enrichEmployeeRangeBeforeQualification({
+            company,
+            plan,
+            criteria: searchPlanToCompanyFinderCriteria(plan, run.prompt),
+          });
+          companyForQualification = employeeEnrichment.company;
+          if (employeeEnrichment.enriched) {
+            await this.companiesService.updateCompany(context, toCompanyId(entry.companyId), {
+              employeeCountMin: employeeEnrichment.employeeCountMin,
+              employeeCountMax: employeeEnrichment.employeeCountMax,
+              employeeCountLabel: employeeEnrichment.employeeCountLabel,
+            });
+          }
+        }
+
         const pipelineDecision = evaluateProspectPipeline({
-          company,
+          company: companyForQualification,
           plan,
           hiring,
           analysis,

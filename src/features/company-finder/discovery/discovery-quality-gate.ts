@@ -43,6 +43,13 @@ export type TavilyDiscoveryResult = {
   title: string;
   url: string;
   description?: string | null;
+  /** Concrete vacancy detail page discovered during search (if any). */
+  discoveryVacancyUrl?: string | null;
+  discoveryVacancyTitle?: string | null;
+  discoveryVacancySource?: string | null;
+  discoveryLocation?: string | null;
+  discoveryResultType?: string | null;
+  discoveryDesiredRoleMatch?: boolean;
 };
 
 export type DiscoveryQualityGateResult = {
@@ -143,22 +150,35 @@ function toCandidate(
   if (!name || name.length < 2) return null;
 
   const domain = extractDomain(result.url);
+  const homepageUrl = result.url.startsWith("http") ? result.url : null;
+  const locations = criteria.locations?.length
+    ? criteria.locations
+    : criteria.city
+      ? [criteria.city]
+      : [];
+  const discoveredCity = result.discoveryLocation
+    ?? (locations.length === 1 ? locations[0] : null)
+    ?? criteria.city
+    ?? null;
 
   return createEmptyCandidate({
     externalId: `${provider}:${domain ?? normalizeCompanyName(name)}`,
     name,
     normalizedName: normalizeCompanyName(name),
-    website: result.url.startsWith("http") ? result.url : null,
+    website: homepageUrl,
     domain,
-    city: criteria.city ?? null,
+    city: discoveredCity,
     region: criteria.region ?? null,
     province: criteria.region ?? null,
     sector: criteria.sector ?? null,
     source: provider,
-    sourceUrl: result.url,
+    sourceUrl: homepageUrl,
     description: result.description ?? null,
     confidence: 0.65,
-    vacancyCount: 0,
+    vacancyCount: result.discoveryVacancyTitle ? 1 : 0,
+    vacancyPageUrl: result.discoveryVacancyUrl ?? null,
+    careersUrl: result.discoveryResultType === "company_careers_page" ? homepageUrl : null,
+    vacancyTitles: result.discoveryVacancyTitle ? [result.discoveryVacancyTitle] : [],
   });
 }
 

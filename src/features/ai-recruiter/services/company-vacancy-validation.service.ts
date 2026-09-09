@@ -13,10 +13,12 @@ import {
   vacancyTitleMatchesDesiredRoles,
 } from "@/features/ai-recruiter/services/desired-role-matching.service";
 import {
+  buildDiscoveryVacancyEvidenceFromCompany,
   dedupeVacancyEvidence,
   parsedVacanciesToEvidence,
   strictVacancyEvidence,
 } from "@/features/ai-recruiter/services/vacancy-evidence.service";
+import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 import type { VacancyAuditStatus } from "@/features/ai-recruiter/services/vacancy-audit-status.service";
 import { fetchHomepageHtml } from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
@@ -53,10 +55,11 @@ function companyWebsite(company: Company): string | null {
   return website.startsWith("http") ? website : `https://${website}`;
 }
 
-export function assessParsedVacancies(input: {
+export function assessVacancyEvidence(input: {
   company: Company;
   plan: AiRecruiterSearchPlan;
   parsedVacancies: ParsedCareerVacancy[];
+  preservedDiscoveryEvidence?: VacancyEvidence[];
   evidenceSource: string;
 }): VacancyValidationResult {
   const { company, plan, parsedVacancies, evidenceSource } = input;
@@ -74,9 +77,9 @@ export function assessParsedVacancies(input: {
 
   const activeParsed = parsedVacancies.filter((vacancy) => vacancy.isActive);
   const parsedVacancyCount = activeParsed.length;
-  const evidence = dedupeVacancyEvidence(
-    parsedVacanciesToEvidence(activeParsed, company, plan, "careers_page_crawl"),
-  ).filter(strictVacancyEvidence);
+  const crawlEvidence = parsedVacanciesToEvidence(activeParsed, company, plan, "careers_page_crawl");
+  const discoveryEvidence = input.preservedDiscoveryEvidence ?? [];
+  const evidence = dedupeVacancyEvidence([...discoveryEvidence, ...crawlEvidence]).filter(strictVacancyEvidence);
 
   if (evidence.length === 0) {
     return {
@@ -142,7 +145,7 @@ export async function validateCompanyVacancies(input: {
   const timeoutMs = input.timeoutMs ?? getLeadIntelligenceConfig().crawlerTimeoutMs;
 
   if (!plan.vacancy_required) {
-    return assessParsedVacancies({
+    return assessVacancyEvidence({
       company,
       plan,
       parsedVacancies: [],
@@ -150,8 +153,10 @@ export async function validateCompanyVacancies(input: {
     });
   }
 
+  const preservedDiscoveryEvidence = buildDiscoveryVacancyEvidenceFromCompany(company, plan);
   const website = companyWebsite(company);
-  if (!website) {
+
+  if (!website && preservedDiscoveryEvidence.length === 0) {
     return {
       status: "no_active_vacancy",
       vacancies: [],
@@ -163,12 +168,17 @@ export async function validateCompanyVacancies(input: {
   }
 
   const domain = companyDomain(company);
-  const homepageHtml = await fetchHtml(website, timeoutMs);
+  const homepageHtml = website ? await fetchHtml(website, timeoutMs) : null;
   const careersCandidates = new Set<string>();
 
   if (company.careersUrl) careersCandidates.add(company.careersUrl);
-  if (company.vacancyPageUrl) careersCandidates.add(company.vacancyPageUrl);
-  if (homepageHtml) {
+  if (company.vacancyPageUrl && !hasConcreteJobUrl(company.vacancyPageUrl)) {
+    careersCandidates.add(company.vacancyPageUrl);
+  }
+  if (company.vacancyPageUrl && hasConcreteJobUrl(company.vacancyPageUrl)) {
+    careersCandidates.add(company.vacancyPageUrl);
+  }
+  if (homepageHtml && website) {
     for (const url of discoverCareersPageUrls(homepageHtml, website)) {
       careersCandidates.add(url);
     }
@@ -187,10 +197,11 @@ export async function validateCompanyVacancies(input: {
     all.findIndex((entry) => entry.title.toLowerCase() === vacancy.title.toLowerCase() && entry.url === vacancy.url) === index,
   );
 
-  const result = assessParsedVacancies({
+  const result = assessVacancyEvidence({
     company,
     plan,
     parsedVacancies: uniqueParsed,
+    preservedDiscoveryEvidence,
     evidenceSource: "careers_page_crawl",
   });
 
@@ -198,6 +209,16 @@ export async function validateCompanyVacancies(input: {
     ...result,
     careersUrlsChecked,
   };
+}
+
+/** @deprecated Use assessVacancyEvidence */
+export function assessParsedVacancies(input: {
+  company: Company;
+  plan: AiRecruiterSearchPlan;
+  parsedVacancies: ParsedCareerVacancy[];
+  evidenceSource: string;
+}): VacancyValidationResult {
+  return assessVacancyEvidence(input);
 }
 
 export function primaryMatchedRole(vacancies: VacancyEvidence[], plan: AiRecruiterSearchPlan): string | null {

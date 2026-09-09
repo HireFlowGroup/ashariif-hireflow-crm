@@ -10,6 +10,8 @@ export type UsefulRecallMetrics = {
   concreteVacancyPages: number;
   desiredRoleVacancyMatches: number;
   acceptedEmployerCompanies: number;
+  /** Accepted employers with concrete vacancy URL or desired-role match — pre-validation gate. */
+  usableEmployerProspects: number;
   technicalSuccess: boolean;
   usefulRecall: boolean;
 };
@@ -93,10 +95,20 @@ export function evaluateUsefulRecall(
     employerHosted.map((entry) => entry.officialDomain?.toLowerCase()).filter(Boolean),
   ).size;
 
+  const usableEmployerDomains = new Set<string>();
+  for (const entry of enriched) {
+    if (!entry.accepted || !entry.officialDomain) continue;
+    const concrete = isConcreteVacancyDiscoveryResult(entry);
+    const roleMatch = concrete && matchesDesiredRole(entry.vacancyTitle ?? entry.title, desiredRoles);
+    if (roleMatch) {
+      usableEmployerDomains.add(entry.officialDomain.toLowerCase());
+    }
+  }
+  const usableEmployerProspects = usableEmployerDomains.size;
+
   const rawResults = enriched.length;
   const technicalSuccess = rawResults > 0;
-  const usefulRecall = employerHosted.length > 0
-    && (concreteVacancyPages > 0 || desiredRoleVacancyMatches > 0 || acceptedEmployerCompanies > 0);
+  const usefulRecall = usableEmployerProspects > 0;
 
   return {
     rawResults,
@@ -106,16 +118,20 @@ export function evaluateUsefulRecall(
     concreteVacancyPages,
     desiredRoleVacancyMatches,
     acceptedEmployerCompanies,
+    usableEmployerProspects,
     technicalSuccess,
     usefulRecall,
   };
 }
 
 /**
- * SerpAPI fallback thresholds (motivated):
- * - technical failure (0 Tavily hits) → alternate provider may index different pages
- * - low recall: Tavily returned hits but zero employer-hosted vacancy/careers signals
- * - role miss: ≥3 raw hits but zero desired-role vacancy titles (query targets a specific role)
+ * SerpAPI fallback uses pre-validation usable recall metrics:
+ * - concreteVacancyPages: employer-hosted URLs passing hasConcreteJobUrl
+ * - desiredRoleVacancyMatches: concrete vacancies matching desired roles
+ * - usableEmployerProspects: unique accepted domains with concrete vacancy OR role match
+ * - acceptedEmployerCompanies: unique accepted employer-hosted domains (broader)
+ *
+ * Fallback triggers when Tavily is technically OK but produces insufficient usable evidence.
  */
 export function shouldTriggerSerpApiFallback(
   metrics: UsefulRecallMetrics,
@@ -143,17 +159,31 @@ export function shouldTriggerSerpApiFallback(
     };
   }
 
-  if (input.vacancyFocusedQuery && metrics.employerHostedResults === 0) {
-    return {
-      trigger: true,
-      reason: `Tavily technisch succesvol (${metrics.rawResults} hits) maar 0 employer-hosted vacancy/careers signalen`,
-    };
-  }
+  if (input.vacancyFocusedQuery && metrics.usableEmployerProspects === 0) {
+    if (metrics.employerHostedResults === 0) {
+      return {
+        trigger: true,
+        reason: `Tavily technisch succesvol (${metrics.rawResults} hits) maar 0 employer-hosted vacancy/careers signalen`,
+      };
+    }
 
-  if (input.vacancyFocusedQuery && metrics.rawResults >= 3 && metrics.desiredRoleVacancyMatches === 0) {
+    if (metrics.concreteVacancyPages === 0) {
+      return {
+        trigger: true,
+        reason: `Tavily oppervlakkige recall (${metrics.rawResults} raw, ${metrics.employerHostedResults} employer-hosted) maar 0 concrete vacaturepagina's`,
+      };
+    }
+
+    if (metrics.rawResults >= 3 && metrics.desiredRoleVacancyMatches === 0) {
+      return {
+        trigger: true,
+        reason: `Tavily recall mist desired-role matches (${metrics.rawResults} raw, ${metrics.concreteVacancyPages} concrete, 0 rol-match)`,
+      };
+    }
+
     return {
       trigger: true,
-      reason: `Tavily recall mist desired-role matches (${metrics.rawResults} raw, 0 rol-match)`,
+      reason: `Tavily produceert geen bruikbare employer prospects (${metrics.usableEmployerProspects} usable van ${metrics.acceptedEmployerCompanies} accepted)`,
     };
   }
 
