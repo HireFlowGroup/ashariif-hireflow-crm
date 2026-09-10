@@ -338,7 +338,7 @@ describe("phase 2 — SerpAPI usable recall fallback", () => {
       vacancyFocusedQuery: true,
     });
     expect(decision.trigger).toBe(true);
-    expect(decision.reason).toContain("0 concrete vacaturepagina");
+    expect(decision.reason).toContain("concrete");
   });
 });
 

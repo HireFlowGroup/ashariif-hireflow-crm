@@ -1,3 +1,5 @@
+import type { UsableRecallDiagnostics } from "@/features/company-finder/discovery/discovery-usable-recall-diagnostics.types";
+
 /** Discovery result classification and funnel types. */
 
 export const discoveryResultTypeSchema = [
@@ -54,6 +56,9 @@ export type DiscoveryResultLogEntry = {
   excludedCompetitor: boolean;
   accepted: boolean;
   rejectionReason: DiscoveryRejectionReasonCode | null;
+  discoveryLocation?: string | null;
+  discoveryRole?: string | null;
+  sourceProvider?: string | null;
 };
 
 export type DiscoveryFunnelMetrics = {
@@ -86,6 +91,7 @@ export type DiscoveryFunnelMetrics = {
   serpApiFallbackTriggered?: boolean;
   serpApiFallbackReason?: string | null;
   queriesGenerated?: string[];
+  usableRecallDiagnostics?: UsableRecallDiagnostics;
 };
 
 export type EnrichedDiscoveryResult = {
@@ -107,4 +113,7 @@ export type EnrichedDiscoveryResult = {
   excludedCompetitor: boolean;
   accepted: boolean;
   rejectionReason: DiscoveryRejectionReasonCode | null;
+  discoveryLocation?: string | null;
+  discoveryRole?: string | null;
+  sourceProvider?: string | null;
 };

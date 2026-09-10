@@ -2,6 +2,7 @@ import type {
   DiscoveryFunnelMetrics,
   DiscoveryResultLogEntry,
 } from "@/features/company-finder/discovery/discovery-result.types";
+import type { UsableRecallDiagnostics } from "@/features/company-finder/discovery/discovery-usable-recall-diagnostics.types";
 import type { DiscoveryQueryDiagnostic } from "@/features/company-finder/services/fast-discovery.service";
 
 export type StoredDiscoveryQueryRun = {
@@ -21,6 +22,7 @@ export type StoredDiscoveryQueryRun = {
   employerHostedResults?: number;
   concreteVacancyResults?: number;
   desiredRoleVacancyResults?: number;
+  usableRecallDiagnostics?: UsableRecallDiagnostics;
 };
 
 const MAX_ENTRIES = 50;

@@ -141,7 +141,7 @@ describe("discovery reliability phase 1", () => {
     expect(metrics.technicalSuccess).toBe(true);
     expect(metrics.usefulRecall).toBe(false);
     expect(decision.trigger).toBe(true);
-    expect(decision.reason).toContain("0 employer-hosted");
+    expect(decision.reason).toContain("concrete");
   });
 
   it("triggers SerpAPI when Tavily has raw hits but no desired-role vacancy matches", () => {

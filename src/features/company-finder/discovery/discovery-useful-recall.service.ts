@@ -3,6 +3,11 @@ import type { EnrichedDiscoveryResult } from "@/features/company-finder/discover
 import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 
 export type UsefulRecallMetrics = {
+  /** Raw hits returned by the search provider API. */
+  rawHitCount: number;
+  /** Enriched/classified result rows after processing. */
+  processedResults: number;
+  /** @deprecated Use rawHitCount */
   rawResults: number;
   uniqueUrls: number;
   uniqueEmployerDomains: number;
@@ -10,7 +15,7 @@ export type UsefulRecallMetrics = {
   concreteVacancyPages: number;
   desiredRoleVacancyMatches: number;
   acceptedEmployerCompanies: number;
-  /** Accepted employers with concrete vacancy URL or desired-role match — pre-validation gate. */
+  /** Unique accepted domains with concrete vacancy + desired-role match. */
   usableEmployerProspects: number;
   technicalSuccess: boolean;
   usefulRecall: boolean;
@@ -31,7 +36,7 @@ function normalize(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function matchesDesiredRole(title: string | null | undefined, desiredRoles: string[]): boolean {
+export function matchesDesiredRoleTitle(title: string | null | undefined, desiredRoles: string[]): boolean {
   if (!title?.trim() || desiredRoles.length === 0) return false;
   const normalizedTitle = normalize(title);
   const normalizedDesired = desiredRoles.map(normalize);
@@ -80,6 +85,7 @@ export function isConcreteVacancyDiscoveryResult(result: EnrichedDiscoveryResult
 export function evaluateUsefulRecall(
   enriched: EnrichedDiscoveryResult[],
   desiredRoles: string[],
+  rawHitCount = enriched.length,
 ): UsefulRecallMetrics {
   const uniqueUrls = new Set(enriched.map((entry) => canonicalUrl(entry.url)).filter(Boolean)).size;
   const employerHosted = enriched.filter(isEmployerHostedDiscoveryResult);
@@ -89,7 +95,7 @@ export function evaluateUsefulRecall(
   const concreteVacancyPages = enriched.filter(isConcreteVacancyDiscoveryResult).length;
   const desiredRoleVacancyMatches = enriched.filter(
     (entry) => isConcreteVacancyDiscoveryResult(entry)
-      && matchesDesiredRole(entry.vacancyTitle ?? entry.title, desiredRoles),
+      && matchesDesiredRoleTitle(entry.vacancyTitle ?? entry.title, desiredRoles),
   ).length;
   const acceptedEmployerCompanies = new Set(
     employerHosted.map((entry) => entry.officialDomain?.toLowerCase()).filter(Boolean),
@@ -99,19 +105,21 @@ export function evaluateUsefulRecall(
   for (const entry of enriched) {
     if (!entry.accepted || !entry.officialDomain) continue;
     const concrete = isConcreteVacancyDiscoveryResult(entry);
-    const roleMatch = concrete && matchesDesiredRole(entry.vacancyTitle ?? entry.title, desiredRoles);
+    const roleMatch = concrete && matchesDesiredRoleTitle(entry.vacancyTitle ?? entry.title, desiredRoles);
     if (roleMatch) {
       usableEmployerDomains.add(entry.officialDomain.toLowerCase());
     }
   }
   const usableEmployerProspects = usableEmployerDomains.size;
 
-  const rawResults = enriched.length;
-  const technicalSuccess = rawResults > 0;
+  const processedResults = enriched.length;
+  const technicalSuccess = rawHitCount > 0;
   const usefulRecall = usableEmployerProspects > 0;
 
   return {
-    rawResults,
+    rawHitCount,
+    processedResults,
+    rawResults: rawHitCount,
     uniqueUrls,
     uniqueEmployerDomains,
     employerHostedResults: employerHosted.length,
@@ -139,53 +147,56 @@ export function shouldTriggerSerpApiFallback(
     serpApiAvailable: boolean;
     tavilyFailed: boolean;
     vacancyFocusedQuery: boolean;
+    /** When true, usable recall is already sufficient — skip fallback. */
+    skipWhenUsable?: boolean;
   },
 ): SerpApiFallbackDecision {
   if (!input.serpApiAvailable) {
     return { trigger: false, reason: null };
   }
 
+  if (input.skipWhenUsable && metrics.usefulRecall) {
+    return { trigger: false, reason: null };
+  }
+
   if (input.tavilyFailed) {
     return {
       trigger: true,
-      reason: "Tavily technisch mislukt of 0 resultaten — SerpAPI fallback",
+      reason: "Tavily technisch mislukt of 0 API-resultaten — SerpAPI fallback",
     };
   }
 
-  if (!metrics.technicalSuccess) {
+  if (!input.vacancyFocusedQuery) {
+    return { trigger: false, reason: null };
+  }
+
+  if (metrics.rawHitCount === 0) {
     return {
       trigger: true,
-      reason: "Tavily leverde geen verwerkbare resultaten — SerpAPI fallback",
+      reason: "Tavily leverde 0 raw hits — SerpAPI fallback",
     };
   }
 
-  if (input.vacancyFocusedQuery && metrics.usableEmployerProspects === 0) {
-    if (metrics.employerHostedResults === 0) {
-      return {
-        trigger: true,
-        reason: `Tavily technisch succesvol (${metrics.rawResults} hits) maar 0 employer-hosted vacancy/careers signalen`,
-      };
-    }
+  if (metrics.usableEmployerProspects > 0) {
+    return { trigger: false, reason: null };
+  }
 
-    if (metrics.concreteVacancyPages === 0) {
-      return {
-        trigger: true,
-        reason: `Tavily oppervlakkige recall (${metrics.rawResults} raw, ${metrics.employerHostedResults} employer-hosted) maar 0 concrete vacaturepagina's`,
-      };
-    }
-
-    if (metrics.rawResults >= 3 && metrics.desiredRoleVacancyMatches === 0) {
-      return {
-        trigger: true,
-        reason: `Tavily recall mist desired-role matches (${metrics.rawResults} raw, ${metrics.concreteVacancyPages} concrete, 0 rol-match)`,
-      };
-    }
-
+  if (metrics.concreteVacancyPages === 0) {
     return {
       trigger: true,
-      reason: `Tavily produceert geen bruikbare employer prospects (${metrics.usableEmployerProspects} usable van ${metrics.acceptedEmployerCompanies} accepted)`,
+      reason: `Tavily ${metrics.rawHitCount} raw hits maar 0 concrete employer-hosted vacature-URL's`,
     };
   }
 
-  return { trigger: false, reason: null };
+  if (metrics.desiredRoleVacancyMatches === 0) {
+    return {
+      trigger: true,
+      reason: `Tavily ${metrics.rawHitCount} raw, ${metrics.concreteVacancyPages} concrete, 0 desired-role matches`,
+    };
+  }
+
+  return {
+    trigger: true,
+    reason: `Tavily ${metrics.rawHitCount} raw maar 0 usable downstream prospects (${metrics.acceptedEmployerCompanies} employers)`,
+  };
 }

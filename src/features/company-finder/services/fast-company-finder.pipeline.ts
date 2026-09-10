@@ -165,6 +165,7 @@ export async function* runFastCompanyFinderPipeline(input: {
       employerHostedResults: tavily.funnel.employerHostedResults,
       concreteVacancyResults: tavily.funnel.concreteVacancyResults,
       desiredRoleVacancyResults: tavily.funnel.desiredRoleVacancyResults,
+      usableRecallDiagnostics: tavily.usableRecallDiagnostics,
     });
 
     timer.start("discovery_quality_gate", "quality");

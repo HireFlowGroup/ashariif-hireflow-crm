@@ -22,10 +22,19 @@ import type {
 import { dedupeEnrichedDiscoveryResults } from "@/features/company-finder/discovery/discovery-result-dedupe.service";
 import { executeQualityAwareDiscoveryQuery } from "@/features/company-finder/discovery/discovery-provider-runner.service";
 import {
+  buildUsableRecallDiagnostics,
+  executeSupplementalSerpApiRetrieval,
+  identifyRecallCoverageGaps,
+  resolveCanonicalRoles,
+} from "@/features/company-finder/discovery/discovery-run-fallback.service";
+import type { UsableRecallDiagnostics } from "@/features/company-finder/discovery/discovery-usable-recall-diagnostics.types";
+import {
   evaluateUsefulRecall,
   isConcreteVacancyDiscoveryResult,
   isEmployerHostedDiscoveryResult,
+  matchesDesiredRoleTitle,
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
+import { getSerpApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 import {
   buildVacancyDrivenDiscoveryQueries,
   selectDiscoveryQueries,
@@ -72,6 +81,7 @@ export type MultiQueryDiscoveryResult = {
   serpApiFallbackTriggered: boolean;
   serpApiFallbackReason: string | null;
   tavilyUsefulRecall: boolean;
+  usableRecallDiagnostics: UsableRecallDiagnostics;
 };
 
 function canonicalUrl(url: string): string {
@@ -111,6 +121,8 @@ function processRawResult(input: {
   query: string;
   providerId: string;
   excludeRecruitmentAgencies: boolean;
+  discoveryLocation?: string | null;
+  discoveryRole?: string | null;
 }): EnrichedDiscoveryResult {
   const classified = classifyDiscoveryResult({
     title: input.title,
@@ -212,13 +224,16 @@ function processRawResult(input: {
     excludedCompetitor: classified.excludedCompetitor,
     accepted,
     rejectionReason,
+    discoveryLocation: input.discoveryLocation ?? null,
+    discoveryRole: input.discoveryRole ?? null,
+    sourceProvider: input.providerId,
   };
 }
 
 function processHits(
   hits: SearchResultItem[],
   providerId: string,
-  query: string,
+  variant: DiscoveryQueryVariant,
   excludeRecruitmentAgencies: boolean,
 ): EnrichedDiscoveryResult[] {
   return hits.map((result) =>
@@ -226,9 +241,11 @@ function processHits(
       title: result.title,
       url: result.url,
       description: result.description ?? null,
-      query,
+      query: variant.query,
       providerId,
       excludeRecruitmentAgencies,
+      discoveryLocation: variant.location,
+      discoveryRole: variant.role,
     }),
   );
 }
@@ -239,21 +256,6 @@ function extractLocationFromQuery(query: string, locations: string[]): string | 
     if (normalizedQuery.includes(location.toLowerCase())) return location;
   }
   return null;
-}
-
-function matchesDesiredRoleTitle(title: string | null | undefined, desiredRoles: string[]): boolean {
-  if (!title?.trim() || desiredRoles.length === 0) return false;
-  const normalizedTitle = title.toLowerCase();
-  for (const role of desiredRoles) {
-    const normalizedRole = role.toLowerCase();
-    if (normalizedRole.includes("recruit") && /\brecruit/.test(normalizedTitle)) return true;
-    if (normalizedRole.includes("account") && /\baccount\s?manager\b/.test(normalizedTitle)) return true;
-    if ((normalizedRole.includes("customer") || normalizedRole.includes("csm"))
-      && /\bcustomer success\b/.test(normalizedTitle)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function pickBestEnrichedPerDomain(enriched: EnrichedDiscoveryResult[]): EnrichedDiscoveryResult[] {
@@ -346,6 +348,7 @@ function buildFunnel(
     serpApiFallbackReason: string | null;
     tavilyUsefulRecall: boolean;
     queriesGenerated: string[];
+    usableRecallDiagnostics?: UsableRecallDiagnostics;
   },
 ): DiscoveryFunnelMetrics {
   const uniqueUrls = new Set(logs.map((l) => canonicalUrl(l.resultUrl))).size;
@@ -385,6 +388,7 @@ function buildFunnel(
     serpApiFallbackTriggered: providerSummary.serpApiFallbackTriggered,
     serpApiFallbackReason: providerSummary.serpApiFallbackReason,
     queriesGenerated: providerSummary.queriesGenerated,
+    usableRecallDiagnostics: providerSummary.usableRecallDiagnostics,
   };
 }
 
@@ -417,6 +421,9 @@ export async function runFastTavilySearch(
   let serpApiFallbackTriggered = false;
   let serpApiFallbackReason: string | null = null;
   let tavilyUsefulRecall = false;
+  let tavilyRawHits = 0;
+  let serpApiRawHits = 0;
+  let serpApiSupplementalQueries = 0;
   const classifiedCounts: MultiQueryDiscoveryResult["classifiedCounts"] = {
     official_company_site: 0,
     company_profile: 0,
@@ -457,20 +464,25 @@ export async function runFastTavilySearch(
         timeoutMs: options.timeoutMs,
         desiredRoles,
         processHits: (hits, hitProviderId) =>
-          processHits(hits, hitProviderId, variant.query, config.excludeRecruitmentAgencies),
+          processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies),
       });
 
       providerId = execution.providerId;
       queryProvider = execution.providerId;
       providersUsed = execution.providersUsed;
-      rawResultCount = execution.rawResults.length;
+      rawResultCount = execution.rawHitCount;
+      tavilyRawHits += execution.tavilyRawHitCount;
+      serpApiRawHits += execution.serpApiRawHitCount;
       queryTavilyUsefulRecall = execution.tavilyUsefulRecall;
       querySerpFallback = execution.serpApiFallbackTriggered;
       querySerpFallbackReason = execution.serpApiFallbackReason;
 
-      if (execution.serpApiFallbackTriggered) {
+      if (execution.serpApiFallbackTriggered || execution.serpApiFallbackAttempted) {
         serpApiFallbackTriggered = true;
         serpApiFallbackReason = execution.serpApiFallbackReason;
+      }
+      if (execution.serpApiFallbackError && !error) {
+        error = execution.serpApiFallbackError;
       }
       if (execution.tavilyUsefulRecall) {
         tavilyUsefulRecall = true;
@@ -588,13 +600,75 @@ export async function runFastTavilySearch(
     }
   }
 
-  const deduped = dedupeEnrichedDiscoveryResults(allEnriched);
   const planLocations = options.searchPlan?.locations ?? criteria.locations ?? [];
   const searchLocations = planLocations.length
     ? planLocations
     : criteria.city
       ? [criteria.city]
       : [];
+  const canonicalRoles = resolveCanonicalRoles(desiredRoles);
+  const sector = options.searchPlan?.sectors?.[0] ?? criteria.sector ?? "";
+
+  const coverageGaps = identifyRecallCoverageGaps({
+    enriched: allEnriched,
+    locations: searchLocations,
+    canonicalRoles,
+    desiredRoles,
+  });
+
+  if (coverageGaps.length > 0 && getSerpApiKey()) {
+    const supplemental = await executeSupplementalSerpApiRetrieval({
+      gaps: coverageGaps,
+      sector,
+      desiredRoles,
+      maxResults: perQueryMax,
+      timeoutMs: options.timeoutMs,
+      maxSupplementalQueries: Math.min(coverageGaps.length, 6),
+      processHits: (hits, hitProviderId, variant) =>
+        processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies),
+    });
+
+    if (supplemental.queriesExecuted > 0) {
+      serpApiFallbackTriggered = true;
+      serpApiSupplementalQueries = supplemental.queriesExecuted;
+      serpApiRawHits += supplemental.rawHits;
+      const supplementalReason = supplemental.reasons.join("; ");
+      serpApiFallbackReason = serpApiFallbackReason
+        ? `${serpApiFallbackReason}; ${supplementalReason}`
+        : supplementalReason;
+
+      for (const enriched of supplemental.enriched) {
+        allEnriched.push(enriched);
+        classifiedCounts[enriched.resultType] += 1;
+        if (enriched.accepted) classifiedCounts.accepted += 1;
+        else classifiedCounts.rejected += 1;
+
+        resultLogs.push({
+          query: enriched.query,
+          provider: "serpapi",
+          resultTitle: enriched.title,
+          resultUrl: enriched.url,
+          resultDomain: enriched.officialDomain ?? "",
+          snippet: (enriched.description ?? "").slice(0, 300),
+          classifiedType: enriched.resultType,
+          classificationConfidence: enriched.classificationConfidence,
+          classificationReason: enriched.classificationReason,
+          extractedCompanyName: enriched.extractedCompanyName,
+          extractedEmployer: enriched.extractedEmployer,
+          officialDomain: enriched.officialDomain,
+          domainConfidence: enriched.domainConfidence,
+          domainSource: enriched.domainSource,
+          vacancyTitle: enriched.vacancyTitle,
+          vacancyUrl: enriched.vacancyUrl,
+          excludedCompetitor: enriched.excludedCompetitor,
+          accepted: enriched.accepted,
+          rejectionReason: enriched.rejectionReason,
+        });
+      }
+    }
+  }
+
+  const deduped = dedupeEnrichedDiscoveryResults(allEnriched);
   const domainBest = pickBestEnrichedPerDomain(deduped);
   const results: TavilyDiscoveryResult[] = [];
 
@@ -610,11 +684,25 @@ export async function runFastTavilySearch(
     if (results.length >= globalMax) break;
   }
 
+  const usableRecallDiagnostics = buildUsableRecallDiagnostics({
+    tavilyEnriched: allEnriched.filter((entry) => entry.sourceProvider === "tavily"),
+    combinedEnriched: deduped,
+    desiredRoles,
+    locations: searchLocations,
+    canonicalRoles,
+    tavilyRawHits,
+    serpApiRawHits,
+    serpApiFallbackTriggered,
+    serpApiFallbackReason,
+    serpApiSupplementalQueries,
+  });
+
   const funnel = buildFunnel(resultLogs, diagnostics, results.length, {
     serpApiFallbackTriggered,
     serpApiFallbackReason,
     tavilyUsefulRecall,
     queriesGenerated,
+    usableRecallDiagnostics,
   });
 
   return {
@@ -630,6 +718,7 @@ export async function runFastTavilySearch(
     serpApiFallbackTriggered,
     serpApiFallbackReason,
     tavilyUsefulRecall,
+    usableRecallDiagnostics,
   };
 }
 

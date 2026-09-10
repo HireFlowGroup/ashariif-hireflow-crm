@@ -16,12 +16,19 @@ export type QualityAwareQueryResult = {
   providerId: string;
   providersUsed: string[];
   rawResults: SearchResultItem[];
+  rawHitCount: number;
+  tavilyRawHitCount: number;
+  serpApiRawHitCount: number;
   enrichedResults: EnrichedDiscoveryResult[];
   tavilyMetrics: UsefulRecallMetrics;
   combinedMetrics: UsefulRecallMetrics;
   serpApiFallbackTriggered: boolean;
+  serpApiFallbackAttempted: boolean;
+  serpApiFallbackSucceeded: boolean;
   serpApiFallbackReason: string | null;
+  serpApiFallbackError: string | null;
   tavilyUsefulRecall: boolean;
+  tavilyFailed: boolean;
 };
 
 const TAVILY_PROVIDER_ID = "tavily";
@@ -38,6 +45,46 @@ export function isVacancyFocusedDiscoveryIntent(intent: DiscoveryQueryVariant["i
   return VACANCY_FOCUSED_INTENTS.has(intent);
 }
 
+export async function executeSerpApiDiscoveryQuery(input: {
+  query: string;
+  maxResults: number;
+  timeoutMs: number;
+  processHits: (hits: SearchResultItem[], providerId: string) => EnrichedDiscoveryResult[];
+}): Promise<{
+  enrichedResults: EnrichedDiscoveryResult[];
+  rawResults: SearchResultItem[];
+  rawHitCount: number;
+  error: string | null;
+}> {
+  if (!getSerpApiKey()) {
+    return { enrichedResults: [], rawResults: [], rawHitCount: 0, error: "SerpAPI niet geconfigureerd" };
+  }
+
+  try {
+    const manager = getProviderManager();
+    const execution = await manager.executeSingleProviderSearch(
+      SERPAPI_PROVIDER_ID,
+      input.query,
+      input.maxResults,
+      input.timeoutMs,
+    );
+    const enrichedResults = input.processHits(execution.results, SERPAPI_PROVIDER_ID);
+    return {
+      enrichedResults,
+      rawResults: execution.results,
+      rawHitCount: execution.results.length,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      enrichedResults: [],
+      rawResults: [],
+      rawHitCount: 0,
+      error: error instanceof Error ? error.message : "SerpAPI query mislukt",
+    };
+  }
+}
+
 export async function executeQualityAwareDiscoveryQuery(input: {
   query: string;
   intent: DiscoveryQueryVariant["intent"];
@@ -52,11 +99,17 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   const manager = getProviderManager();
   const providersUsed: string[] = [];
   let serpApiFallbackTriggered = false;
+  let serpApiFallbackAttempted = false;
+  let serpApiFallbackSucceeded = false;
   let serpApiFallbackReason: string | null = null;
+  let serpApiFallbackError: string | null = null;
   let tavilyHits: SearchResultItem[] = [];
   let tavilyEnriched: EnrichedDiscoveryResult[] = [];
-  let tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles);
+  let tavilyRawHitCount = 0;
+  let serpApiRawHitCount = 0;
+  let tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles, 0);
   let tavilyFailed = false;
+  let tavilyError: string | null = null;
 
   try {
     const tavilyExecution = await manager.executeSingleProviderSearch(
@@ -66,11 +119,14 @@ export async function executeQualityAwareDiscoveryQuery(input: {
       input.timeoutMs,
     );
     tavilyHits = tavilyExecution.results;
+    tavilyRawHitCount = tavilyExecution.results.length;
     providersUsed.push(TAVILY_PROVIDER_ID);
     tavilyEnriched = input.processHits(tavilyHits, TAVILY_PROVIDER_ID);
-    tavilyMetrics = evaluateUsefulRecall(tavilyEnriched, input.desiredRoles);
-  } catch {
+    tavilyMetrics = evaluateUsefulRecall(tavilyEnriched, input.desiredRoles, tavilyRawHitCount);
+  } catch (error) {
     tavilyFailed = true;
+    tavilyError = error instanceof Error ? error.message : "Tavily query mislukt";
+    tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles, 0);
   }
 
   let combinedEnriched = tavilyEnriched;
@@ -84,43 +140,53 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   });
 
   if (fallbackDecision.trigger) {
-    try {
-      const serpExecution = await manager.executeSingleProviderSearch(
-        SERPAPI_PROVIDER_ID,
-        input.query,
-        input.maxResults,
-        input.timeoutMs,
-      );
-      const serpEnriched = input.processHits(serpExecution.results, SERPAPI_PROVIDER_ID);
-      combinedEnriched = mergeEnrichedDiscoveryResults(tavilyEnriched, serpEnriched);
-      combinedHits = [...tavilyHits, ...serpExecution.results];
+    serpApiFallbackTriggered = true;
+    serpApiFallbackAttempted = true;
+    serpApiFallbackReason = fallbackDecision.reason;
+
+    const serpExecution = await executeSerpApiDiscoveryQuery({
+      query: input.query,
+      maxResults: input.maxResults,
+      timeoutMs: input.timeoutMs,
+      processHits: input.processHits,
+    });
+
+    serpApiRawHitCount = serpExecution.rawHitCount;
+    if (serpExecution.error) {
+      serpApiFallbackError = serpExecution.error;
+    } else if (serpExecution.enrichedResults.length > 0 || serpExecution.rawHitCount > 0) {
+      serpApiFallbackSucceeded = true;
+      combinedEnriched = mergeEnrichedDiscoveryResults(tavilyEnriched, serpExecution.enrichedResults);
+      combinedHits = [...tavilyHits, ...serpExecution.rawResults];
       providersUsed.push(SERPAPI_PROVIDER_ID);
-      providerId = serpEnriched.length > 0 && tavilyEnriched.length === 0
-        ? SERPAPI_PROVIDER_ID
-        : `${TAVILY_PROVIDER_ID}+${SERPAPI_PROVIDER_ID}`;
-      serpApiFallbackTriggered = true;
-      serpApiFallbackReason = fallbackDecision.reason;
-    } catch {
-      // Keep Tavily-only results when fallback also fails.
-      if (tavilyFailed) throw new Error(fallbackDecision.reason ?? "Discovery query mislukt");
+      providerId = tavilyEnriched.length === 0 ? SERPAPI_PROVIDER_ID : `${TAVILY_PROVIDER_ID}+${SERPAPI_PROVIDER_ID}`;
+    } else {
+      serpApiFallbackError = "SerpAPI leverde 0 resultaten";
     }
   }
 
-  if (combinedEnriched.length === 0 && tavilyFailed) {
-    throw new Error(fallbackDecision.reason ?? "Discovery query mislukt");
-  }
-
-  const combinedMetrics = evaluateUsefulRecall(combinedEnriched, input.desiredRoles);
+  const combinedMetrics = evaluateUsefulRecall(
+    combinedEnriched,
+    input.desiredRoles,
+    tavilyRawHitCount + serpApiRawHitCount,
+  );
 
   return {
     providerId,
     providersUsed: [...new Set(providersUsed)],
     rawResults: combinedHits,
+    rawHitCount: tavilyRawHitCount + serpApiRawHitCount,
+    tavilyRawHitCount,
+    serpApiRawHitCount,
     enrichedResults: combinedEnriched,
     tavilyMetrics,
     combinedMetrics,
     serpApiFallbackTriggered,
+    serpApiFallbackAttempted,
+    serpApiFallbackSucceeded,
     serpApiFallbackReason,
+    serpApiFallbackError: serpApiFallbackError ?? (tavilyFailed ? tavilyError : null),
     tavilyUsefulRecall: tavilyMetrics.usefulRecall,
+    tavilyFailed,
   };
 }
