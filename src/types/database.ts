@@ -23,6 +23,10 @@ import type {
   CommercialPipelineCardRow,
 } from "@/types/crm";
 import type { AiConversation, AiMessage } from "@/types/ai";
+import type {
+  CandidateDiscoveryProposalRow,
+  CandidateDiscoveryRunRow,
+} from "@/types/candidate-discovery-db";
 import type { AiToolLog, OrganizationProviderConfig, OrganizationProviderHealth, PlatformEvent } from "@/types/platform";
 
 export type Json =
@@ -121,6 +125,27 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<Candidate>;
+        Relationships: [];
+      };
+      candidate_discovery_runs: {
+        Row: CandidateDiscoveryRunRow;
+        Insert: Omit<CandidateDiscoveryRunRow, "id" | "created_at" | "updated_at" | "retention_expires_at"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+          retention_expires_at?: string;
+        };
+        Update: Partial<CandidateDiscoveryRunRow>;
+        Relationships: [];
+      };
+      candidate_discovery_proposals: {
+        Row: CandidateDiscoveryProposalRow;
+        Insert: Omit<CandidateDiscoveryProposalRow, "id" | "created_at" | "updated_at"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<CandidateDiscoveryProposalRow>;
         Relationships: [];
       };
       vacancies: {

@@ -23,3 +23,10 @@ export {
   normalizeLinkedInProfileUrl,
 } from "@/features/candidate-discovery/services/linkedin-profile-url.validator";
 export { parseSerpToCandidateProfile } from "@/features/candidate-discovery/services/serp-to-candidate-profile.parser";
+export type {
+  CandidateDiscoveryProposal,
+  CandidateDiscoveryRun,
+} from "@/features/candidate-discovery/domain/candidate-discovery.persistence.types";
+export type { CandidateDiscoveryRepository } from "@/features/candidate-discovery/repositories/candidate-discovery.repository";
+export { SupabaseCandidateDiscoveryRepository } from "@/features/candidate-discovery/repositories/supabase-candidate-discovery.repository";
+export { createCandidateDiscoveryRepository } from "@/features/candidate-discovery/create-candidate-discovery-repository";
