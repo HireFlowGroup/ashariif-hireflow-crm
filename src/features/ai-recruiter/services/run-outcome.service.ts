@@ -131,5 +131,10 @@ export function resolveRunOutcome(input: {
 }
 
 export function discoveryStepFailed(errorCode: RunFailureCode | null): boolean {
-  return isProviderFailure(errorCode) || errorCode === "database_error" || errorCode === "unknown_error";
+  return (
+    isProviderFailure(errorCode)
+    || errorCode === "database_error"
+    || errorCode === "pipeline_timeout"
+    || errorCode === "unknown_error"
+  );
 }

@@ -40,8 +40,20 @@ describe("classifyProviderError", () => {
     expect(classifyProviderError("Rate limit exceeded", 429)).toBe("provider_rate_limited");
   });
 
+  it("classifies Tavily HTTP 432 usage limit as provider_rate_limited", () => {
+    const message =
+      'Tavily HTTP 432: {"detail":{"error":"This request exceeds your plan\'s set usage limit."}}';
+    expect(classifyProviderError(message)).toBe("provider_rate_limited");
+    expect(classifyProviderError(message, 432)).toBe("provider_rate_limited");
+  });
+
   it("classifies timeout", () => {
     expect(classifyProviderError("Tavily discovery time-out na 10000ms")).toBe("provider_timeout");
+  });
+
+  it("classifies fast-finder global job timeout as pipeline_timeout not provider_timeout", () => {
+    const message = "Zoekjob time-out (45000ms) tijdens fast_save";
+    expect(classifyProviderError(message)).toBe("pipeline_timeout");
   });
 
   it("classifies database errors", () => {
@@ -195,5 +207,26 @@ describe("buildRunFailureUiMessage", () => {
     const ui = buildRunFailureUiMessage(diagnostics, "failed");
     expect(ui?.body).toContain("locatie, branche");
     expect(ui?.retryRecommended).toBe(true);
+  });
+
+  it("does not blame Tavily for pipeline job timeout", () => {
+    const diagnostics = createEmptyRunDiagnostics();
+    diagnostics.errorCode = "pipeline_timeout";
+    diagnostics.errorMessage = "Zoekjob time-out (60000ms) tijdens fast_save";
+    diagnostics.providerName = "tavily";
+
+    const ui = buildRunFailureUiMessage(diagnostics, "failed");
+    expect(ui?.title).toBe("Zoekjob-timeout");
+    expect(ui?.body).toContain("fast_save");
+    expect(ui?.body).not.toContain("reageerde niet op tijd");
+    expect(ui?.providerName).toBeNull();
+  });
+});
+
+describe("discoveryStepFailed", () => {
+  it("treats pipeline_timeout as a failed discovery step", () => {
+    expect(discoveryStepFailed("pipeline_timeout")).toBe(true);
+    expect(discoveryStepFailed("provider_timeout")).toBe(true);
+    expect(discoveryStepFailed("no_valid_companies")).toBe(false);
   });
 });

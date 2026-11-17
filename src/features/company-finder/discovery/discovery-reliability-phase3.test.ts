@@ -286,6 +286,8 @@ describe("discovery reliability phase 3 — run diagnostics", () => {
       serpApiRawHits: 5,
       serpApiFallbackTriggered: true,
       serpApiFallbackReason: "Tavily 100 raw hits maar 0 concrete employer-hosted vacature-URL's",
+      serpApiFallbackSkipped: false,
+      serpApiFallbackSkipReason: null,
       serpApiSupplementalQueries: 2,
     });
 
@@ -296,5 +298,7 @@ describe("discovery reliability phase 3 — run diagnostics", () => {
     expect(diagnostics.SERPAPI_FALLBACK_REASON).toContain("concrete");
     expect(diagnostics.SERPAPI_SUPPLEMENTAL_QUERIES).toBe(2);
     expect(diagnostics.SERPAPI_USABLE).toBeGreaterThan(0);
+    expect(diagnostics.SERPAPI_FALLBACK_SKIPPED).toBe(false);
+    expect(diagnostics.SERPAPI_FALLBACK_SKIP_REASON).toBeNull();
   });
 });

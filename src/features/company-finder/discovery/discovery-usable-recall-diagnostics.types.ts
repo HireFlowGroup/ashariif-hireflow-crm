@@ -11,6 +11,8 @@ export type UsableRecallDiagnostics = {
   SERPAPI_USABLE: number;
   SERPAPI_FALLBACK_TRIGGERED: boolean;
   SERPAPI_FALLBACK_REASON: string | null;
+  SERPAPI_FALLBACK_SKIPPED: boolean;
+  SERPAPI_FALLBACK_SKIP_REASON: string | null;
   SERPAPI_SUPPLEMENTAL_QUERIES: number;
 };
 

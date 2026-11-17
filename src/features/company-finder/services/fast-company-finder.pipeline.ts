@@ -69,7 +69,8 @@ export async function* runFastCompanyFinderPipeline(input: {
 }): AsyncGenerator<LeadIntelligenceRunEvent, CompanySearchJob, undefined> {
   const config = getLeadIntelligenceConfig();
   const timer = new PipelineStepTimer(input.jobId);
-  const deadline = JobDeadline.fromTimeoutMs(config.globalJobTimeoutMs);
+  const deadline = JobDeadline.fromTimeoutMs(config.fastDiscoveryPhaseTimeoutMs);
+  let phaseTimeoutMs = config.fastDiscoveryPhaseTimeoutMs;
   let currentJob = input.currentJob;
   let savedCount = 0;
   let updatedCount = 0;
@@ -249,6 +250,9 @@ export async function* runFastCompanyFinderPipeline(input: {
       progressPercent: 35,
     },
   );
+
+  phaseTimeoutMs = config.fastSavePhaseTimeoutMs;
+  deadline.reset(phaseTimeoutMs);
 
   timer.start("fast_save", "supabase");
   deadline.assert("fast_save");
@@ -463,7 +467,7 @@ export async function* runFastCompanyFinderPipeline(input: {
   } catch (error) {
     const message =
       error instanceof JobTimeoutError
-        ? `Zoekjob time-out (${config.globalJobTimeoutMs}ms) tijdens ${error.phase}`
+        ? `Zoekjob time-out (${phaseTimeoutMs}ms) tijdens ${error.phase}`
         : error instanceof Error
           ? error.message
           : "Fast mode mislukt";

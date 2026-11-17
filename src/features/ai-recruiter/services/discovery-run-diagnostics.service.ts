@@ -61,7 +61,10 @@ export function buildDiscoveryDiagnostics(input: {
   } else if (input.summary.lastErrorMessage) {
     errorMessage = input.summary.lastErrorMessage;
     errorCode = classifyProviderError(errorMessage);
-    retryRecommended = errorCode === "provider_rate_limited" || errorCode === "provider_timeout";
+    retryRecommended =
+      errorCode === "provider_rate_limited"
+      || errorCode === "provider_timeout"
+      || errorCode === "pipeline_timeout";
   } else if (responseCount > 0 && input.validatedCount === 0) {
     errorCode = "no_valid_companies";
     errorMessage =
@@ -72,7 +75,10 @@ export function buildDiscoveryDiagnostics(input: {
   } else if (input.job?.status === "failed" && input.job.errorMessage) {
     errorMessage = input.job.errorMessage;
     errorCode = classifyProviderError(errorMessage);
-    retryRecommended = errorCode === "provider_rate_limited" || errorCode === "provider_timeout";
+    retryRecommended =
+      errorCode === "provider_rate_limited"
+      || errorCode === "provider_timeout"
+      || errorCode === "pipeline_timeout";
   } else if (responseCount === 0 && input.validatedCount === 0) {
     errorCode = "no_results";
     errorMessage = "De zoekopdracht leverde geen bedrijven op. Pas locatie, branche of zoekwoorden aan.";

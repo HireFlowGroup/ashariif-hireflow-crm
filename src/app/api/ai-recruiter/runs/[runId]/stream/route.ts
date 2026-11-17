@@ -7,6 +7,12 @@ import {
 } from "@/lib/ai-recruiter/stream-sse";
 import { aiRecruiterRunIdParamSchema } from "@/lib/validations/ai-recruiter-api";
 
+/**
+ * Full AI Recruiter stream (discovery + enrichment + concepts). Matches Vercel Pro Fluid default (300s).
+ * Fast-finder phase budgets are enforced separately via COMPANY_FINDER_*_PHASE_TIMEOUT_MS.
+ */
+export const maxDuration = 300;
+
 type RouteContext = { params: Promise<{ runId: string }> };
 
 export async function GET(_request: Request, routeContext: RouteContext): Promise<Response> {

@@ -17,14 +17,40 @@ export function buildRequestCriteriaFromPlan(plan: AiRecruiterSearchPlan): Recor
   };
 }
 
+/** Extract HTTP status from provider error messages like `Tavily HTTP 432: ...`. */
+export function parseProviderHttpStatus(message: string): number | null {
+  const match = message.match(/\bHTTP\s+(\d{3})\b/i);
+  if (!match) return null;
+  const status = parseInt(match[1] ?? "", 10);
+  return Number.isFinite(status) ? status : null;
+}
+
+/** Truncate provider errors for diagnostics — no secrets or large JSON bodies. */
+export function sanitizeDiscoveryProviderError(message: string): string {
+  return message
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/(api[_-]?key|token|subscription[_-]?token)[=:]\s*\S+/gi, "$1=[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 280);
+}
+
 export function classifyProviderError(message: string, httpStatus: number | null = null): RunFailureCode {
   const lower = message.toLowerCase();
+  const resolvedStatus = httpStatus ?? parseProviderHttpStatus(message);
 
-  if (httpStatus === 401 || /unauthorized|authentication|invalid api key|401/.test(lower)) {
+  if (resolvedStatus === 401 || /unauthorized|authentication|invalid api key|401/.test(lower)) {
     return "provider_auth_failed";
   }
-  if (httpStatus === 429 || /rate limit|too many requests|429|quota/.test(lower)) {
+  if (
+    resolvedStatus === 429
+    || resolvedStatus === 432
+    || /rate limit|too many requests|429|quota|usage limit|exceeds your plan/.test(lower)
+  ) {
     return "provider_rate_limited";
+  }
+  if (/zoekjob time-out|job time-out tijdens fase/.test(lower)) {
+    return "pipeline_timeout";
   }
   if (/timeout|time-out|timed out|deadline|etimedout/.test(lower)) {
     return "provider_timeout";
@@ -115,6 +141,18 @@ export function buildRunFailureUiMessage(
       retryRecommended: true,
       showProviderSettings: false,
       providerName: diagnostics.providerName,
+    };
+  }
+
+  if (diagnostics.errorCode === "pipeline_timeout") {
+    return {
+      title: "Zoekjob-timeout",
+      body:
+        diagnostics.errorMessage
+        ?? "De zoekjob overschreed het tijdsbudget voor discovery of opslag. Probeer opnieuw of verfraai de criteria.",
+      retryRecommended: true,
+      showProviderSettings: false,
+      providerName: null,
     };
   }
 

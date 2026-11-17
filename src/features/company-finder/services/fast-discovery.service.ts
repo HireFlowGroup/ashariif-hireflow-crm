@@ -36,6 +36,10 @@ import {
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
 import { getSerpApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 import {
+  sanitizeDiscoveryProviderError,
+} from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
+import type { RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
+import {
   buildVacancyDrivenDiscoveryQueries,
   selectDiscoveryQueries,
   type DiscoveryQueryVariant,
@@ -64,6 +68,10 @@ export type DiscoveryQueryDiagnostic = {
   tavilyUsefulRecall: boolean;
   serpApiFallbackTriggered: boolean;
   serpApiFallbackReason: string | null;
+  serpApiFallbackAttempted: boolean;
+  serpApiFallbackSkipped: boolean;
+  tavilyFailed: boolean;
+  tavilyFailureCode: RunFailureCode | null;
   durationMs: number;
   error: string | null;
 };
@@ -424,6 +432,8 @@ export async function runFastTavilySearch(
   let tavilyRawHits = 0;
   let serpApiRawHits = 0;
   let serpApiSupplementalQueries = 0;
+  let serpApiFallbackSkipped = false;
+  let serpApiFallbackSkipReason: string | null = null;
   const classifiedCounts: MultiQueryDiscoveryResult["classifiedCounts"] = {
     official_company_site: 0,
     company_profile: 0,
@@ -455,6 +465,10 @@ export async function runFastTavilySearch(
     let queryTavilyUsefulRecall = false;
     let querySerpFallback = false;
     let querySerpFallbackReason: string | null = null;
+    let querySerpFallbackAttempted = false;
+    let querySerpFallbackSkipped = false;
+    let queryTavilyFailed = false;
+    let queryTavilyFailureCode: RunFailureCode | null = null;
 
     try {
       const execution = await executeQualityAwareDiscoveryQuery({
@@ -476,13 +490,23 @@ export async function runFastTavilySearch(
       queryTavilyUsefulRecall = execution.tavilyUsefulRecall;
       querySerpFallback = execution.serpApiFallbackTriggered;
       querySerpFallbackReason = execution.serpApiFallbackReason;
+      querySerpFallbackAttempted = execution.serpApiFallbackAttempted;
+      querySerpFallbackSkipped = execution.serpApiFallbackSkipped;
+      queryTavilyFailed = execution.tavilyFailed;
+      queryTavilyFailureCode = execution.tavilyFailureCode;
 
       if (execution.serpApiFallbackTriggered || execution.serpApiFallbackAttempted) {
         serpApiFallbackTriggered = true;
         serpApiFallbackReason = execution.serpApiFallbackReason;
       }
-      if (execution.serpApiFallbackError && !error) {
-        error = execution.serpApiFallbackError;
+      if (execution.serpApiFallbackSkipped) {
+        serpApiFallbackSkipped = true;
+        serpApiFallbackSkipReason = execution.serpApiFallbackError;
+      }
+      if (execution.tavilyFailed && execution.tavilyErrorSanitized && !error) {
+        error = execution.tavilyErrorSanitized;
+      } else if (execution.serpApiFallbackError && !error) {
+        error = sanitizeDiscoveryProviderError(execution.serpApiFallbackError);
       }
       if (execution.tavilyUsefulRecall) {
         tavilyUsefulRecall = true;
@@ -535,7 +559,8 @@ export async function runFastTavilySearch(
         });
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Query mislukt";
+      const message = cause instanceof Error ? cause.message : "Query mislukt";
+      error = sanitizeDiscoveryProviderError(message);
     }
 
     const uniqueResultCount = new Set(
@@ -565,6 +590,10 @@ export async function runFastTavilySearch(
       tavilyUsefulRecall: queryTavilyUsefulRecall,
       serpApiFallbackTriggered: querySerpFallback,
       serpApiFallbackReason: querySerpFallbackReason,
+      serpApiFallbackAttempted: querySerpFallbackAttempted,
+      serpApiFallbackSkipped: querySerpFallbackSkipped,
+      tavilyFailed: queryTavilyFailed,
+      tavilyFailureCode: queryTavilyFailureCode,
       durationMs: Date.now() - started,
       error,
     } satisfies DiscoveryQueryDiagnostic;
@@ -594,8 +623,14 @@ export async function runFastTavilySearch(
         tavilyUsefulRecall: false,
         serpApiFallbackTriggered: false,
         serpApiFallbackReason: null,
+        serpApiFallbackAttempted: false,
+        serpApiFallbackSkipped: false,
+        tavilyFailed: true,
+        tavilyFailureCode: null,
         durationMs: 0,
-        error: entry.reason instanceof Error ? entry.reason.message : "Query mislukt",
+        error: sanitizeDiscoveryProviderError(
+          entry.reason instanceof Error ? entry.reason.message : "Query mislukt",
+        ),
       });
     }
   }
@@ -694,6 +729,8 @@ export async function runFastTavilySearch(
     serpApiRawHits,
     serpApiFallbackTriggered,
     serpApiFallbackReason,
+    serpApiFallbackSkipped,
+    serpApiFallbackSkipReason,
     serpApiSupplementalQueries,
   });
 

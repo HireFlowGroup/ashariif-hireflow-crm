@@ -124,6 +124,8 @@ export function buildUsableRecallDiagnostics(input: {
   serpApiRawHits: number;
   serpApiFallbackTriggered: boolean;
   serpApiFallbackReason: string | null;
+  serpApiFallbackSkipped: boolean;
+  serpApiFallbackSkipReason: string | null;
   serpApiSupplementalQueries: number;
 }): UsableRecallDiagnostics {
   const tavilyOnly = input.tavilyEnriched.filter((entry) => entry.sourceProvider !== "serpapi");
@@ -144,6 +146,8 @@ export function buildUsableRecallDiagnostics(input: {
     SERPAPI_USABLE: serpMetrics.usableEmployerProspects,
     SERPAPI_FALLBACK_TRIGGERED: input.serpApiFallbackTriggered,
     SERPAPI_FALLBACK_REASON: input.serpApiFallbackReason,
+    SERPAPI_FALLBACK_SKIPPED: input.serpApiFallbackSkipped,
+    SERPAPI_FALLBACK_SKIP_REASON: input.serpApiFallbackSkipReason,
     SERPAPI_SUPPLEMENTAL_QUERIES: input.serpApiSupplementalQueries,
     // combined usable available via combinedMetrics if needed downstream
   };

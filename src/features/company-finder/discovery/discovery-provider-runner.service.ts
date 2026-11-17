@@ -8,6 +8,12 @@ import {
   type UsefulRecallMetrics,
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
 import type { DiscoveryQueryVariant } from "@/features/ai-recruiter/services/discovery-query-builder.service";
+import {
+  classifyProviderError,
+  parseProviderHttpStatus,
+  sanitizeDiscoveryProviderError,
+} from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
+import type { RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { getProviderManager } from "@/features/lead-intelligence/providers/manager";
 import { getSerpApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 import type { SearchResultItem } from "@/features/lead-intelligence/providers/manager/types";
@@ -27,8 +33,12 @@ export type QualityAwareQueryResult = {
   serpApiFallbackSucceeded: boolean;
   serpApiFallbackReason: string | null;
   serpApiFallbackError: string | null;
+  serpApiFallbackRequired: boolean;
+  serpApiFallbackSkipped: boolean;
   tavilyUsefulRecall: boolean;
   tavilyFailed: boolean;
+  tavilyFailureCode: RunFailureCode | null;
+  tavilyErrorSanitized: string | null;
 };
 
 const TAVILY_PROVIDER_ID = "tavily";
@@ -110,6 +120,9 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   let tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles, 0);
   let tavilyFailed = false;
   let tavilyError: string | null = null;
+  let tavilyFailureCode: RunFailureCode | null = null;
+  let serpApiFallbackRequired = false;
+  let serpApiFallbackSkipped = false;
 
   try {
     const tavilyExecution = await manager.executeSingleProviderSearch(
@@ -126,6 +139,10 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   } catch (error) {
     tavilyFailed = true;
     tavilyError = error instanceof Error ? error.message : "Tavily query mislukt";
+    tavilyFailureCode = classifyProviderError(
+      tavilyError,
+      parseProviderHttpStatus(tavilyError),
+    );
     tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles, 0);
   }
 
@@ -133,16 +150,19 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   let combinedHits = tavilyHits;
   let providerId = TAVILY_PROVIDER_ID;
 
-  const fallbackDecision = shouldTriggerSerpApiFallback(tavilyMetrics, {
-    serpApiAvailable: Boolean(getSerpApiKey()),
+  const vacancyFocusedQuery = isVacancyFocusedDiscoveryIntent(input.intent);
+  const serpConfigured = Boolean(getSerpApiKey());
+  const fallbackNeeded = shouldTriggerSerpApiFallback(tavilyMetrics, {
+    serpApiAvailable: true,
     tavilyFailed,
-    vacancyFocusedQuery: isVacancyFocusedDiscoveryIntent(input.intent),
+    vacancyFocusedQuery,
   });
+  serpApiFallbackRequired = fallbackNeeded.trigger;
+  serpApiFallbackReason = fallbackNeeded.reason;
 
-  if (fallbackDecision.trigger) {
+  if (fallbackNeeded.trigger && serpConfigured) {
     serpApiFallbackTriggered = true;
     serpApiFallbackAttempted = true;
-    serpApiFallbackReason = fallbackDecision.reason;
 
     const serpExecution = await executeSerpApiDiscoveryQuery({
       query: input.query,
@@ -163,6 +183,10 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     } else {
       serpApiFallbackError = "SerpAPI leverde 0 resultaten";
     }
+  } else if (fallbackNeeded.trigger && !serpConfigured) {
+    serpApiFallbackTriggered = true;
+    serpApiFallbackSkipped = true;
+    serpApiFallbackError = "SerpAPI fallback vereist maar SERPAPI_API_KEY ontbreekt";
   }
 
   const combinedMetrics = evaluateUsefulRecall(
@@ -185,8 +209,13 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     serpApiFallbackAttempted,
     serpApiFallbackSucceeded,
     serpApiFallbackReason,
-    serpApiFallbackError: serpApiFallbackError ?? (tavilyFailed ? tavilyError : null),
+    serpApiFallbackError: serpApiFallbackError
+      ?? (tavilyFailed ? sanitizeDiscoveryProviderError(tavilyError ?? "Tavily query mislukt") : null),
+    serpApiFallbackRequired,
+    serpApiFallbackSkipped,
     tavilyUsefulRecall: tavilyMetrics.usefulRecall,
     tavilyFailed,
+    tavilyFailureCode,
+    tavilyErrorSanitized: tavilyFailed ? sanitizeDiscoveryProviderError(tavilyError ?? "") : null,
   };
 }
