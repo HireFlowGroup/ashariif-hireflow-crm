@@ -20,6 +20,7 @@ export interface ProviderAdapter {
   executeSearch?(
     query: string,
     maxResults: number,
+    requestTimeoutMs?: number,
   ): Promise<ProviderExecutionResult<SearchResultItem[]>>;
 
   executeCrawl?(url: string): Promise<ProviderExecutionResult<CrawlResult>>;

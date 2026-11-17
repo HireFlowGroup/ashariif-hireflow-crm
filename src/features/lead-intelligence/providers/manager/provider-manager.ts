@@ -114,7 +114,7 @@ export class ProviderManager {
         useCache: provider.cacheEnabled,
         cacheTtlMs: provider.cacheTtlMs,
       },
-      () => adapter.executeSearch!(query, maxResults),
+      (requestTimeoutMs) => adapter.executeSearch!(query, maxResults, requestTimeoutMs),
     );
 
     return {
@@ -179,7 +179,7 @@ export class ProviderManager {
             useCache: provider.cacheEnabled,
             cacheTtlMs: provider.cacheTtlMs,
           },
-          () => adapter.executeSearch!(query, maxResults),
+          (requestTimeoutMs) => adapter.executeSearch!(query, maxResults, requestTimeoutMs),
         );
 
         totalDurationMs += execution.durationMs;
@@ -278,7 +278,7 @@ export class ProviderManager {
             useCache: provider.cacheEnabled,
             cacheTtlMs: provider.cacheTtlMs,
           },
-          () => adapter.executeCrawl!(url),
+          (_requestTimeoutMs) => adapter.executeCrawl!(url),
         );
 
         if (shouldEscalateToPlaywright(execution.data.html) && provider.id !== "playwright") {

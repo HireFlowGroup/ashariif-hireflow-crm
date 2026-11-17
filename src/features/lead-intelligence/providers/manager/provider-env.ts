@@ -12,6 +12,15 @@ export const DEFAULT_PROVIDER_TIMEOUT_MS = parseInt(
   process.env.COMPANY_FINDER_PROVIDER_TIMEOUT_MS ?? "20000",
   10,
 );
+export const DEFAULT_PROVIDER_HEALTH_TEST_TIMEOUT_MS = parseInt(
+  process.env.PROVIDER_HEALTH_TEST_TIMEOUT_MS ?? "18000",
+  10,
+);
+
+export function resolveProviderHealthTestTimeoutMs(): number {
+  const parsed = DEFAULT_PROVIDER_HEALTH_TEST_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 18_000;
+}
 export const DEFAULT_MAX_RETRIES = parseInt(process.env.PROVIDER_MAX_RETRIES ?? "2", 10);
 export const DEFAULT_RATE_LIMIT = parseInt(process.env.PROVIDER_RATE_LIMIT_PER_MINUTE ?? "60", 10);
 export const DEFAULT_CACHE_TTL_MS = parseInt(process.env.PROVIDER_CACHE_TTL_MS ?? "300000", 10);

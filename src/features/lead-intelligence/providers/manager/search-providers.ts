@@ -99,12 +99,26 @@ export async function executeBraveSearch(
   return { data, responseSize: body.length, quotaRemaining: parseQuotaFromHeaders(response.headers) };
 }
 
+export function resolveSerpApiRequestTimeoutMs(requestTimeoutMs?: number): number {
+  if (requestTimeoutMs !== undefined && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {
+    return requestTimeoutMs;
+  }
+  const fromEnv = process.env.SERPAPI_TIMEOUT_MS ?? process.env.COMPANY_FINDER_PROVIDER_TIMEOUT_MS;
+  const parsed = fromEnv ? parseInt(fromEnv, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 20_000;
+}
+
 export async function executeSerpApiSearch(
   query: string,
   maxResults: number,
+  requestTimeoutMs?: number,
 ): Promise<{ data: SearchResultItem[]; responseSize: number; quotaRemaining?: number | null }> {
   const apiKey = getSerpApiKey();
   if (!apiKey) throw new Error("SerpAPI key ontbreekt");
+
+  const timeoutMs = resolveSerpApiRequestTimeoutMs(requestTimeoutMs);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google");
@@ -114,23 +128,32 @@ export async function executeSerpApiSearch(
   url.searchParams.set("hl", "nl");
   url.searchParams.set("api_key", apiKey);
 
-  const response = await fetch(url.toString());
-  const body = await response.text();
-  if (!response.ok) throw new Error(`SerpAPI HTTP ${response.status}: ${body.slice(0, 200)}`);
+  try {
+    const response = await fetch(url.toString(), { signal: controller.signal });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`SerpAPI HTTP ${response.status}: ${body.slice(0, 200)}`);
 
-  const payload = JSON.parse(body) as {
-    organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
-  };
+    const payload = JSON.parse(body) as {
+      organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+    };
 
-  const data = (payload.organic_results ?? [])
-    .filter((row) => row.title && row.link)
-    .map((row) => ({
-      title: row.title!.trim(),
-      url: row.link!.trim(),
-      description: row.snippet?.trim() ?? "",
-    }));
+    const data = (payload.organic_results ?? [])
+      .filter((row) => row.title && row.link)
+      .map((row) => ({
+        title: row.title!.trim(),
+        url: row.link!.trim(),
+        description: row.snippet?.trim() ?? "",
+      }));
 
-  return { data, responseSize: body.length, quotaRemaining: parseQuotaFromHeaders(response.headers) };
+    return { data, responseSize: body.length, quotaRemaining: parseQuotaFromHeaders(response.headers) };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`SerpAPI time-out na ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function executeGoogleCseSearch(
@@ -203,7 +226,11 @@ export async function executeBingSearch(
 
 const searchExecutors: Record<
   string,
-  (query: string, maxResults: number) => Promise<{ data: SearchResultItem[]; responseSize: number; quotaRemaining?: number | null }>
+  (
+    query: string,
+    maxResults: number,
+    requestTimeoutMs?: number,
+  ) => Promise<{ data: SearchResultItem[]; responseSize: number; quotaRemaining?: number | null }>
 > = {
   tavily: executeTavilySearch,
   "brave-search": executeBraveSearch,
@@ -220,10 +247,16 @@ export async function runSearchProvider(
   provider: ManagedProviderDefinition,
   query: string,
   maxResults: number,
+  requestTimeoutMs?: number,
 ): Promise<{ data: SearchResultItem[]; responseSize: number; quotaRemaining?: number | null }> {
   const executor = getSearchExecutor(provider.id);
   if (!executor) throw new Error(`Geen search executor voor ${provider.id}`);
 
-  pipelineDebug("search.provider.execute", { providerId: provider.id, query, maxResults });
-  return executor(query, maxResults);
+  pipelineDebug("search.provider.execute", {
+    providerId: provider.id,
+    query,
+    maxResults,
+    requestTimeoutMs: requestTimeoutMs ?? null,
+  });
+  return executor(query, maxResults, requestTimeoutMs);
 }
