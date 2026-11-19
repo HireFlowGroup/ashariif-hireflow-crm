@@ -30,3 +30,7 @@ export type {
 export type { CandidateDiscoveryRepository } from "@/features/candidate-discovery/repositories/candidate-discovery.repository";
 export { SupabaseCandidateDiscoveryRepository } from "@/features/candidate-discovery/repositories/supabase-candidate-discovery.repository";
 export { createCandidateDiscoveryRepository } from "@/features/candidate-discovery/create-candidate-discovery-repository";
+export {
+  assertProposalMatchesRun,
+  assertVacancyBelongsToOrganization,
+} from "@/features/candidate-discovery/services/candidate-discovery-integrity.service";

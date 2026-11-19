@@ -20,7 +20,78 @@ function createChainableMock(finalResult: { data: unknown; error: unknown }) {
   return chain;
 }
 
-describe("SupabaseCandidateDiscoveryRepository tenant scoping", () => {
+describe("SupabaseCandidateDiscoveryRepository integrity and tenant scoping", () => {
+  it("rejects createRun when vacancy is not visible for organization", async () => {
+    const vacancyChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "vacancies") return vacancyChain;
+        throw new Error(`unexpected table ${table}`);
+      }),
+    };
+
+    const repo = new SupabaseCandidateDiscoveryRepository(client as never);
+    await expect(
+      repo.createRun({
+        organizationId: "org-a",
+        vacancyId: "vac-foreign",
+        createdBy: "user-1",
+        queries: ["q"],
+        queryPlan: { queries: ["q"], vacancyTitle: "T", locationHint: null, skillTerms: [] },
+        minMatchScoreUsed: 45,
+      }),
+    ).rejects.toThrow(/organisatie/);
+  });
+
+  it("rejects insertProposals when run vacancy does not match", async () => {
+    const runRow = {
+      id: "run-1",
+      organization_id: "org-a",
+      vacancy_id: "vac-a",
+      created_by: "user-1",
+      status: "completed",
+      queries: [],
+      query_plan: {},
+      search_attempts: [],
+      provider_meta: {},
+      proposal_count: 0,
+      below_threshold_count: 0,
+      ineligible_count: 0,
+      duplicate_url_count: 0,
+      provider_failures: 0,
+      min_match_score_used: 45,
+      error_code: null,
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+      retention_expires_at: "2026-12-01T00:00:00Z",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    const runChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: runRow, error: null }),
+    };
+    const client = {
+      from: vi.fn(() => runChain),
+    };
+
+    const repo = new SupabaseCandidateDiscoveryRepository(client as never);
+    await expect(
+      repo.insertProposals({
+        organizationId: "org-a",
+        vacancyId: "vac-other",
+        runId: "run-1",
+        ranked: [],
+      }),
+    ).rejects.toThrow(/vacature/i);
+  });
   it("scopes getRun queries by organization_id", async () => {
     const chain = createChainableMock({ data: null, error: null });
     const client = {
@@ -49,12 +120,46 @@ describe("SupabaseCandidateDiscoveryRepository tenant scoping", () => {
   });
 
   it("skips duplicate proposals without throwing", async () => {
+    const runRow = {
+      id: "run-1",
+      organization_id: "org-1",
+      vacancy_id: "vac-1",
+      created_by: "user-1",
+      status: "completed",
+      queries: [],
+      query_plan: {},
+      search_attempts: [],
+      provider_meta: {},
+      proposal_count: 0,
+      below_threshold_count: 0,
+      ineligible_count: 0,
+      duplicate_url_count: 0,
+      provider_failures: 0,
+      min_match_score_used: 45,
+      error_code: null,
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+      retention_expires_at: "2026-12-01T00:00:00Z",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    const runChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: runRow, error: null }),
+    };
     const insertChain = createChainableMock({
       data: null,
       error: { code: "23505", message: "duplicate" },
     });
     const client = {
-      from: vi.fn(() => insertChain),
+      from: vi.fn((table: string) => {
+        if (table === "candidate_discovery_runs") return runChain;
+        if (table === "candidate_discovery_proposals") return insertChain;
+        throw new Error(`unexpected table ${table}`);
+      }),
     };
 
     const repo = new SupabaseCandidateDiscoveryRepository(client as never);

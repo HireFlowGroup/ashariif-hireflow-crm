@@ -16,6 +16,10 @@ import {
   type CandidateDiscoveryProposalRow,
   type CandidateDiscoveryRunRow,
 } from "@/features/candidate-discovery/repositories/candidate-discovery.mapper";
+import {
+  assertProposalMatchesRun,
+  assertVacancyBelongsToOrganization,
+} from "@/features/candidate-discovery/services/candidate-discovery-integrity.service";
 import { CandidateDiscoveryRepositoryError } from "@/features/candidate-discovery/repositories/candidate-discovery.repository.errors";
 import type { CandidateDiscoveryRepository } from "@/features/candidate-discovery/repositories/candidate-discovery.repository";
 import type { Database } from "@/types/database";
@@ -24,6 +28,24 @@ export class SupabaseCandidateDiscoveryRepository implements CandidateDiscoveryR
   constructor(private readonly client: SupabaseClient<Database>) {}
 
   async createRun(input: CreateCandidateDiscoveryRunInput): Promise<CandidateDiscoveryRun> {
+    const { data: vacancy, error: vacancyError } = await this.client
+      .from("vacancies")
+      .select("organization_id")
+      .eq("id", input.vacancyId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+
+    if (vacancyError || !vacancy) {
+      throw new CandidateDiscoveryRepositoryError(
+        "Vacature hoort niet bij deze organisatie of is niet gevonden.",
+      );
+    }
+
+    assertVacancyBelongsToOrganization(
+      input.organizationId,
+      (vacancy as { organization_id: string }).organization_id,
+    );
+
     const { data, error } = await this.client
       .from("candidate_discovery_runs")
       .insert({
@@ -119,6 +141,13 @@ export class SupabaseCandidateDiscoveryRepository implements CandidateDiscoveryR
   }
 
   async insertProposals(input: InsertProposalsFromRankInput): Promise<InsertProposalsResult> {
+    const run = await this.getRun(input.organizationId, input.runId);
+    assertProposalMatchesRun({
+      organizationId: input.organizationId,
+      vacancyId: input.vacancyId,
+      run,
+    });
+
     const rows = buildProposalInsertRows({
       organizationId: input.organizationId,
       vacancyId: input.vacancyId,
