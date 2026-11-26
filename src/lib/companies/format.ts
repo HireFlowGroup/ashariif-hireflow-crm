@@ -5,6 +5,7 @@ const statusLabels: Record<Company["status"], string> = {
   active: "Actief",
   inactive: "Inactief",
   prospect: "Prospect",
+  review: "Review",
   archived: "Gearchiveerd",
 };
 

@@ -16,7 +16,8 @@ export type CompanyDbStatus =
   | LegacyCrmDbStatus
   | "active"
   | "inactive"
-  | "prospect";
+  | "prospect"
+  | "Review";
 
 const LEGACY_CRM_SET = new Set<string>(LEGACY_CRM_DB_STATUSES);
 
@@ -28,6 +29,8 @@ export function toDbCompanyStatus(status?: CompanyStatus | null): CompanyDbStatu
     case "archived":
     case "inactive":
       return "inactive";
+    case "review":
+      return "Review";
     case "prospect":
     default:
       return "Nieuw";
@@ -40,6 +43,7 @@ export function toDomainCompanyStatus(status: string | null | undefined): Compan
 
   if (status === "active" || status === "Klant") return "active";
   if (status === "inactive") return "archived";
+  if (status === "Review" || status === "review") return "review";
   if (status === "prospect") return "prospect";
   if (LEGACY_CRM_SET.has(status)) return "prospect";
 

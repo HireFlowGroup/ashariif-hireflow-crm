@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { parseAiRecruiterSearchPlan, SearchPlanParserError } from "@/features/ai-recruiter/services/search-plan-parser.service";
+import { clampAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-limits.service";
 import { aiRecruiterPlanSchema } from "@/features/ai-recruiter/validation/search-plan.schemas";
 import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
 import { aiRecruiterParsePlanBodySchema } from "@/lib/validations/ai-recruiter-api";
@@ -24,7 +25,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   console.log("[AI Recruiter] parse-plan API prompt:", parsed.data.prompt);
 
   try {
-    const plan = await parseAiRecruiterSearchPlan(parsed.data.prompt);
+    const plan = clampAiRecruiterSearchPlan(await parseAiRecruiterSearchPlan(parsed.data.prompt));
     const validated = aiRecruiterPlanSchema.safeParse(plan);
 
     if (!validated.success) {

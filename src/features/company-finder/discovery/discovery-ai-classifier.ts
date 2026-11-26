@@ -115,7 +115,9 @@ export async function validateCompanyCandidates(
       signalCount: item.signalCount,
     }));
 
-    const prompt = `Je valideert of een URL een echt bedrijf is (geen artikel, directory of gemeentepagina).
+    const prompt = `Is dit de officiële website van een bedrijf?
+
+Antwoord uitsluitend met company of not_company, plus confidence.
 
 Antwoord ALLEEN als JSON:
 {
@@ -123,20 +125,22 @@ Antwoord ALLEEN als JSON:
     {
       "id": 0,
       "verdict": "company",
+      "confidence": 85,
       "companyType": "company_website"
     }
   ]
 }
 
 verdict: "company" of "not_company" (exact)
+confidence: geheel getal 0-100
 
 companyType (alleen bij company):
-- company_website (score 100): echte bedrijfswebsite
-- holding (score 80): holding/moederbedrijf
-- agency (score 70): bureau/agency/intermediair
+- company_website: echte bedrijfswebsite
+- holding: holding/moederbedrijf
+- agency: bureau/agency/intermediair
 
 Bij not_company, kies companyType:
-- directory (30), news (20), government (10), spam (0)
+- directory, news, government, spam
 
 Input:
 ${JSON.stringify(payload, null, 2)}`;
@@ -155,7 +159,7 @@ ${JSON.stringify(payload, null, 2)}`;
     }
 
     const parsed = JSON.parse(content) as {
-      results?: Array<{ id: number; verdict: string; companyType?: string }>;
+      results?: Array<{ id: number; verdict: string; companyType?: string; confidence?: number }>;
     };
 
     const byId = new Map((parsed.results ?? []).map((row) => [row.id, row]));
@@ -168,6 +172,19 @@ ${JSON.stringify(payload, null, 2)}`;
   } catch {
     return items.map((item) => heuristicCompanyValidation(item));
   }
+}
+
+/** Alias used by consolidation decision flow. */
+export async function decideCompanyUrls(
+  inputs: DiscoveryUrlInput[],
+): Promise<CompanyValidationResult[]> {
+  return validateCompanyCandidates(
+    inputs.map((input) => ({
+      ...input,
+      signalCount: 0,
+      signalSummary: "",
+    })),
+  );
 }
 
 function heuristicClassifications(inputs: DiscoveryUrlInput[]): UrlClassificationResult[] {
@@ -186,36 +203,31 @@ function heuristicCompanyValidation(
 
   if (urlCategory !== "company") {
     const companyType = URL_CATEGORY_TO_COMPANY_TYPE[urlCategory] ?? "spam";
+    const score = DISCOVERY_TYPE_SCORES[companyType];
     return {
       verdict: "not_company",
+      confidence: score,
       companyType,
-      score: DISCOVERY_TYPE_SCORES[companyType],
+      score,
       source: "heuristic",
     };
   }
 
-  if (item.signalCount >= 4) {
+  if (item.signalCount >= 1) {
     return {
       verdict: "company",
-      companyType: "company_website",
-      score: DISCOVERY_TYPE_SCORES.company_website,
-      source: "heuristic",
-    };
-  }
-
-  if (item.signalCount >= 2) {
-    return {
-      verdict: "company",
-      companyType: "agency",
-      score: DISCOVERY_TYPE_SCORES.agency,
+      confidence: item.signalCount >= 4 ? 85 : 65,
+      companyType: item.signalCount >= 4 ? "company_website" : "agency",
+      score: item.signalCount >= 4 ? 85 : 65,
       source: "heuristic",
     };
   }
 
   return {
-    verdict: "not_company",
-    companyType: "spam",
-    score: DISCOVERY_TYPE_SCORES.spam,
+    verdict: "company",
+    confidence: 55,
+    companyType: "agency",
+    score: 55,
     source: "heuristic",
   };
 }
@@ -223,14 +235,21 @@ function heuristicCompanyValidation(
 function mapValidationRow(row: {
   verdict: string;
   companyType?: string;
+  confidence?: number;
 }): CompanyValidationResult {
   const verdict = row.verdict === "company" ? "company" : "not_company";
   const companyType = normalizeCompanyType(row.companyType, verdict);
+  const typeScore = DISCOVERY_TYPE_SCORES[companyType];
+  const confidence =
+    typeof row.confidence === "number" && Number.isFinite(row.confidence)
+      ? Math.max(0, Math.min(100, Math.round(row.confidence)))
+      : typeScore;
 
   return {
     verdict,
+    confidence,
     companyType,
-    score: DISCOVERY_TYPE_SCORES[companyType],
+    score: confidence,
     source: "ai",
   };
 }
@@ -245,6 +264,7 @@ function normalizeCategory(value: string): DiscoveryUrlCategory {
     "listing",
     "jobboard",
     "social",
+    "forum",
     "unknown",
   ];
 
@@ -270,6 +290,31 @@ function normalizeCompanyType(
   if (allowed.includes(normalized)) return normalized;
 
   return verdict === "company" ? "company_website" : "spam";
+}
+
+/** Parse free-text AI answers shaped like the exclusive prompt. */
+export function parseAiDecisionText(text: string): {
+  verdict: "company" | "not_company";
+  confidence: number;
+} {
+  const lower = text.toLowerCase();
+  const verdict: "company" | "not_company" = /\bnot_company\b/.test(lower)
+    ? "not_company"
+    : /\bcompany\b/.test(lower)
+      ? "company"
+      : "not_company";
+
+  const confidenceMatch = text.match(/confidence\s*[:=]?\s*(\d{1,3})/i);
+  const confidence = confidenceMatch
+    ? Number(confidenceMatch[1])
+    : verdict === "company"
+      ? 60
+      : 20;
+
+  return {
+    verdict,
+    confidence: Math.max(0, Math.min(100, Math.round(confidence))),
+  };
 }
 
 /** Single-URL AI validation prompt (step 4). */

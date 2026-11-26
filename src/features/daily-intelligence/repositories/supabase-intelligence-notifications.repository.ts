@@ -6,6 +6,7 @@ import {
   type CreateNotificationInput,
   type IntelligenceNotificationsRepository,
 } from "@/features/daily-intelligence/repositories/intelligence-scan.repository";
+import { isRecoverableSupabaseAccessError as isRecoverableNotificationsDbError } from "@/features/dashboard/repositories/dashboard-db-access";
 import type { Database } from "@/types/database";
 
 type NotificationRow = {
@@ -102,6 +103,7 @@ export class SupabaseIntelligenceNotificationsRepository
       .limit(limit);
 
     if (error) {
+      if (isRecoverableNotificationsDbError(error)) return [];
       throw new IntelligenceNotificationsRepositoryError("Notificaties laden mislukt.");
     }
 
@@ -117,6 +119,7 @@ export class SupabaseIntelligenceNotificationsRepository
       .limit(limit);
 
     if (error) {
+      if (isRecoverableNotificationsDbError(error)) return [];
       throw new IntelligenceNotificationsRepositoryError("Notificaties laden mislukt.");
     }
 
@@ -149,6 +152,7 @@ export class SupabaseIntelligenceNotificationsRepository
       .is("read_at", null);
 
     if (error) {
+      if (isRecoverableNotificationsDbError(error)) return 0;
       throw new IntelligenceNotificationsRepositoryError("Ongelezen notificaties tellen mislukt.");
     }
 

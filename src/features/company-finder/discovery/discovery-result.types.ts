@@ -1,3 +1,5 @@
+import type { UsableRecallDiagnostics } from "@/features/company-finder/discovery/discovery-usable-recall-diagnostics.types";
+
 /** Discovery result classification and funnel types. */
 
 export const discoveryResultTypeSchema = [
@@ -29,6 +31,7 @@ export const discoveryRejectionReasonCodeSchema = [
   "duplicate",
   "insufficient_evidence",
   "invalid_source",
+  "wrong_employer",
   "other",
 ] as const;
 
@@ -54,6 +57,9 @@ export type DiscoveryResultLogEntry = {
   excludedCompetitor: boolean;
   accepted: boolean;
   rejectionReason: DiscoveryRejectionReasonCode | null;
+  discoveryLocation?: string | null;
+  discoveryRole?: string | null;
+  sourceProvider?: string | null;
 };
 
 export type DiscoveryFunnelMetrics = {
@@ -69,10 +75,24 @@ export type DiscoveryFunnelMetrics = {
   realCompanies: number;
   companiesInRegion: number;
   companiesInSector: number;
-  withVacancyEvidence: number;
+  /** Vacancy title present in search snippet — hint only, not validated evidence */
+  withDiscoveryVacancyTitle: number;
   withoutVacancyEvidence: number;
+  /** Deduplicated companies passed to quality gate (not vacancy-qualified) */
+  companiesPassedToGate: number;
+  /** @deprecated Use companiesPassedToGate */
   saved: number;
+  /** @deprecated Use withDiscoveryVacancyTitle */
+  withVacancyEvidence: number;
   rejected: number;
+  employerHostedResults?: number;
+  concreteVacancyResults?: number;
+  desiredRoleVacancyResults?: number;
+  tavilyUsefulRecall?: boolean;
+  serpApiFallbackTriggered?: boolean;
+  serpApiFallbackReason?: string | null;
+  queriesGenerated?: string[];
+  usableRecallDiagnostics?: UsableRecallDiagnostics;
 };
 
 export type EnrichedDiscoveryResult = {
@@ -94,4 +114,7 @@ export type EnrichedDiscoveryResult = {
   excludedCompetitor: boolean;
   accepted: boolean;
   rejectionReason: DiscoveryRejectionReasonCode | null;
+  discoveryLocation?: string | null;
+  discoveryRole?: string | null;
+  sourceProvider?: string | null;
 };

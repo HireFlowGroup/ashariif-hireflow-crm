@@ -11,6 +11,7 @@ import {
   buildRequestCriteriaFromPlan,
   classifyProviderError,
   type DiscoveryEventSummary,
+  isProviderFailure,
 } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
 
 export type { DiscoveryEventSummary } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
@@ -61,7 +62,10 @@ export function buildDiscoveryDiagnostics(input: {
   } else if (input.summary.lastErrorMessage) {
     errorMessage = input.summary.lastErrorMessage;
     errorCode = classifyProviderError(errorMessage);
-    retryRecommended = errorCode === "provider_rate_limited" || errorCode === "provider_timeout";
+    retryRecommended =
+      errorCode === "provider_rate_limited"
+      || errorCode === "provider_timeout"
+      || errorCode === "pipeline_timeout";
   } else if (responseCount > 0 && input.validatedCount === 0) {
     errorCode = "no_valid_companies";
     errorMessage =
@@ -72,11 +76,49 @@ export function buildDiscoveryDiagnostics(input: {
   } else if (input.job?.status === "failed" && input.job.errorMessage) {
     errorMessage = input.job.errorMessage;
     errorCode = classifyProviderError(errorMessage);
-    retryRecommended = errorCode === "provider_rate_limited" || errorCode === "provider_timeout";
+    retryRecommended =
+      errorCode === "provider_rate_limited"
+      || errorCode === "provider_timeout"
+      || errorCode === "pipeline_timeout";
   } else if (responseCount === 0 && input.validatedCount === 0) {
-    errorCode = "no_results";
-    errorMessage = "De zoekopdracht leverde geen bedrijven op. Pas locatie, branche of zoekwoorden aan.";
-    retryRecommended = true;
+    const providerCode = input.summary.lastErrorMessage
+      ? classifyProviderError(input.summary.lastErrorMessage)
+      : null;
+  const jobProviderCode =
+    input.job?.errorMessage && !input.summary.lastErrorMessage
+      ? classifyProviderError(input.job.errorMessage)
+      : null;
+  const failureCode = providerCode && isProviderFailure(providerCode)
+    ? providerCode
+    : jobProviderCode && isProviderFailure(jobProviderCode)
+      ? jobProviderCode
+      : null;
+
+    if (failureCode) {
+      errorCode = failureCode;
+      errorMessage =
+        input.summary.lastErrorMessage
+        ?? input.job?.errorMessage
+        ?? "Zoekprovider kon geen resultaten leveren.";
+      retryRecommended =
+        failureCode === "provider_rate_limited"
+        || failureCode === "provider_timeout"
+        || failureCode === "provider_request_failed";
+    } else {
+      errorCode = "no_results";
+      errorMessage = "De zoekopdracht leverde geen bedrijven op. Pas locatie, branche of zoekwoorden aan.";
+      retryRecommended = true;
+    }
+  }
+
+  if (
+    input.validatedCount > 0
+    && errorCode
+    && (errorCode === "provider_rate_limited" || errorCode === "provider_timeout" || errorCode === "provider_request_failed")
+  ) {
+    errorCode = null;
+    errorMessage = null;
+    retryRecommended = false;
   }
 
   return runDiagnosticsSchema.parse({

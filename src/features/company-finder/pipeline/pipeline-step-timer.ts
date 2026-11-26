@@ -97,10 +97,15 @@ export class PipelineStepTimer {
 }
 
 export class JobDeadline {
-  constructor(private readonly deadlineAt: number) {}
+  constructor(private deadlineAt: number) {}
 
   static fromTimeoutMs(timeoutMs: number): JobDeadline {
     return new JobDeadline(Date.now() + timeoutMs);
+  }
+
+  /** Fresh phase budget (discovery vs save) without sharing wall-clock with prior phases. */
+  reset(timeoutMs: number): void {
+    this.deadlineAt = Date.now() + timeoutMs;
   }
 
   remainingMs(): number {

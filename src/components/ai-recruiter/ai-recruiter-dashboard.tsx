@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recruiter/discovery-funnel-panel";
+import { EvidenceQueuePanel } from "@/components/ai-recruiter/evidence-queue-panel";
 import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
 import { ProspectReviewWorkspace } from "@/components/ai-recruiter/prospect-review-workspace";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
@@ -17,6 +18,7 @@ import { WorkspacePage } from "@/components/layout/workspace-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { isTraceableRunResultItem } from "@/features/ai-recruiter/services/run-review-queue.service";
 import type {
   AiRecruiterPipelineStep,
   AiRecruiterRun,
@@ -138,38 +140,20 @@ export function AiRecruiterDashboard() {
     })();
   }, [activeRun?.settings?.finderJobId, activeRun?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- discoveryPanel is output state only
 
-  const reviewItems = useMemo(
-    () =>
-      items.filter((i) => {
-        const stageOk =
-          i.stage === "draft_created"
-          || i.outreachMessageId
-          || i.stage === "contact_found"
-          || i.stage === "general_mailbox_found"
-          || i.stage === "blocked_missing_contact";
-        if (!stageOk) return false;
-        if (i.scoreBreakdown?.decision === "IGNORE") return false;
-        if (i.scoreBreakdown?.identityUnresolved) return false;
-        if (
-          i.scoreBreakdown?.businessClassification === "recruitment_competitor"
-          || i.scoreBreakdown?.businessClassification === "staffing_competitor"
-        ) {
-          return false;
-        }
-        return true;
-      }),
+  const runResultItems = useMemo(
+    () => items.filter(isTraceableRunResultItem),
     [items],
   );
 
   useEffect(() => {
-    if (reviewItems.length === 0) {
+    if (runResultItems.length === 0) {
       setSelectedItemId(null);
       return;
     }
-    if (!selectedItemId || !reviewItems.some((i) => i.id === selectedItemId)) {
-      setSelectedItemId(reviewItems[0]!.id);
+    if (!selectedItemId || !runResultItems.some((i) => i.id === selectedItemId)) {
+      setSelectedItemId(runResultItems[0]!.id);
     }
-  }, [reviewItems, selectedItemId]);
+  }, [runResultItems, selectedItemId]);
 
   const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
 
@@ -442,6 +426,9 @@ export function AiRecruiterDashboard() {
                         runId={activeRun.id}
                         onDraftCreated={() => void loadRuns()}
                       />
+                      <div className="mt-4">
+                        <EvidenceQueuePanel runId={activeRun.id} />
+                      </div>
                     </div>
                   ) : null}
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -469,7 +456,7 @@ export function AiRecruiterDashboard() {
 
               <ProspectReviewWorkspace
                 run={activeRun}
-                items={reviewItems}
+                items={runResultItems}
                 selectedItemId={selectedItemId}
                 onSelectItem={setSelectedItemId}
                 onItemUpdated={(updated) => {

@@ -6,6 +6,7 @@ export const runFailureCodeSchema = z.enum([
   "provider_rate_limited",
   "provider_timeout",
   "provider_request_failed",
+  "pipeline_timeout",
   "no_results",
   "no_valid_companies",
   "database_error",

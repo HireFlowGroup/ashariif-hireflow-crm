@@ -28,7 +28,7 @@ export const updateCompanyToolParametersSchema = z
     city: optionalToolString(120, "Plaats is te lang."),
     sector: optionalToolString(120, "Sector is te lang."),
     notes: optionalToolString(5000, "Notities zijn te lang."),
-    status: z.enum(["active", "inactive", "prospect", "archived"]).optional(),
+    status: z.enum(["active", "inactive", "prospect", "archived", "review"]).optional(),
   })
   .refine(
     (value) =>

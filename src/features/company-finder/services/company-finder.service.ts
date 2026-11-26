@@ -7,13 +7,14 @@ import type {
 } from "@/features/company-finder/domain";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
 import { LeadIntelligenceEngine } from "@/features/lead-intelligence/services/lead-intelligence-engine.service";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type CompanyFinderServiceContext = CompaniesServiceContext;
 
 export type CompanyFinderRunEvent =
   | { type: "progress"; progress: CompanyFinderProgress }
   | { type: "event"; eventType: string; payload: Record<string, unknown> }
-  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean }
+  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean; companyId?: string }
   | { type: "pipeline"; event: import("@/features/company-finder/pipeline/pipeline-viewer.types").PipelineStreamEvent }
   | { type: "complete"; job: CompanySearchJob }
   | { type: "error"; message: string };
@@ -25,8 +26,9 @@ export class CompanyFinderService {
   constructor(
     jobRepository: CompanySearchJobRepository,
     companiesService: CompaniesService,
+    supabaseClient?: SupabaseClient | null,
   ) {
-    this.engine = new LeadIntelligenceEngine(jobRepository, companiesService);
+    this.engine = new LeadIntelligenceEngine(jobRepository, companiesService, supabaseClient);
   }
 
   async createJob(

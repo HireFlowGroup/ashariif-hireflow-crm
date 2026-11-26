@@ -1,0 +1,92 @@
+{
+  "phase": "P0-R3.2.5-discovery-smoke",
+  "query": "site:.nl (werken bij OR vacatures) (Recruiter OR Corporate Recruiter OR Talent Acquisition) (Rotterdam OR Den Haag OR Utrecht) -indeed -linkedin -monster -uitzendbureau -recruitment agency",
+  "httpCalls": 2,
+  "rawCount": 10,
+  "employerSignalCount": 3,
+  "sampleEmployerSignals": [
+    {
+      "title": "Shops",
+      "url": "https://werkenbij.odido.nl/option/vakgebied-1/shops-1",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": true,
+      "resultType": "company_careers_page",
+      "blockedDomain": false,
+      "genericTitle": false,
+      "employerSignal": true
+    },
+    {
+      "title": "Management Assistent Corporate Clients Nederland",
+      "url": "https://www.banken.nl/vacatures/34406/rabobank/management-assistent-corporate-clients-nederland",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": true,
+      "resultType": "company_careers_page",
+      "blockedDomain": false,
+      "genericTitle": false,
+      "employerSignal": true
+    },
+    {
+      "title": "Bellen voordat je solliciteert: de do's & don'ts",
+      "url": "https://www.intermediair.nl/werk-en-carriere/loopbaanadvies/bellen-voordat-je-solliciteert-de-do-s-don-ts",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": true,
+      "resultType": "company",
+      "blockedDomain": false,
+      "genericTitle": false,
+      "employerSignal": true
+    }
+  ],
+  "rejectedSamples": [
+    {
+      "title": "HR Talent Acquisition Lead vacatures in Nederland",
+      "url": "https://www.careerjet.nl/vacatures-hr-talent-acquisition-lead",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": false,
+      "resultType": "vacancy",
+      "blockedDomain": false,
+      "genericTitle": true,
+      "employerSignal": false
+    },
+    {
+      "title": "Talent Acquisition Partner Jobs en vacatures",
+      "url": "https://www.stepstone.nl/vacatures/talent-acquisition-partner",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": true,
+      "resultType": "company_careers_page",
+      "blockedDomain": true,
+      "genericTitle": true,
+      "employerSignal": false
+    },
+    {
+      "title": "3 hr business partner vacatures bij Lumera Services",
+      "url": "https://www.nationalevacaturebank.nl/vacatures/functie/hr-business-partner/bij-lumera-services",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": false,
+      "resultType": "company_careers_page",
+      "blockedDomain": true,
+      "genericTitle": true,
+      "employerSignal": false
+    },
+    {
+      "title": "Junior Medewerker Operations Den Haag | Randstad Professional",
+      "url": "https://www.randstadprofessional.nl/vacatures/9218504/junior-medewerker-operations",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": false,
+      "resultType": "directory",
+      "blockedDomain": false,
+      "genericTitle": true,
+      "employerSignal": false
+    },
+    {
+      "title": "hr vacatures vacatures in Koog aan de Zaan voor de overheid",
+      "url": "https://www.vacatures-overheid-online.nl/vacatures-overheid/koog-aan-de-zaan/hr-vacatures",
+      "provider": "serpapi",
+      "shouldSaveAsCompany": true,
+      "resultType": "company_careers_page",
+      "blockedDomain": false,
+      "genericTitle": true,
+      "employerSignal": false
+    }
+  ],
+  "generatedAt": "2026-11-26T10:14:20.219Z"
+}

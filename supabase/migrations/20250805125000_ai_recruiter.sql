@@ -1,5 +1,9 @@
 -- HireFlow AI Recruiter — runs, run items, pipeline audit
 -- Safe-by-default: manual approval, no auto-send
+--
+-- Ordered at 20250805125000 so core tables exist before stage/reply extensions
+-- (contact stages, reply classifications, analyses FK, prospect audit, identity).
+-- Legacy version id on some databases: 20250806100000.
 
 -- ---------------------------------------------------------------------------
 -- ai_recruiter_runs

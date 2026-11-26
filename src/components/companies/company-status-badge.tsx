@@ -9,6 +9,7 @@ const statusVariant: Record<
 > = {
   active: "default",
   prospect: "secondary",
+  review: "outline",
   inactive: "outline",
   archived: "destructive",
 };

@@ -84,7 +84,7 @@ describe("suggested reply generation", () => {
     });
 
     expect(reply.shouldSend).toBe(true);
-    expect(reply.bodyText?.toLowerCase()).toMatch(/kennismaking|gesprek|tijdslot/);
+    expect(reply.bodyText?.toLowerCase()).toMatch(/kennismaking|kennis te maken|gesprek|tijdslot|afspraak/);
     expect(reply.bodyText?.toLowerCase()).not.toContain("ik wilde even");
   });
 

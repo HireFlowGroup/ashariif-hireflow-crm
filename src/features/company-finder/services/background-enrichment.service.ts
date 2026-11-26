@@ -11,6 +11,7 @@ import { toCompanyId } from "@/features/companies/domain";
 import { enterOrganizationContext } from "@/features/provider-vault/server/org-context";
 import { triggerCompanyAnalysisRefresh } from "@/features/company-ai-analysis/trigger-company-analysis";
 import { logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
+import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 
 /** Non-blocking enrichment + AI + score after discovery save. Failures never block the saved record. */
 export function scheduleBackgroundCompanyEnrichment(input: {
@@ -117,6 +118,13 @@ export function scheduleBackgroundCompanyEnrichment(input: {
         input.searchCriteria,
       );
 
+      const vacancyPageUrl =
+        enriched.vacancyPageUrl && hasConcreteJobUrl(enriched.vacancyPageUrl)
+          ? enriched.vacancyPageUrl
+          : input.candidate.vacancyPageUrl && hasConcreteJobUrl(input.candidate.vacancyPageUrl)
+            ? input.candidate.vacancyPageUrl
+            : undefined;
+
       await input.companiesService.updateCompany(input.context, toCompanyId(input.companyId), {
         website: enriched.website,
         domain: enriched.domain,
@@ -126,9 +134,12 @@ export function scheduleBackgroundCompanyEnrichment(input: {
         hrEmail: enriched.hrEmail,
         phone: enriched.phone,
         careersUrl: enriched.careersUrl,
-        vacancyPageUrl: enriched.vacancyPageUrl,
-        vacancyCount: enriched.vacancyCount,
-        hiringSignals: enriched.hiringSignals,
+        ...(vacancyPageUrl ? { vacancyPageUrl } : {}),
+        vacancyCount: Math.max(input.candidate.vacancyCount ?? 0, enriched.vacancyCount ?? 0),
+        hiringSignals:
+          (enriched.hiringSignals?.length ?? 0) > (input.candidate.hiringSignals?.length ?? 0)
+            ? enriched.hiringSignals
+            : undefined,
         aiSummary: aiResult.aiSummary,
         leadScore: scored.score,
         leadPriority: scored.priority,

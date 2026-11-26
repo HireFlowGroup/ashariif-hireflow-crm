@@ -100,6 +100,8 @@ export async function POST(request: Request, routeContext: RouteContext): Promis
     const external = item.externalCompanyData as {
       contactDiscovery?: { selected?: SelectedDiscoveredContact | null };
       vacancyEvidence?: VacancyEvidence[];
+      vacancies?: VacancyEvidence[];
+      eligibility?: { vacancies?: VacancyEvidence[] };
     } | null;
 
     const contact = external?.contactDiscovery?.selected;
@@ -107,7 +109,11 @@ export async function POST(request: Request, routeContext: RouteContext): Promis
       return NextResponse.json({ error: "Geen contact beschikbaar" }, { status: 422 });
     }
 
-    const vacancies = external?.vacancyEvidence ?? [];
+    const vacancies =
+      external?.vacancyEvidence
+      ?? external?.vacancies
+      ?? external?.eligibility?.vacancies
+      ?? [];
     const engine = await createOutreachEngineService();
 
     if (!item.outreachMessageId) {
@@ -124,6 +130,18 @@ export async function POST(request: Request, routeContext: RouteContext): Promis
       const updatedItem = await repository.updateRunItem(context.organizationId, item.id, {
         outreachMessageId: created.outreachMessageId,
         stage: "draft_created",
+      });
+
+      const counters = run.counters ?? {
+        found: 0,
+        skipped: 0,
+        enriched: 0,
+        qualified: 0,
+        rejected: 0,
+        draftsCreated: 0,
+      };
+      await repository.updateRun(context.organizationId, runIdResult.data, {
+        counters: { ...counters, draftsCreated: counters.draftsCreated + 1 },
       });
 
       return NextResponse.json({ item: updatedItem });

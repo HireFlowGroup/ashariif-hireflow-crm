@@ -3,6 +3,7 @@ import { z } from "zod";
 export const conceptEligibilityReasonCodeSchema = z.enum([
   "eligible",
   "no_active_vacancy",
+  "no_matching_role",
   "no_contact",
   "invalid_contact",
   "suppressed_contact",
@@ -13,6 +14,12 @@ export const conceptEligibilityReasonCodeSchema = z.enum([
   "duplicate_outreach",
   "cooldown_active",
   "missing_required_data",
+  "employee_range_unknown",
+  "employee_range_mismatch",
+  "needs_evidence",
+  "commercial_hiring_below_plan",
+  "commercial_opportunity_below_plan",
+  "commercial_scores_missing",
   "manual_override",
   "unknown",
 ]);
@@ -32,22 +39,47 @@ export const prospectResultTypeSchema = z.enum([
 
 export type ProspectResultType = z.infer<typeof prospectResultTypeSchema>;
 
+export type QualificationStatus = "eligible" | "needs_evidence" | "rejected";
+
 export type ConceptEligibilityResult = {
+  /** @deprecated Use qualificationStatus === "eligible". */
   eligible: boolean;
+  qualificationStatus: QualificationStatus;
+  /** Deterministische prospectscore (concept readiness). */
   score: number;
+  /** Concept readiness drempel (meestal `conceptScoreThreshold`, niet plan-70). */
   threshold: number;
   priority: "priority_a" | "priority_b" | "priority_c" | "low_priority" | "reject";
   acceptedRules: string[];
   rejectedRules: string[];
   reasonCode: ConceptEligibilityReasonCode;
   userMessage: string;
+  /** Centraal qualification contract (P0-R1). */
+  contract?: import("@/features/ai-recruiter/domain/qualification-contract.types").QualificationContractSnapshot;
 };
 
+export type VacancyEvidenceSourceType =
+  | "careers_page_crawl"
+  | "discovery_classification"
+  | "crm_record";
+
+export type VacancyActiveStatus = "active" | "inactive" | "unknown";
+
+export type ConstraintMatchStatus = "matched" | "unknown" | "mismatched";
+
 export type VacancyEvidence = {
-  title: string;
   companyName: string | null;
-  location: string | null;
+  companyDomain: string;
+  jobTitle: string;
+  jobUrl: string;
   sourceUrl: string;
+  sourceType: VacancyEvidenceSourceType;
+  location: string | null;
+  observedAt: string;
+  activeStatus: VacancyActiveStatus;
+  desiredRoleMatch: boolean;
+  /** @deprecated Use jobTitle */
+  title: string;
   sourceDomain: string;
   publishedAt: string | null;
   validThrough: string | null;

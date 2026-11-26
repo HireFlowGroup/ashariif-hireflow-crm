@@ -32,6 +32,25 @@ export function buildConceptGenerationRunMessage(input: {
 
   if (
     conceptCounters.conceptsCreated === 0
+    && conceptCounters.conceptsSkipped > 0
+    && conceptCounters.conceptsFailed === 0
+    && conceptCounters.conceptsGenerating === 0
+    && conceptCounters.conceptsPending === 0
+  ) {
+    return `${conceptCounters.conceptsSkipped} prospect(s) overgeslagen — actief concept bestaat al.`;
+  }
+
+  if (
+    conceptCounters.conceptsCreated === 0
+    && conceptCounters.conceptsFailed > 0
+    && conceptCounters.conceptsGenerating === 0
+    && conceptCounters.conceptsPending === 0
+  ) {
+    return `Conceptgeneratie mislukt voor ${conceptCounters.conceptsFailed} prospects.`;
+  }
+
+  if (
+    conceptCounters.conceptsCreated === 0
     && conceptCounters.conceptsFailed === 0
     && conceptCounters.conceptsGenerating === 0
     && conceptCounters.conceptsPending === 0
@@ -62,12 +81,20 @@ export function resolveConceptGenerationRunStatus(input: {
     return "awaiting_approval";
   }
 
-  if (conceptCounters.prospectsEligible === 0) {
+  if (conceptCounters.prospectsEligible === 0 && conceptCounters.prospectsEvaluated === 0) {
     return "completed";
+  }
+
+  if (conceptCounters.prospectsEligible === 0) {
+    return "partially_completed";
   }
 
   if (conceptCounters.conceptsFailed > 0 && conceptCounters.conceptsCreated === 0) {
     return "failed";
+  }
+
+  if (conceptCounters.conceptsCreated === 0 && conceptCounters.conceptsSkipped > 0 && conceptCounters.conceptsFailed === 0) {
+    return "partially_completed";
   }
 
   return "partially_completed";

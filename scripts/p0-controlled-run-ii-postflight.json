@@ -1,0 +1,39 @@
+{
+  "phase": "Controlled Run II",
+  "runId": "b1f374b6-7af2-4d50-9fe9-1b6699b437d3",
+  "runName": "Controlled Run II — Commercial Validation",
+  "runStatusDb": "partially_completed",
+  "supabaseProjectRef": "vcmegbghsaqagikfxces",
+  "discovery": {
+    "validated": 2,
+    "rejected": 9,
+    "responseCount": 11,
+    "durationMs": 19950,
+    "primaryProviderTelemetry": "serpapi (logs)",
+    "degradedTavilyHttpBudgetZero": true
+  },
+  "funnelUi": {
+    "companiesSaved": 2,
+    "eligible": 0,
+    "drafts": 0,
+    "contactFound": 1
+  },
+  "companies": [
+    { "name": "SoftTech Automatisering", "domain": "softtech.nl", "companyId": "681ba48f-6138-4e75-836e-2194fae63e40" },
+    { "name": "BBTG", "domain": "bbtg.com", "companyId": "e833072c-7ff1-4391-bdc7-d2fe0d9f8cd7", "contact": "leusden@bbtg.com", "opportunityScore": 4, "hiringScore": 10 }
+  ],
+  "enrichmentPreRunTest": {
+    "companyId": "b56757d2-7b17-42fb-9464-2d3b111bb957",
+    "postStatus": 200,
+    "aiSummariesInserted": 2
+  },
+  "apiBudgetPlanned": {
+    "maxHttpPerRun": 16,
+    "maxSerpApi": 14,
+    "maxTavily": 0,
+    "maxCompaniesPlan": 10,
+    "maxDraftsPlan": 2
+  },
+  "testsConsolidation": "547/547",
+  "generatedAt": "2026-11-26T10:28:00.000Z"
+}

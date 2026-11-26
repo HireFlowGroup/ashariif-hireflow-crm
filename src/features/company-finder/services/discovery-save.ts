@@ -16,11 +16,22 @@ export function buildDiscoveryCreateInput(
   sourceOverride?: string,
   metadata?: Pick<
     QualifiedDiscoveryCandidate,
-    "companyType" | "companyConfidence" | "discoveryReason" | "discoveryProvider"
+    "companyType" | "companyConfidence" | "discoveryReason" | "discoveryProvider" | "saveStatus"
   >,
 ): CreateCompanyInput {
   const website = sanitizeDiscoveryUrl(candidate.website);
   const sourceUrl = sanitizeDiscoveryUrl(candidate.sourceUrl);
+  const status = metadata?.saveStatus === "review" ? "review" : "prospect";
+
+  const vacancyTitles = candidate.vacancyTitles ?? [];
+  const hiringSignals = vacancyTitles.length
+    ? vacancyTitles.map((title) => ({
+        type: "active_vacancy",
+        description: title,
+        source: sourceOverride ?? candidate.source ?? "discovery",
+        confidence: 0.75,
+      }))
+    : undefined;
 
   return {
     name: candidate.name,
@@ -37,8 +48,12 @@ export function buildDiscoveryCreateInput(
     companyConfidence: metadata?.companyConfidence ?? null,
     discoveryReason: metadata?.discoveryReason ?? null,
     discoveryProvider: metadata?.discoveryProvider ?? sourceOverride ?? candidate.source ?? "tavily",
-    status: "prospect",
+    status,
     notes: discoveryUrlFallbackNote(candidate.website ?? candidate.sourceUrl, candidate.description),
+    vacancyPageUrl: sanitizeDiscoveryUrl(candidate.vacancyPageUrl),
+    careersUrl: sanitizeDiscoveryUrl(candidate.careersUrl),
+    vacancyCount: vacancyTitles.length,
+    hiringSignals,
   };
 }
 

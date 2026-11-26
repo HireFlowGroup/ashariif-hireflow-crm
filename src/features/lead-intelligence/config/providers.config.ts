@@ -43,6 +43,14 @@ export function getLeadIntelligenceConfig() {
       10,
     ),
     globalJobTimeoutMs: parseInt(process.env.COMPANY_FINDER_GLOBAL_JOB_TIMEOUT_MS ?? "45000", 10),
+    fastDiscoveryPhaseTimeoutMs: parseInt(
+      process.env.COMPANY_FINDER_DISCOVERY_PHASE_TIMEOUT_MS ?? "105000",
+      10,
+    ),
+    fastSavePhaseTimeoutMs: parseInt(
+      process.env.COMPANY_FINDER_SAVE_PHASE_TIMEOUT_MS ?? "60000",
+      10,
+    ),
     fastModeMaxResults: parseInt(process.env.COMPANY_FINDER_FAST_MODE_MAX_RESULTS ?? "15", 10),
     braveSearch: {
       name: "brave-search",

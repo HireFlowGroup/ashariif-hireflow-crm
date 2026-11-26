@@ -11,7 +11,11 @@ import {
   classifyDiscoveryUrls,
   validateCompanyCandidates,
 } from "@/features/company-finder/discovery/discovery-ai-classifier";
-import { applyDiscoveryHeuristics } from "@/features/company-finder/discovery/discovery-heuristics";
+import {
+  applyDiscoveryHeuristics,
+  rejectionReasonFromHeuristic,
+} from "@/features/company-finder/discovery/discovery-heuristics";
+import { evaluateDiscoveryDecision } from "@/features/company-finder/discovery/discovery-decision";
 import { resolveOfficialCompanyIdentity } from "@/features/company-finder/discovery/company-identity.service";
 import {
   classifyBusinessModel,
@@ -25,21 +29,29 @@ import type {
   QualifiedDiscoveryCandidate,
   RejectedDiscoveryUrl,
 } from "@/features/company-finder/discovery/discovery-quality.types";
-import {
-  DISCOVERY_MIN_SAVE_SCORE,
-} from "@/features/company-finder/discovery/discovery-quality.types";
+import { DISCOVERY_REVIEW_CONFIDENCE_MIN } from "@/features/company-finder/discovery/discovery-quality.types";
 import {
   fetchHomepageSignals,
+  formatCompanyAcceptanceSignals,
   formatHomepageSignals,
 } from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
-import { logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
+import { evaluateDiscoveryPlanConstraints } from "@/features/company-finder/discovery/discovery-plan-constraint.service";
+import { logDiscoveryRejection, logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
+import { applyDiscoveryVacancyEvidenceToCandidate } from "@/features/company-finder/services/discovery-vacancy-persistence";
 
 export type TavilyDiscoveryResult = {
   title: string;
   url: string;
   description?: string | null;
+  /** Concrete vacancy detail page discovered during search (if any). */
+  discoveryVacancyUrl?: string | null;
+  discoveryVacancyTitle?: string | null;
+  discoveryVacancySource?: string | null;
+  discoveryLocation?: string | null;
+  discoveryResultType?: string | null;
+  discoveryDesiredRoleMatch?: boolean;
 };
 
 export type DiscoveryQualityGateResult = {
@@ -59,14 +71,18 @@ function emptyReport(totalUrls = 0): DiscoveryQualityReport {
     government: 0,
     social: 0,
     jobboards: 0,
+    forums: 0,
     unknown: 0,
     realCompanies: 0,
+    review: 0,
     saved: 0,
     rejectedByHeuristics: 0,
     rejectedByAiCategory: 0,
     rejectedByHomepageSignals: 0,
     rejectedByAiValidation: 0,
     rejectedByScore: 0,
+    rejectedByDuplicate: 0,
+    rejectedByLowConfidence: 0,
   };
 }
 
@@ -93,12 +109,34 @@ function incrementCategory(report: DiscoveryQualityReport, category: DiscoveryUr
     case "jobboard":
       report.jobboards += 1;
       break;
+    case "forum":
+      report.forums += 1;
+      break;
     case "unknown":
       report.unknown += 1;
       break;
     default:
       break;
   }
+}
+
+function reject(
+  report: DiscoveryQualityReport,
+  rejected: RejectedDiscoveryUrl[],
+  entry: RejectedDiscoveryUrl,
+  jobId?: string,
+) {
+  report.rejected += 1;
+  incrementCategory(report, entry.category);
+  rejected.push(entry);
+  logDiscoveryRejection({
+    url: entry.url,
+    title: entry.title,
+    reason: entry.reason,
+    detail: entry.detail,
+    score: entry.score,
+    jobId,
+  });
 }
 
 function toCandidate(
@@ -114,25 +152,46 @@ function toCandidate(
   if (!name || name.length < 2) return null;
 
   const domain = extractDomain(result.url);
+  const homepageUrl = result.url.startsWith("http") ? result.url : null;
+  const locations = criteria.locations?.length
+    ? criteria.locations
+    : criteria.city
+      ? [criteria.city]
+      : [];
+  const discoveredCity = result.discoveryLocation
+    ?? (locations.length === 1 ? locations[0] : null)
+    ?? criteria.city
+    ?? null;
 
   return createEmptyCandidate({
     externalId: `${provider}:${domain ?? normalizeCompanyName(name)}`,
     name,
     normalizedName: normalizeCompanyName(name),
-    website: result.url.startsWith("http") ? result.url : null,
+    website: homepageUrl,
     domain,
-    city: criteria.city ?? null,
+    city: discoveredCity,
     region: criteria.region ?? null,
     province: criteria.region ?? null,
     sector: criteria.sector ?? null,
     source: provider,
-    sourceUrl: result.url,
+    sourceUrl: homepageUrl,
     description: result.description ?? null,
     confidence: 0.65,
-    vacancyCount: 0,
+    vacancyCount: result.discoveryVacancyTitle ? 1 : 0,
+    vacancyPageUrl: result.discoveryVacancyUrl ?? null,
+    careersUrl: result.discoveryResultType === "company_careers_page" ? homepageUrl : null,
+    vacancyTitles: result.discoveryVacancyTitle ? [result.discoveryVacancyTitle] : [],
   });
 }
 
+/**
+ * Discovery quality gate (ashariif + Make-HireFlow consolidation):
+ * 1. Dedup → duplicate
+ * 2. High-confidence heuristics only
+ * 3. Soft AI URL category (non-company still filtered)
+ * 4. Homepage signals + ashariif identity / business-model checks
+ * 5. AI confidence bands: >70 company, 50–70 Review, else reject
+ */
 export async function runDiscoveryQualityGate(input: {
   results: TavilyDiscoveryResult[];
   criteria: CompanySearchCriteria;
@@ -161,7 +220,22 @@ export async function runDiscoveryQualityGate(input: {
 
   for (const result of input.results) {
     const dedupeKey = extractDomain(result.url) ?? normalizeCompanyName(cleanCompanyTitle(result.title));
-    if (seen.has(dedupeKey)) continue;
+    if (seen.has(dedupeKey)) {
+      report.rejectedByDuplicate += 1;
+      reject(
+        report,
+        rejected,
+        {
+          url: result.url,
+          title: result.title,
+          category: "unknown",
+          reason: "duplicate",
+          detail: `Duplicate domein/naam: ${dedupeKey}`,
+        },
+        input.jobId,
+      );
+      continue;
+    }
     seen.add(dedupeKey);
 
     const heuristic = applyDiscoveryHeuristics({
@@ -172,30 +246,37 @@ export async function runDiscoveryQualityGate(input: {
 
     if (heuristic.rejected) {
       const category = heuristic.category ?? "unknown";
-      report.rejected += 1;
       report.rejectedByHeuristics += 1;
-      incrementCategory(report, category);
-      rejected.push({
-        url: result.url,
-        title: result.title,
-        category,
-        reason: heuristic.reason ?? "heuristic_title",
-        detail: heuristic.detail ?? "Heuristische afwijzing",
-      });
+      reject(
+        report,
+        rejected,
+        {
+          url: result.url,
+          title: result.title,
+          category,
+          reason: rejectionReasonFromHeuristic(heuristic),
+          detail: heuristic.detail ?? "Heuristische afwijzing (hoge zekerheid)",
+        },
+        input.jobId,
+      );
       continue;
     }
 
     const candidate = toCandidate(result, input.criteria, provider);
     if (!candidate?.website) {
-      report.rejected += 1;
       report.rejectedByHeuristics += 1;
-      rejected.push({
-        url: result.url,
-        title: result.title,
-        category: "unknown",
-        reason: "missing_website",
-        detail: "Geen bruikbare website",
-      });
+      reject(
+        report,
+        rejected,
+        {
+          url: result.url,
+          title: result.title,
+          category: "unknown",
+          reason: "missing_website",
+          detail: "Geen bruikbare website",
+        },
+        input.jobId,
+      );
       continue;
     }
 
@@ -213,31 +294,57 @@ export async function runDiscoveryQualityGate(input: {
     return { qualified, rejected, report };
   }
 
-  const classifications = await classifyDiscoveryUrls(
-    heuristicPassed.map(({ result }) => ({
-      url: result.url,
-      title: result.title,
-      description: result.description,
-    })),
-  );
+  const vacancyEvidencePassed: typeof heuristicPassed = [];
+  const needsAiCategory: typeof heuristicPassed = [];
 
-  const companyPassed: typeof heuristicPassed = [];
+  if (input.criteria.discoveryMode === "targeted") {
+    vacancyEvidencePassed.push(...heuristicPassed);
+  } else {
+    for (const entry of heuristicPassed) {
+      const hasConcreteVacancy =
+        Boolean(entry.result.discoveryVacancyUrl)
+        && (entry.result.discoveryResultType === "individual_vacancy"
+          || entry.result.discoveryResultType === "vacancy_board"
+          || entry.result.discoveryResultType === "company_careers_page");
+      if (hasConcreteVacancy) {
+        vacancyEvidencePassed.push(entry);
+        continue;
+      }
+      needsAiCategory.push(entry);
+    }
+  }
 
-  for (let index = 0; index < heuristicPassed.length; index += 1) {
-    const entry = heuristicPassed[index]!;
+  const classifications =
+    needsAiCategory.length > 0
+      ? await classifyDiscoveryUrls(
+          needsAiCategory.map(({ result }) => ({
+            url: result.url,
+            title: result.title,
+            description: result.description,
+          })),
+        )
+      : [];
+
+  const companyPassed: typeof heuristicPassed = [...vacancyEvidencePassed];
+
+  for (let index = 0; index < needsAiCategory.length; index += 1) {
+    const entry = needsAiCategory[index]!;
     const classification = classifications[index]!;
 
     if (classification.category !== "company") {
-      report.rejected += 1;
       report.rejectedByAiCategory += 1;
-      incrementCategory(report, classification.category);
-      rejected.push({
-        url: entry.result.url,
-        title: entry.result.title,
-        category: classification.category,
-        reason: "ai_url_category",
-        detail: `AI classificatie: ${classification.category}`,
-      });
+      reject(
+        report,
+        rejected,
+        {
+          url: entry.result.url,
+          title: entry.result.title,
+          category: classification.category,
+          reason: "ai_url_category",
+          detail: `AI classificatie: ${classification.category}`,
+        },
+        input.jobId,
+      );
       continue;
     }
 
@@ -267,7 +374,9 @@ export async function runDiscoveryQualityGate(input: {
     result: TavilyDiscoveryResult;
     candidate: ExternalCompanyCandidate;
     signalCount: number;
+    hasCompanyAcceptanceSignal: boolean;
     signalSummary: string;
+    companySignalSummary: string;
   }> = [];
 
   const recruiterConfig = getAiRecruiterConfig();
@@ -279,18 +388,8 @@ export async function runDiscoveryQualityGate(input: {
     let candidate = toCandidate(result, input.criteria, provider);
     if (!candidate) continue;
 
-    if (homepage.signalCount < 2) {
-      report.rejected += 1;
-      report.rejectedByHomepageSignals += 1;
-      rejected.push({
-        url: result.url,
-        title: result.title,
-        category: "company",
-        reason: "insufficient_homepage_signals",
-        detail: `Homepage signalen: ${homepage.signalCount}/10 (${formatHomepageSignals(homepage.signals) || "geen"})`,
-      });
-      continue;
-    }
+    // Soft gate: prefer ≥1 company acceptance signal; AI >70 can still accept later.
+    // Do not hard-reject here solely on signal count — decision layer handles that.
 
     const identity = await resolveOfficialCompanyIdentity({
       searchTitle: result.title,
@@ -310,58 +409,70 @@ export async function runDiscoveryQualityGate(input: {
     });
 
     if (isExcludedBusinessModel(businessModel.classification, recruiterConfig.excludeRecruitmentAgencies)) {
-      report.rejected += 1;
       report.rejectedByHeuristics += 1;
-      rejected.push({
-        url: result.url,
-        title: result.title,
-        category: "directory",
-        reason: "heuristic_title",
-        detail: `Concurrent uitgesloten: ${businessModel.classification} — ${businessModel.reasons.join("; ")}`,
-      });
+      reject(
+        report,
+        rejected,
+        {
+          url: result.url,
+          title: result.title,
+          category: "directory",
+          reason: "directory",
+          detail: `Concurrent uitgesloten: ${businessModel.classification} — ${businessModel.reasons.join("; ")}`,
+        },
+        input.jobId,
+      );
       continue;
     }
 
-    if (identity.unresolved || !identity.officialName || isGenericCompanyLabel(candidate.name)) {
-      if (identity.officialName && identity.confidence >= 0.5) {
-        candidate = {
-          ...candidate,
-          name: identity.officialName,
-          normalizedName: normalizeCompanyName(identity.officialName),
-          confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
-        };
-      } else {
-        report.rejected += 1;
-        report.rejectedByHeuristics += 1;
-        rejected.push({
+    const resolvedName = identity.officialName ?? candidate.name;
+    const resolvedDomain = candidate.domain ?? candidate.website ?? result.url;
+
+    if (
+      identity.unresolved
+      || !resolvedName
+      || isGenericCompanyLabel(resolvedName)
+      || isGenericCompanyLabel(result.title)
+      || !resolvedDomain
+    ) {
+      report.rejectedByHeuristics += 1;
+      reject(
+        report,
+        rejected,
+        {
           url: result.url,
           title: result.title,
           category: "unknown",
           reason: "heuristic_title",
           detail: identity.unresolved
             ? "Bedrijfsidentiteit niet betrouwbaar vastgesteld (unresolved_company_identity)"
-            : `Generieke titel afgewezen: ${result.title}`,
-        });
-        continue;
-      }
-    } else {
-      candidate = {
-        ...candidate,
-        name: identity.officialName,
-        normalizedName: normalizeCompanyName(identity.officialName),
-        confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
-        description: [
-          candidate.description,
-          `Identity: ${identity.source} (${Math.round(identity.confidence * 100)}%)`,
-        ].filter(Boolean).join(" · "),
-      };
+            : isGenericCompanyLabel(resolvedName)
+              ? `Generieke bedrijfslabel afgewezen: ${resolvedName}`
+              : `Generieke titel afgewezen: ${result.title}`,
+        },
+        input.jobId,
+      );
+      continue;
     }
+
+    candidate = {
+      ...candidate,
+      name: resolvedName,
+      normalizedName: normalizeCompanyName(resolvedName),
+      confidence: Math.max(candidate.confidence ?? 0, identity.confidence),
+      description: [
+        candidate.description,
+        `Identity: ${identity.source} (${Math.round(identity.confidence * 100)}%)`,
+      ].filter(Boolean).join(" · "),
+    };
 
     signalPassed.push({
       result,
       candidate,
       signalCount: homepage.signalCount,
+      hasCompanyAcceptanceSignal: homepage.hasCompanyAcceptanceSignal,
       signalSummary: formatHomepageSignals(homepage.signals),
+      companySignalSummary: formatCompanyAcceptanceSignals(homepage.signals),
     });
   }
 
@@ -389,58 +500,98 @@ export async function runDiscoveryQualityGate(input: {
   for (let index = 0; index < signalPassed.length; index += 1) {
     const entry = signalPassed[index]!;
     const validation = validations[index]!;
+    const confidence = validation.confidence ?? validation.score;
 
-    if (validation.verdict !== "company") {
-      report.rejected += 1;
+    const outcome = evaluateDiscoveryDecision({
+      verdict: validation.verdict,
+      confidence,
+      hasCompanyAcceptanceSignal: entry.hasCompanyAcceptanceSignal,
+    });
+
+    if (outcome.action === "reject") {
+      if (outcome.reason === "missing_company_signals") {
+        report.rejectedByHomepageSignals += 1;
+      } else {
+        report.rejectedByAiValidation += 1;
+        report.rejectedByLowConfidence += 1;
+        if (confidence < DISCOVERY_REVIEW_CONFIDENCE_MIN) {
+          report.rejectedByScore += 1;
+        }
+      }
+
+      reject(
+        report,
+        rejected,
+        {
+          url: entry.result.url,
+          title: entry.result.title,
+          category: validation.verdict === "company" ? "company" : "unknown",
+          reason: outcome.reason,
+          detail: outcome.detail,
+          score: outcome.confidence,
+        },
+        input.jobId,
+      );
+      continue;
+    }
+
+    const planConstraint = evaluateDiscoveryPlanConstraints({
+      candidate: entry.candidate,
+      result: entry.result,
+      criteria: input.criteria,
+    });
+
+    if (!planConstraint.acceptable) {
       report.rejectedByAiValidation += 1;
-      incrementCategory(report, validation.companyType === "news" ? "news" : "directory");
-      rejected.push({
-        url: entry.result.url,
-        title: entry.result.title,
-        category: "company",
-        reason: "ai_not_company",
-        detail: `AI validatie: not_company (${validation.companyType})`,
-        score: validation.score,
-      });
+      reject(
+        report,
+        rejected,
+        {
+          url: entry.result.url,
+          title: entry.result.title,
+          category: "company",
+          reason: "score_below_threshold",
+          detail: `Planconstraint ${planConstraint.reason}: ${planConstraint.detail}`,
+          score: outcome.confidence,
+        },
+        input.jobId,
+      );
       continue;
     }
 
-    if (validation.score < DISCOVERY_MIN_SAVE_SCORE) {
-      report.rejected += 1;
-      report.rejectedByScore += 1;
-      rejected.push({
-        url: entry.result.url,
-        title: entry.result.title,
-        category: "company",
-        reason: "score_below_threshold",
-        detail: `Score ${validation.score} onder drempel ${DISCOVERY_MIN_SAVE_SCORE}`,
-        score: validation.score,
-      });
-      continue;
+    if (outcome.saveStatus === "review") {
+      report.review += 1;
     }
-
     report.realCompanies += 1;
 
     const discoveryReason = [
-      "url_category:company",
-      `homepage_signals:${entry.signalCount}`,
+      `ai:${validation.verdict}`,
+      `confidence:${outcome.confidence}`,
+      `save:${outcome.saveStatus}`,
+      `company_signals:${entry.companySignalSummary || "geen"}`,
       entry.signalSummary,
       `validation:${validation.companyType}`,
-      `score:${validation.score}`,
     ].join(" | ");
 
-    qualified.push({
-      candidate: {
+    const candidateWithVacancy = applyDiscoveryVacancyEvidenceToCandidate(
+      {
         ...entry.candidate,
-        confidence: validation.score / 100,
+        confidence: outcome.confidence / 100,
         description: entry.candidate.description,
       },
+      entry.result,
+      provider,
+    );
+
+    qualified.push({
+      candidate: candidateWithVacancy,
       companyType: validation.companyType,
-      companyConfidence: validation.score,
+      companyConfidence: outcome.confidence,
       discoveryReason,
       discoveryProvider: provider,
       urlCategory: "company",
       homepageSignalCount: entry.signalCount,
+      saveStatus: outcome.saveStatus,
     });
   }
 

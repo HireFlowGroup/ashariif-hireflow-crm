@@ -1,6 +1,8 @@
 import type { ProviderAdapter } from "@/features/lead-intelligence/providers/manager/provider-adapter.types";
 import type { ManagedProviderDefinition, ProviderTestResult } from "@/features/lead-intelligence/providers/manager/types";
+import { executeWithResilience } from "@/features/lead-intelligence/providers/manager/provider-executor";
 import { runCrawlerProvider } from "@/features/lead-intelligence/providers/manager/crawler-providers";
+import { resolveProviderHealthTestTimeoutMs } from "@/features/lead-intelligence/providers/manager/provider-env";
 import { runSearchProvider } from "@/features/lead-intelligence/providers/manager/search-providers";
 
 export function createSearchAdapter(
@@ -11,18 +13,31 @@ export function createSearchAdapter(
     definition,
     async test(): Promise<ProviderTestResult> {
       const started = Date.now();
+      const healthTestTimeoutMs = resolveProviderHealthTestTimeoutMs();
       try {
-        const result = await runSearchProvider(
-          { ...definition, id: executorId },
-          "HireFlow provider health check",
-          1,
+        const execution = await executeWithResilience(
+          {
+            providerId: definition.id,
+            timeoutMs: healthTestTimeoutMs,
+            maxRetries: definition.maxRetries,
+            rateLimitPerMinute: definition.rateLimitPerMinute,
+            useCache: false,
+          },
+          (requestTimeoutMs) =>
+            runSearchProvider(
+              { ...definition, id: executorId },
+              "HireFlow provider health check",
+              1,
+              requestTimeoutMs,
+            ),
         );
+        const resultData = execution.data;
         return {
           providerId: definition.id,
-          success: result.data.length > 0,
+          success: resultData.length > 0,
           durationMs: Date.now() - started,
-          responseSize: result.responseSize,
-          message: `${result.data.length} resultaat via ${definition.name}`,
+          responseSize: execution.responseSize,
+          message: `${resultData.length} resultaat via ${definition.name}`,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : "Onbekende fout";
@@ -36,8 +51,13 @@ export function createSearchAdapter(
         };
       }
     },
-    async executeSearch(query, maxResults) {
-      const result = await runSearchProvider({ ...definition, id: executorId }, query, maxResults);
+    async executeSearch(query, maxResults, requestTimeoutMs) {
+      const result = await runSearchProvider(
+        { ...definition, id: executorId },
+        query,
+        maxResults,
+        requestTimeoutMs,
+      );
       return {
         data: result.data,
         responseSize: result.responseSize,

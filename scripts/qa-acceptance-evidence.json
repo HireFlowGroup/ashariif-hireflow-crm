@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-11-26T13:51:08.428Z",
+  "cleanup": [
+    "run b2514961-1bb0-425f-b76e-25e5a3a25992",
+    "run 75e6d467-753b-4dbe-b183-55628a11030d",
+    "run 75e6d467-753b-4dbe-b183-55628a11030d",
+    "company 05b05830-9804-4923-8333-fc5717aed96a"
+  ],
+  "organizationId": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
+  "userId": "3176acff-989c-4c80-accd-321552bd9972",
+  "slotRunId": "b2514961-1bb0-425f-b76e-25e5a3a25992",
+  "slotTests": {
+    "firstReserved": true,
+    "secondReserved": true,
+    "thirdReserved": false,
+    "companiesCommitted": 2,
+    "tenantGuardRejected": true
+  },
+  "commitCounters": {
+    "run_id": "75e6d467-753b-4dbe-b183-55628a11030d",
+    "organization_id": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
+    "companies_committed": 1,
+    "drafts_committed": 0,
+    "updated_at": "2026-11-26T13:51:11.714576+00:00"
+  },
+  "downstreamRunId": "75e6d467-753b-4dbe-b183-55628a11030d",
+  "companyId": "05b05830-9804-4923-8333-fc5717aed96a",
+  "itemId": "f9383f8f-6182-49a2-969d-98f219282572",
+  "downstreamDraftId": "edc14c37-8577-42a1-a548-48d21d810807",
+  "downstream": {
+    "saveType": "saved",
+    "companiesCommitted": 1,
+    "eligibilityEligible": true,
+    "itemId": "f9383f8f-6182-49a2-969d-98f219282572",
+    "companyDomain": "qa-accept-a66649e3.fixture.test",
+    "uiPath": "/ai-recruiter/runs/75e6d467-753b-4dbe-b183-55628a11030d"
+  }
+}

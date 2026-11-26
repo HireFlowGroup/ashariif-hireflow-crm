@@ -4,16 +4,29 @@ import { toCompanyId } from "@/features/companies/domain";
 import type { CompaniesService } from "@/features/companies/services/companies.service";
 import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
 import {
-  evaluateProspectPipeline,
   summarizeEligibilityDecisions,
 } from "@/features/ai-recruiter/services/prospect-eligibility-pipeline.service";
+import { qualifyProspectWithBoundedEnrichment } from "@/features/ai-recruiter/services/prospect-requalification.service";
+import {
+  dedupeVacancyEvidence,
+  filterStrictVacancyEvidence,
+  desiredRoleMatchesVacancy,
+  primaryVacancyTitle,
+} from "@/features/ai-recruiter/services/vacancy-evidence.service";
+import { validateCompanyVacancies } from "@/features/ai-recruiter/services/company-vacancy-validation.service";
 import {
   mapScoreToDecision,
   prospectDecisionToBreakdownFields,
 } from "@/features/ai-recruiter/services/prospect-decision.service";
 import { classifyBusinessModel, isExcludedBusinessModel } from "@/features/company-finder/discovery/business-model-classifier.service";
 import { isGenericCompanyLabel } from "@/features/company-finder/discovery/generic-company-label";
+import { selectContactWithMatchingDomain } from "@/features/ai-recruiter/services/contact-domain-validation.service";
+import {
+  isProspectDraftCapable,
+  resolveCrmPublishedMailbox,
+} from "@/features/ai-recruiter/services/prospect-lifecycle.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import { assertAiRecruiterRuntimeConfigReady } from "@/features/ai-recruiter/services/ai-recruiter-runtime-config.service";
 import type {
   AiRecruiterEngineContext,
   AiRecruiterRun,
@@ -53,6 +66,7 @@ import {
   emptyDiscoverySummary,
   resolveProviderAvailability,
 } from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
+import { resolveDiscoverySearchReadiness } from "@/features/ai-recruiter/services/discovery-search-readiness.service";
 import {
   discoveryStepFailed,
   resolveRunOutcome,
@@ -62,11 +76,19 @@ import {
   mergeDiscoveryEvent,
   skipEnrichmentAndDownstream,
 } from "@/features/ai-recruiter/services/run-session.helpers";
+import { buildPipelineFunnelDiagnostics } from "@/features/ai-recruiter/services/pipeline-funnel-diagnostics.service";
+import { getDiscoveryQueryRun } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
+import { countStrictActiveVacancies } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { CompanySearchJob } from "@/features/company-finder/domain";
+import {
+  enrichEmployeeRangeBeforeQualification,
+  employeeRangeEnrichmentRequired,
+} from "@/features/ai-recruiter/services/employee-range-enrichment.service";
 import {
   parseAiRecruiterSearchPlan,
   searchPlanToCompanyFinderCriteria,
 } from "@/features/ai-recruiter/services/search-plan-parser.service";
+import { clampAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-limits.service";
 import type { CompanyFinderService } from "@/features/company-finder/services/company-finder.service";
 import type { ContactDiscoveryEngine } from "@/features/contact-finder/services/contact-discovery-engine.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
@@ -105,7 +127,8 @@ export class AiRecruiterOrchestrator {
       sendEnabled: config.sendEnabled,
     });
 
-    return this.repository.createRun(context.organizationId, context.userId, input, settings);
+    const searchPlan = clampAiRecruiterSearchPlan(input.searchPlan);
+    return this.repository.createRun(context.organizationId, context.userId, { ...input, searchPlan }, settings);
   }
 
   async *runSession(
@@ -121,6 +144,7 @@ export class AiRecruiterOrchestrator {
     }
 
     const config = getAiRecruiterConfig();
+    assertAiRecruiterRuntimeConfigReady();
     const timeoutMs = config.runTimeoutMinutes * 60_000;
     const startedAt = Date.now();
     const counters: AiRecruiterRunCounters = {
@@ -152,10 +176,16 @@ export class AiRecruiterOrchestrator {
       pipeline.startStep("discovery");
       yield emitPipeline();
 
-      const plan = run.searchCriteria;
-      const criteria = searchPlanToCompanyFinderCriteria(plan, run.prompt);
+      const plan = clampAiRecruiterSearchPlan(run.searchCriteria);
+      const criteria = {
+        ...searchPlanToCompanyFinderCriteria(plan, run.prompt),
+        aiRecruiterRunId: runId,
+        persistenceMaximumCompanies: plan.maximum_companies,
+        maxResults: plan.maximum_companies,
+      };
 
-      if (!resolveProviderAvailability("tavily")) {
+      const discoveryReadiness = resolveDiscoverySearchReadiness();
+      if (!discoveryReadiness.canStart) {
         const discoveryDurationMs = 0;
         const diagnostics = buildDiscoveryDiagnostics({
           plan,
@@ -165,10 +195,14 @@ export class AiRecruiterOrchestrator {
           validatedCount: 0,
         });
         runDiagnostics = diagnostics;
-        pipeline.failStep("discovery", diagnostics.errorMessage ?? "Zoekprovider niet geconfigureerd", {
+        pipeline.failStep(
+          "discovery",
+          discoveryReadiness.message ?? diagnostics.errorMessage ?? "Zoekprovider niet geconfigureerd",
+          {
           processed: 0,
           errors: 1,
-        });
+        },
+        );
         skipEnrichmentAndDownstream(pipeline, "Overgeslagen — provider niet geconfigureerd");
         pipeline.finalizeTerminalRun();
         yield emitPipeline();
@@ -221,8 +255,21 @@ export class AiRecruiterOrchestrator {
           }
 
           if (event.saved || event.updated) {
+            if (savedCompanyIds.length >= plan.maximum_companies) {
+              counters.skipped += 1;
+              await this.repository.createRunItem(context.organizationId, runId, {
+                externalCompanyData: { candidate: event.candidate },
+                stage: "skipped",
+                status: "skipped",
+                rejectionReason: `Over serverlimiet van ${plan.maximum_companies} opgeslagen bedrijven`,
+              });
+              continue;
+            }
+
             counters.validated += 1;
-            const company = await this.resolveCompany(context, event.candidate.name, event.candidate.website);
+            const company = event.companyId
+              ? await this.companiesService.getCompany(context, toCompanyId(event.companyId))
+              : await this.resolveCompany(context, event.candidate.name, event.candidate.website);
             const item = await this.repository.createRunItem(context.organizationId, runId, {
               companyId: company?.id ?? null,
               externalCompanyData: { candidate: event.candidate },
@@ -348,6 +395,141 @@ export class AiRecruiterOrchestrator {
       pipeline.startStep("hiring_signals");
       yield emitPipeline();
 
+      const recruiterConfig = getAiRecruiterConfig();
+      const vacancyApprovedCompanies: Array<{
+        companyId: string;
+        itemId: string;
+        name: string;
+        company: Awaited<ReturnType<CompaniesService["getCompany"]>>;
+        validatedVacancies: VacancyEvidence[];
+        vacancyValidationMessage?: string;
+      }> = [];
+
+      let vacancyValidationProcessed = 0;
+      let vacancyValidationRejected = 0;
+      let vacancyNeedsInvestigation = 0;
+      let enrichmentAttempts = 0;
+
+      for (const { companyId, itemId, name } of savedCompanyIds) {
+        if (Date.now() - startedAt > timeoutMs) break;
+
+        try {
+          const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
+          vacancyValidationProcessed += 1;
+
+          if (plan.vacancy_required) {
+            const validation = await validateCompanyVacancies({ company, plan });
+            const strictVacancies = filterStrictVacancyEvidence(validation.vacancies);
+
+            if (
+              validation.status === "needs_investigation"
+              || validation.status === "insufficient_evidence"
+            ) {
+              vacancyNeedsInvestigation += 1;
+              vacancyApprovedCompanies.push({
+                companyId,
+                itemId,
+                name,
+                company,
+                validatedVacancies: strictVacancies,
+                vacancyValidationMessage: validation.message,
+              });
+              await this.repository.updateRunItem(context.organizationId, itemId, {
+                externalCompanyData: {
+                  vacancyValidation: validation,
+                  validatedVacancies: strictVacancies,
+                  vacancyHints: validation.hints,
+                },
+              });
+              continue;
+            }
+
+            if (validation.status !== "accepted") {
+              vacancyValidationRejected += 1;
+              counters.skipped += 1;
+
+              const reasonCode: ConceptEligibilityResult["reasonCode"] =
+                validation.status === "no_matching_role" ? "no_matching_role" : "no_active_vacancy";
+              const eligibility: ConceptEligibilityResult = {
+                eligible: false,
+                qualificationStatus: "rejected",
+                score: 0,
+                threshold: recruiterConfig.conceptScoreThreshold,
+                priority: "reject",
+                acceptedRules: [],
+                rejectedRules: [reasonCode],
+                reasonCode,
+                userMessage: validation.message,
+              };
+
+              const updatedItem = await this.repository.updateRunItem(context.organizationId, itemId, {
+                stage: "skipped",
+                status: "skipped",
+                rejectionReason: validation.message,
+                externalCompanyData: {
+                  vacancyValidation: validation,
+                  validatedVacancies: strictVacancies,
+                  eligibility,
+                },
+              });
+
+              await this.prospectAudit.upsertDecision({
+                organizationId: context.organizationId,
+                runId,
+                runItemId: itemId,
+                company,
+                eligibility,
+                vacancies: strictVacancies,
+                contact: null,
+                contactStage: reasonCode,
+                conceptStatus: "skipped",
+                vacancyAuditStatus: validation.auditStatus,
+                parsedVacancyCount: validation.parsedVacancyCount,
+                searchPlan: plan,
+              });
+
+              yield { type: "item", item: updatedItem };
+              continue;
+            }
+
+            vacancyApprovedCompanies.push({
+              companyId,
+              itemId,
+              name,
+              company,
+              validatedVacancies: strictVacancies,
+            });
+            counters.withVacancies += 1;
+            continue;
+          }
+
+          vacancyApprovedCompanies.push({
+            companyId,
+            itemId,
+            name,
+            company,
+            validatedVacancies: [],
+          });
+        } catch (error) {
+          consecutiveFailures += 1;
+          counters.failed += 1;
+          console.error("[VacancyValidation] company validation failed", {
+            companyId,
+            itemId,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
+
+      pipeline.completeStep("vacancies", {
+        processed: vacancyValidationProcessed,
+        succeeded: vacancyApprovedCompanies.length,
+        skipped: vacancyValidationRejected,
+        message: plan.vacancy_required
+          ? `${vacancyApprovedCompanies.length}/${vacancyValidationProcessed} doorgestroomd (${counters.withVacancies} bevestigd, ${vacancyNeedsInvestigation} onderzoek)`
+          : "Vacaturevalidatie niet vereist",
+      });
+
       const qualifiedItems: Array<{
         itemId: string;
         companyId: string;
@@ -368,20 +550,27 @@ export class AiRecruiterOrchestrator {
         hiring: HiringIntelligenceProfile;
         opportunity: OpportunityAssessment;
         sales: SalesIntelligenceAssessment;
+        validatedVacancies: VacancyEvidence[];
       };
 
       const companyContactContexts: CompanyContactContext[] = [];
 
-      for (const { companyId, itemId, name } of savedCompanyIds) {
+      for (const entry of vacancyApprovedCompanies) {
         if (Date.now() - startedAt > timeoutMs) break;
 
         try {
-          const company = await this.companiesService.getCompany(context, toCompanyId(companyId));
+          const { company, companyId, itemId, name, validatedVacancies } = entry;
           const hiring = computeHiringIntelligenceProfile(company, plan);
-          const opportunity = computeOpportunityAssessment(company, plan);
+          const opportunity = computeOpportunityAssessment(company, plan, {
+            hiringScore: hiring.hiringScore,
+            desiredRoleMatch: (() => {
+              const vacancies = filterStrictVacancyEvidence(dedupeVacancyEvidence(entry.validatedVacancies));
+              const primaryTitle = primaryVacancyTitle(vacancies);
+              return primaryTitle ? desiredRoleMatchesVacancy(primaryTitle, plan) : false;
+            })(),
+          });
           const sales = computeSalesIntelligence(company, hiring, plan);
 
-          if (hiring.vacancyCount > 0) counters.withVacancies += 1;
           if (hiring.signals.length > 0) counters.withSignals += 1;
 
           console.info("[SalesIntelligence] assessment", {
@@ -411,13 +600,14 @@ export class AiRecruiterOrchestrator {
             hiring,
             opportunity,
             sales,
+            validatedVacancies,
           });
         } catch (error) {
           consecutiveFailures += 1;
           counters.failed += 1;
           console.error("[ContactFinder] company context failed", {
-            companyId,
-            itemId,
+            companyId: entry.companyId,
+            itemId: entry.itemId,
             error: error instanceof Error ? error.message : error,
           });
           if (consecutiveFailures >= config.consecutiveProviderFailuresKillSwitch) {
@@ -428,24 +618,31 @@ export class AiRecruiterOrchestrator {
 
       console.info("[ContactFinder] DEBUG overview — start", {
         companiesReceived: savedCompanyIds.length,
+        vacancyApproved: vacancyApprovedCompanies.length,
         validatedCounter: counters.validated,
         companiesPreparedForContactFinder: companyContactContexts.length,
       });
 
-      if (counters.validated > 0 && savedCompanyIds.length === 0) {
-        console.error("[ContactFinder] BUG: validated > 0 maar geen company_id op run items", {
-          validated: counters.validated,
-          savedCompanyIds: savedCompanyIds.length,
+      if (vacancyApprovedCompanies.length === 0 && savedCompanyIds.length > 0) {
+        skipEnrichmentAndDownstream(pipeline, "Geen bedrijven met actuele vacature-match");
+        pipeline.finalizeTerminalRun();
+        yield emitPipeline();
+
+        const outcome = resolveRunOutcome({ counters, diagnostics: runDiagnostics!, draftsCreated: 0 });
+        const finalRun = await this.repository.updateRun(context.organizationId, runId, {
+          status: outcome.status,
+          counters,
+          pipelineSteps: pipeline.getSnapshot(),
+          completedAt: new Date().toISOString(),
+          errorMessage: outcome.errorMessage,
+          settings: buildRunSettingsWithDiagnostics(run.settings, runDiagnostics!, finderJobId),
         });
+
+        yield { type: "counters", counters };
+        yield { type: "complete", run: finalRun };
+        return;
       }
 
-      if (companyContactContexts.length === 0 && savedCompanyIds.length > 0) {
-        console.error("[ContactFinder] BUG: geen company context — Contact Finder wordt niet uitgevoerd", {
-          savedCompanyIds: savedCompanyIds.length,
-        });
-      }
-
-      pipeline.completeStep("vacancies", { succeeded: counters.withVacancies });
       pipeline.completeStep("hiring_signals", { succeeded: counters.withSignals });
       yield emitPipeline();
 
@@ -453,10 +650,10 @@ export class AiRecruiterOrchestrator {
       yield emitPipeline();
 
       let aiAnalysisSucceeded = 0;
-      const intelligenceEngine = await createRecruitmentIntelligenceEngine();
+      const intelligenceEngine = await createRecruitmentIntelligenceEngine(this.contactsClient);
       const analysisByCompanyId = new Map<string, RecruitmentIntelligenceAnalysis>();
 
-      for (const { companyId, itemId } of savedCompanyIds) {
+      for (const { companyId, itemId } of vacancyApprovedCompanies) {
         try {
           const record = await intelligenceEngine.ensureFreshAnalysis(context, companyId, {
             runItemId: itemId,
@@ -475,10 +672,10 @@ export class AiRecruiterOrchestrator {
       }
 
       pipeline.completeStep("ai_analysis", {
-        processed: savedCompanyIds.length,
+        processed: vacancyApprovedCompanies.length,
         succeeded: aiAnalysisSucceeded,
-        errors: savedCompanyIds.length - aiAnalysisSucceeded,
-        message: `${aiAnalysisSucceeded}/${savedCompanyIds.length} recruitment intelligence analyses`,
+        errors: vacancyApprovedCompanies.length - aiAnalysisSucceeded,
+        message: `${aiAnalysisSucceeded}/${vacancyApprovedCompanies.length} recruitment intelligence analyses`,
       });
       yield emitPipeline();
 
@@ -622,7 +819,6 @@ export class AiRecruiterOrchestrator {
 
       pipeline.startStep("lead_score");
 
-      const recruiterConfig = getAiRecruiterConfig();
       const eligibilityDecisions: import("@/features/ai-recruiter/domain/concept-eligibility.types").ConceptEligibilityResult[] = [];
 
       for (const entry of companyContactContexts) {
@@ -641,6 +837,12 @@ export class AiRecruiterOrchestrator {
         const analysis = analysisByCompanyId.get(entry.companyId) ?? null;
         const salesFields = salesToScoreBreakdownFields(sales);
 
+        const verifiedContact = selectContactWithMatchingDomain({
+          selected: result.selected,
+          alternatives: result.alternatives,
+          companyDomain: company.domain,
+        });
+
         const businessModel = classifyBusinessModel({
           name: company.name,
           url: company.website,
@@ -649,15 +851,74 @@ export class AiRecruiterOrchestrator {
           excludeRecruitmentAgencies: recruiterConfig.excludeRecruitmentAgencies,
         });
 
-        const pipelineDecision = evaluateProspectPipeline({
+        const discoverySnippets = [
+          company.aiSummary,
+          company.discoveryReason,
+          company.employeeCountLabel,
+          company.sourceUrl,
+        ].filter((value): value is string => Boolean(value?.trim()));
+
+        const criteria = searchPlanToCompanyFinderCriteria(plan, run.prompt);
+        enrichmentAttempts += 1;
+        const confirmedVacancyCount = countStrictActiveVacancies(entry.validatedVacancies);
+        const requal = await qualifyProspectWithBoundedEnrichment({
           company,
           plan,
-          hiring,
-          analysis,
-          contact: result.selected,
-          contactStage: result.stage,
-          contactRejectionReason: result.errorMessage,
+          hiringScore: hiring.hiringScore,
+          opportunityScore: opportunity.opportunityScore,
+          vacancyCount: confirmedVacancyCount,
+          vacancies: entry.validatedVacancies,
+          contact: verifiedContact.contact,
+          contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
+          contactRejectionReason: verifiedContact.invalidContact
+            ? "Contactdomein komt niet overeen met bedrijfsdomein."
+            : result.errorMessage,
+          desiredRoleMatch: (() => {
+            const vacancies = filterStrictVacancyEvidence(dedupeVacancyEvidence(entry.validatedVacancies));
+            const primaryTitle = primaryVacancyTitle(vacancies);
+            return primaryTitle ? desiredRoleMatchesVacancy(primaryTitle, plan) : false;
+          })(),
+          invalidContact: verifiedContact.invalidContact,
+          discoverySnippets,
+          enrichmentDeps: employeeRangeEnrichmentRequired(plan)
+            ? {
+                resolveEmployeeRangeViaProvider: async ({ company: c }) => {
+                  const employeeEnrichment = await enrichEmployeeRangeBeforeQualification({
+                    company: c,
+                    plan,
+                    criteria,
+                  });
+                  if (!employeeEnrichment.employeeCountLabel) return null;
+                  const verified = employeeEnrichment.employeeCountLabel.includes("Bewijs in bron");
+                  return {
+                    label: employeeEnrichment.employeeCountLabel,
+                    verified,
+                    sourceUrl: c.website ?? c.sourceUrl,
+                    sourceType: "llm_inference",
+                  };
+                },
+              }
+            : undefined,
         });
+
+        if (
+          requal.company.employeeCountMin !== company.employeeCountMin
+          || requal.company.employeeCountMax !== company.employeeCountMax
+          || requal.company.employeeCountLabel !== company.employeeCountLabel
+        ) {
+          await this.companiesService.updateCompany(context, toCompanyId(entry.companyId), {
+            employeeCountMin: requal.company.employeeCountMin,
+            employeeCountMax: requal.company.employeeCountMax,
+            employeeCountLabel: requal.company.employeeCountLabel,
+          });
+        }
+
+        const pipelineDecision = {
+          eligibility: requal.eligibility,
+          vacancies: filterStrictVacancyEvidence(dedupeVacancyEvidence(entry.validatedVacancies)),
+          desiredRoleMatch: requal.eligibility.acceptedRules.includes("relevant_focus_role"),
+          aiOpportunityScore: analysis?.recruitment_opportunity_score ?? null,
+        };
 
         const decisionFields = prospectDecisionToBreakdownFields(
           mapScoreToDecision(pipelineDecision.eligibility.score),
@@ -671,30 +932,38 @@ export class AiRecruiterOrchestrator {
 
         const contactDiscoveryPayload = {
           contactDiscovery: {
-            stage: result.stage,
-            selected: result.selected,
+            stage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
+            selected: verifiedContact.contact,
             alternatives: result.alternatives,
-            errorMessage: result.errorMessage,
+            errorMessage: verifiedContact.invalidContact
+              ? "Contactdomein komt niet overeen met bedrijfsdomein."
+              : result.errorMessage,
           },
           eligibility: pipelineDecision.eligibility,
           vacancyEvidence: pipelineDecision.vacancies,
+          prospectEvidence: requal.evidenceBundle,
+          boundedEnrichment: requal.enrichment,
         };
 
-        if (result.stage === "contact_found") {
+        if (verifiedContact.contact && result.stage === "contact_found") {
           counters.contactFound += 1;
-        } else if (result.stage === "general_mailbox_found") {
+        } else if (verifiedContact.contact && result.stage === "general_mailbox_found") {
           counters.generalMailboxFound += 1;
+        } else if (!verifiedContact.contact) {
+          counters.blockedMissingContact += 1;
         } else if (result.stage === "blocked_missing_contact") {
           counters.blockedMissingContact += 1;
         }
+
+        const selectedContact = verifiedContact.contact;
 
         const scoreBreakdown = {
           companyFit: pipelineDecision.eligibility.score,
           hiring: hiring.hiringScore,
           opportunity: pipelineDecision.aiOpportunityScore ?? opportunity.opportunityScore,
-          contact: result.selected ? (result.selected.isGeneralMailbox ? 12 : 20) : 0,
+          contact: selectedContact ? (selectedContact.isGeneralMailbox ? 12 : 20) : 0,
           personalization: 0,
-          outreachReadiness: pipelineDecision.eligibility.eligible ? 50 : 0,
+          outreachReadiness: pipelineDecision.eligibility.qualificationStatus === "eligible" ? 50 : 0,
           explanations: [
             ...pipelineDecision.eligibility.acceptedRules,
             ...pipelineDecision.eligibility.rejectedRules.map((rule) => `Afgewezen: ${rule}`),
@@ -713,21 +982,31 @@ export class AiRecruiterOrchestrator {
           identityUnresolved: isGenericCompanyLabel(company.name),
         };
 
-        const effectivelyEligible = pipelineDecision.eligibility.eligible && !identityBlocked;
+        const effectivelyEligible =
+          pipelineDecision.eligibility.qualificationStatus === "eligible" && !identityBlocked;
 
-        if (!effectivelyEligible) {
+        const contactForDraft = selectedContact ?? resolveCrmPublishedMailbox(requal.company);
+        const draftCapable =
+          !identityBlocked
+          && Boolean(contactForDraft)
+          && (
+            effectivelyEligible
+            || isProspectDraftCapable(pipelineDecision.eligibility, plan)
+          );
+
+        if (!draftCapable || !contactForDraft) {
           const updatedItem = await this.repository.updateRunItem(context.organizationId, entry.itemId, {
             stage: result.stage,
             status: result.stage === "contact_lookup_failed" ? "failed" : "skipped",
             hiringScore: hiring.hiringScore,
-            contactScore: result.selected ? 12 : 0,
+            contactScore: selectedContact ? 12 : 0,
             totalScore: pipelineDecision.eligibility.score,
             scoreBreakdown,
             rejectionReason: identityBlocked
               ? `Uitgesloten: ${businessModel.classification} / generieke identiteit`
               : pipelineDecision.eligibility.userMessage,
             warnings: hiring.warnings,
-            selectedContactId: result.selected?.contactId ?? null,
+            selectedContactId: selectedContact?.contactId ?? null,
             externalCompanyData: contactDiscoveryPayload,
           });
 
@@ -738,9 +1017,10 @@ export class AiRecruiterOrchestrator {
             company,
             eligibility: pipelineDecision.eligibility,
             vacancies: pipelineDecision.vacancies,
-            contact: result.selected,
-            contactStage: result.stage,
+            contact: selectedContact,
+            contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
             conceptStatus: "skipped",
+            searchPlan: plan,
           });
 
           if (result.stage !== "contact_lookup_failed") {
@@ -755,13 +1035,13 @@ export class AiRecruiterOrchestrator {
           stage: result.stage,
           status: "completed",
           hiringScore: hiring.hiringScore,
-          contactScore: result.selected?.isGeneralMailbox ? 12 : 20,
-          outreachScore: 50,
+          contactScore: selectedContact?.isGeneralMailbox ? 12 : 20,
+          outreachScore: effectivelyEligible ? 50 : 35,
           totalScore: pipelineDecision.eligibility.score,
           scoreBreakdown,
-          rejectionReason: null,
+          rejectionReason: effectivelyEligible ? null : pipelineDecision.eligibility.userMessage,
           warnings: hiring.warnings,
-          selectedContactId: result.selected?.contactId ?? null,
+          selectedContactId: selectedContact?.contactId ?? null,
           externalCompanyData: contactDiscoveryPayload,
         });
 
@@ -769,35 +1049,31 @@ export class AiRecruiterOrchestrator {
           organizationId: context.organizationId,
           runId,
           runItemId: entry.itemId,
-          company,
+          company: requal.company,
           eligibility: pipelineDecision.eligibility,
           vacancies: pipelineDecision.vacancies,
-          contact: result.selected,
-          contactStage: result.stage,
+          contact: contactForDraft,
+          contactStage: verifiedContact.contact ? result.stage : "blocked_missing_contact",
           conceptStatus: "pending",
+          searchPlan: plan,
         });
 
         yield { type: "item", item: updatedItem };
 
-        if (result.selected) {
-          qualifiedItems.push({
-            itemId: entry.itemId,
-            companyId: entry.companyId,
-            company,
-            totalScore: pipelineDecision.eligibility.score,
-            opportunity,
-            selected: result.selected,
-            vacancies: pipelineDecision.vacancies,
-            contactStage: result.stage,
-            eligibility: pipelineDecision.eligibility,
-          });
-        }
+        qualifiedItems.push({
+          itemId: entry.itemId,
+          companyId: entry.companyId,
+          company: requal.company,
+          totalScore: pipelineDecision.eligibility.score,
+          opportunity,
+          selected: contactForDraft,
+          vacancies: pipelineDecision.vacancies,
+          contactStage: result.stage,
+          eligibility: pipelineDecision.eligibility,
+        });
       }
 
-      eligibilitySummary = summarizeEligibilityDecisions(
-        eligibilityDecisions,
-        recruiterConfig.conceptScoreThreshold,
-      );
+      eligibilitySummary = summarizeEligibilityDecisions(eligibilityDecisions, plan);
 
       const avgDuration =
         contactStats.processed > 0
@@ -831,7 +1107,11 @@ export class AiRecruiterOrchestrator {
       qualifiedItems.sort((a, b) => b.totalScore - a.totalScore);
 
       const eligibleProspects: EligibleProspectForConcept[] = qualifiedItems
-        .filter((entry) => entry.eligibility.eligible)
+        .filter(
+          (entry) =>
+            entry.eligibility.qualificationStatus === "eligible"
+            || isProspectDraftCapable(entry.eligibility, plan),
+        )
         .map((entry) => ({
           itemId: entry.itemId,
           companyId: entry.companyId,
@@ -862,6 +1142,7 @@ export class AiRecruiterOrchestrator {
           repository: this.repository,
           prospectAudit: this.prospectAudit,
           maxConcepts: plan.maximum_drafts,
+          supabaseClient: this.contactsClient,
         });
       } finally {
         if (!conceptDispatchResult) {
@@ -900,6 +1181,7 @@ export class AiRecruiterOrchestrator {
           `eligible ${conceptDispatchResult.counters.prospectsEligible}`,
           `gestart ${conceptDispatchResult.counters.conceptsStarted}`,
           `aangemaakt ${conceptDispatchResult.counters.conceptsCreated}`,
+          `overgeslagen ${conceptDispatchResult.counters.conceptsSkipped}`,
           `mislukt ${conceptDispatchResult.counters.conceptsFailed}`,
         ].join(" · "),
       });
@@ -925,6 +1207,20 @@ export class AiRecruiterOrchestrator {
           ? buildRunFailureUiMessage(runDiagnostics, outcome.status)
           : null;
 
+      const storedDiscovery = finderJobId ? getDiscoveryQueryRun(finderJobId) : null;
+      const pipelineFunnel = buildPipelineFunnelDiagnostics({
+        discoverySummary: discoverySummary,
+        counters,
+        eligibilityDecisions,
+        enrichmentAttempts,
+        conceptsCreated: counters.draftsCreated,
+        providerTelemetry: storedDiscovery?.providerRequestTelemetry ?? null,
+        providerDegradedMode: storedDiscovery?.providerDegradedMode ?? null,
+        enrichmentProviderCalls: enrichmentAttempts,
+        searchQueries: storedDiscovery?.queriesGenerated?.length,
+        providerFailoverCount: storedDiscovery?.providerRequestTelemetry?.failoverEvents,
+      });
+
       const finalRun = await this.repository.updateRun(context.organizationId, runId, {
         status: outcome.status,
         counters,
@@ -932,8 +1228,8 @@ export class AiRecruiterOrchestrator {
         completedAt: new Date().toISOString(),
         errorMessage: outcome.errorMessage ?? uiMessage?.body ?? null,
         settings: runDiagnostics
-          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics, finderJobId)
-          : run.settings,
+          ? buildRunSettingsWithDiagnostics(run.settings, runDiagnostics, finderJobId, pipelineFunnel)
+          : { ...run.settings, pipelineFunnel },
       });
 
       yield { type: "counters", counters };

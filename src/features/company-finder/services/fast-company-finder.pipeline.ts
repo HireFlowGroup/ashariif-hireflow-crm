@@ -8,10 +8,19 @@ import {
   PipelineStepTimer,
 } from "@/features/company-finder/pipeline/pipeline-step-timer";
 import { scheduleBackgroundCompanyEnrichment } from "@/features/company-finder/services/background-enrichment.service";
-import { buildQualifiedDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
-import { runFastTavilySearch } from "@/features/company-finder/services/fast-discovery.service";
+import {
+  loadExistingCompaniesForDedupe,
+  saveDiscoveryCompanyWithDedupe,
+  type DiscoveryCompanyRunPersistenceContext,
+} from "@/features/company-finder/services/discovery-company-deduplication.service";
+import {
+  runFastTavilySearch,
+  type MultiQueryDiscoveryResult,
+} from "@/features/company-finder/services/fast-discovery.service";
 import { recordDiscoveryQueryRun } from "@/features/company-finder/discovery/discovery-query-diagnostics.store";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import { limitQualifiedDiscoveryCandidatesForPersistence } from "@/features/ai-recruiter/services/search-plan-limits.service";
+import { resolvePrimaryDiscoveryProviderFailure } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
 import { runDiscoveryQualityGate } from "@/features/company-finder/discovery/discovery-quality-gate";
 import type { DiscoveryQualityReport, QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
@@ -26,6 +35,7 @@ import type { LeadIntelligenceContext, LeadIntelligenceRunEvent } from "@/featur
 import { isExcludedCandidate } from "@/features/lead-intelligence/services/dedupe";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
 import { logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 function toStreamCandidate(candidate: LeadCandidate): ExternalCompanyCandidate {
   return {
@@ -63,12 +73,15 @@ export async function* runFastCompanyFinderPipeline(input: {
     }>,
   ) => LeadIntelligenceRunEvent;
   currentJob: CompanySearchJob;
+  supabaseClient?: SupabaseClient | null;
 }): AsyncGenerator<LeadIntelligenceRunEvent, CompanySearchJob, undefined> {
   const config = getLeadIntelligenceConfig();
   const timer = new PipelineStepTimer(input.jobId);
-  const deadline = JobDeadline.fromTimeoutMs(config.globalJobTimeoutMs);
+  const deadline = JobDeadline.fromTimeoutMs(config.fastDiscoveryPhaseTimeoutMs);
+  let phaseTimeoutMs = config.fastDiscoveryPhaseTimeoutMs;
   let currentJob = input.currentJob;
   let savedCount = 0;
+  let updatedCount = 0;
   let skippedCount = 0;
   let saveErrorCount = 0;
 
@@ -95,16 +108,22 @@ export async function* runFastCompanyFinderPipeline(input: {
     government: 0,
     social: 0,
     jobboards: 0,
+    forums: 0,
     unknown: 0,
     realCompanies: 0,
+    review: 0,
     saved: 0,
     rejectedByHeuristics: 0,
     rejectedByAiCategory: 0,
     rejectedByHomepageSignals: 0,
     rejectedByAiValidation: 0,
     rejectedByScore: 0,
+    rejectedByDuplicate: 0,
+    rejectedByLowConfidence: 0,
   };
   let qualifiedCandidates: QualifiedDiscoveryCandidate[] = [];
+  let discoveryRun: MultiQueryDiscoveryResult | null = null;
+  let runPersistence: DiscoveryCompanyRunPersistenceContext | null = null;
 
   try {
     const discoveryStarted = Date.now();
@@ -114,7 +133,15 @@ export async function* runFastCompanyFinderPipeline(input: {
       aiRecruiterConfig.discoveryQueryCount * aiRecruiterConfig.resultsPerQuery,
     );
 
-    const tavily = await runFastTavilySearch(input.searchCriteria, {
+    discoveryRun = await runFastTavilySearch(
+      {
+        ...input.searchCriteria,
+        aiRecruiterRunId: input.job.criteria.aiRecruiterRunId,
+        discoveryMode: input.job.criteria.discoveryMode,
+        targetEmployerNames: input.job.criteria.targetEmployerNames,
+        targetEmployerDomains: input.job.criteria.targetEmployerDomains,
+      },
+      {
       maxResults: discoveryMaxResults,
       timeoutMs: config.tavilyTimeoutMs,
       searchPlan: {
@@ -136,9 +163,12 @@ export async function* runFastCompanyFinderPipeline(input: {
         approval_mode: "manual",
         exclusions: input.job.criteria.excludedNames ?? [],
         uncertainties: [],
-        reasoning: "",
+        reasoning: input.job.criteria.sourceQuery ?? "",
       },
-    });
+    },
+    );
+
+    const tavily = discoveryRun;
 
     recordDiscoveryQueryRun({
       jobId: input.jobId,
@@ -150,6 +180,18 @@ export async function* runFastCompanyFinderPipeline(input: {
       funnel: tavily.funnel,
       resultLogs: tavily.resultLogs,
       recordedAt: new Date().toISOString(),
+      queriesGenerated: tavily.queriesGenerated,
+      serpApiFallbackTriggered: tavily.serpApiFallbackTriggered,
+      serpApiFallbackReason: tavily.serpApiFallbackReason,
+      tavilyUsefulRecall: tavily.tavilyUsefulRecall,
+      employerHostedResults: tavily.funnel.employerHostedResults,
+      concreteVacancyResults: tavily.funnel.concreteVacancyResults,
+      desiredRoleVacancyResults: tavily.funnel.desiredRoleVacancyResults,
+      usableRecallDiagnostics: tavily.usableRecallDiagnostics,
+      providerRequestTelemetry: tavily.providerRequestTelemetry,
+      providerDegradedMode: tavily.providerDegradedMode,
+      discoveryQueryDuplicatesRemoved: tavily.discoveryQueryDuplicatesRemoved,
+      apiBudgetSnapshot: tavily.apiBudgetSnapshot,
     });
 
     timer.start("discovery_quality_gate", "quality");
@@ -168,8 +210,37 @@ export async function* runFastCompanyFinderPipeline(input: {
     });
 
     qualityReport = qualityGate.report;
-    qualifiedCandidates = qualityGate.qualified;
-    candidates = qualityGate.qualified.map((entry) => entry.candidate);
+    const persistenceCap = Math.min(
+      input.job.criteria.persistenceMaximumCompanies
+        ?? input.job.criteria.maxResults
+        ?? aiRecruiterConfig.defaultMaximumCompanies,
+      getAiRecruiterConfig().planLimitMaximumCompanies,
+    );
+    runPersistence = input.job.criteria.aiRecruiterRunId
+      ? {
+          organizationId: input.context.organizationId,
+          runId: input.job.criteria.aiRecruiterRunId,
+          maximumCompanies: persistenceCap,
+          client: input.supabaseClient ?? null,
+        }
+      : null;
+    const limited = limitQualifiedDiscoveryCandidatesForPersistence(qualityGate.qualified, persistenceCap, {
+      locations: input.searchCriteria.locations,
+      sectors: input.searchCriteria.sectors?.length
+        ? input.searchCriteria.sectors
+        : input.searchCriteria.sector
+          ? [input.searchCriteria.sector]
+          : [],
+      desiredRoles: input.searchCriteria.desiredRoles,
+    });
+    qualifiedCandidates = limited.toPersist;
+    qualityReport = {
+      ...qualityReport,
+      foundQualified: qualityGate.qualified.length,
+      persistedCap: persistenceCap,
+      deferredOverPlanLimit: limited.deferredCount,
+    };
+    candidates = qualifiedCandidates.map((entry) => entry.candidate);
 
     timer.complete("tavily_discovery", { resultCount: tavily.results.length, provider: "tavily" });
     logPipelinePhase({
@@ -234,8 +305,13 @@ export async function* runFastCompanyFinderPipeline(input: {
     },
   );
 
+  phaseTimeoutMs = config.fastSavePhaseTimeoutMs;
+  deadline.reset(phaseTimeoutMs);
+
   timer.start("fast_save", "supabase");
   deadline.assert("fast_save");
+
+  const existingCompanies = await loadExistingCompaniesForDedupe(input.companiesService, input.context);
 
   const saveResults = await runWithConcurrencySettled(
     qualifiedCandidates.map((qualified) => async () => {
@@ -254,10 +330,13 @@ export async function* runFastCompanyFinderPipeline(input: {
       });
 
       try {
-        const created = await input.companiesService.createDiscoveryCompany(
-          input.context,
-          buildQualifiedDiscoveryCreateInput(qualified, input.context.userId),
-        );
+        const saveResult = await saveDiscoveryCompanyWithDedupe({
+          companiesService: input.companiesService,
+          context: input.context,
+          qualified,
+          existingCompanies,
+          runPersistence,
+        });
 
         logPipelinePhase({
           phase: "SAVE",
@@ -268,17 +347,19 @@ export async function* runFastCompanyFinderPipeline(input: {
           jobId: input.jobId,
         });
 
-        scheduleBackgroundCompanyEnrichment({
-          organizationId: input.context.organizationId,
-          companiesService: input.companiesService,
-          context: input.context,
-          companyId: created.id as string,
-          candidate,
-          searchCriteria: input.searchCriteria,
-          jobId: input.jobId,
-        });
+        if (saveResult.type === "saved") {
+          scheduleBackgroundCompanyEnrichment({
+            organizationId: input.context.organizationId,
+            companiesService: input.companiesService,
+            context: input.context,
+            companyId: saveResult.companyId,
+            candidate,
+            searchCriteria: input.searchCriteria,
+            jobId: input.jobId,
+          });
+        }
 
-        return { type: "saved" as const, candidate, companyId: created.id as string };
+        return saveResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Opslaan mislukt";
         logPipelinePhase({
@@ -327,6 +408,31 @@ export async function* runFastCompanyFinderPipeline(input: {
       continue;
     }
 
+    if (result.value.type === "updated") {
+      updatedCount += 1;
+      yield {
+        type: "candidate",
+        candidate: toStreamCandidate(result.value.candidate),
+        saved: false,
+        updated: true,
+        skipped: false,
+        companyId: result.value.companyId,
+      };
+      yield {
+        type: "event",
+        eventType: "company_updated",
+        payload: { name: result.value.candidate.name, mode: "fast" },
+      };
+      yield input.emitProgress("saving", `Bestaand bedrijf gekoppeld: ${result.value.candidate.name}`, {
+        foundCount: candidates.length,
+        savedCount,
+        updatedCount,
+        skippedCount,
+        progressPercent: 35 + Math.round(((savedCount + updatedCount) / Math.max(candidates.length, 1)) * 55),
+      });
+      continue;
+    }
+
     savedCount += 1;
     yield {
       type: "candidate",
@@ -334,6 +440,7 @@ export async function* runFastCompanyFinderPipeline(input: {
       saved: true,
       updated: false,
       skipped: false,
+      companyId: result.value.companyId,
     };
     yield {
       type: "event",
@@ -348,25 +455,31 @@ export async function* runFastCompanyFinderPipeline(input: {
     });
   }
 
-  timer.complete("fast_save", { resultCount: savedCount, provider: "supabase" });
+  timer.complete("fast_save", { resultCount: savedCount + updatedCount, provider: "supabase" });
 
+  const persistedCount = savedCount + updatedCount;
   const finalStatus =
-    savedCount > 0
+    persistedCount > 0
       ? "completed"
       : candidates.length > 0
         ? "failed"
         : "failed";
+  const providerFailure = resolvePrimaryDiscoveryProviderFailure(discoveryRun?.queries ?? []);
   const errorMessage =
-    savedCount > 0
+    persistedCount > 0
       ? null
       : saveErrorCount > 0
         ? `${saveErrorCount} bedrijven konden niet worden opgeslagen (validatie of database).`
-        : "Geen bedrijven opgeslagen na Tavily discovery.";
+        : providerFailure?.message
+          ?? (candidates.length === 0
+            ? "Geen bedrijven opgeslagen na discovery."
+            : "Geen bedrijven opgeslagen na Tavily discovery.");
 
   currentJob = await input.jobRepository.update(input.context.organizationId, input.jobId, {
     status: finalStatus,
     foundCount: qualityReport.totalUrls,
     savedCount,
+    updatedCount,
     skippedCount: skippedCount + qualityReport.rejected,
     errorCount: saveErrorCount,
     providerErrors: [],
@@ -382,11 +495,15 @@ export async function* runFastCompanyFinderPipeline(input: {
   };
 
   const completionMessage =
-    savedCount > 0
-      ? `${savedCount} bedrijven opgeslagen (${qualityReport.rejected} afgewezen) — verrijking op de achtergrond`
+    persistedCount > 0
+      ? `${savedCount} bedrijven opgeslagen${updatedCount > 0 ? `, ${updatedCount} gekoppeld` : ""} (${qualityReport.rejected} afgewezen) — verrijking op de achtergrond`
       : qualityReport.rejected > 0
         ? `Geen bedrijven opgeslagen: ${qualityReport.rejected} URLs afgewezen (${qualityReport.directories} directories, ${qualityReport.blogs + qualityReport.news} blogs/nieuws)`
         : errorMessage ?? "Geen bedrijven opgeslagen";
+
+  if (providerFailure && persistedCount === 0) {
+    yield { type: "error", message: providerFailure.message };
+  }
 
   yield input.emitProgress(finalStatus === "completed" ? "completed" : "failed", completionMessage, {
     foundCount: qualityReport.totalUrls,
@@ -413,7 +530,7 @@ export async function* runFastCompanyFinderPipeline(input: {
   } catch (error) {
     const message =
       error instanceof JobTimeoutError
-        ? `Zoekjob time-out (${config.globalJobTimeoutMs}ms) tijdens ${error.phase}`
+        ? `Zoekjob time-out (${phaseTimeoutMs}ms) tijdens ${error.phase}`
         : error instanceof Error
           ? error.message
           : "Fast mode mislukt";

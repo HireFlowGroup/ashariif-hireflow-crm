@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { runDiagnosticsSchema } from "@/features/ai-recruiter/domain/run-diagnostics";
+import { pipelineFunnelDiagnosticsSchema } from "@/features/ai-recruiter/domain/pipeline-funnel-diagnostics.types";
 
 export const aiRecruiterRunStatusSchema = z.enum([
   "draft",
@@ -102,6 +103,7 @@ export const aiRecruiterRunSettingsSchema = z.object({
   runDiagnostics: runDiagnosticsSchema.nullable().optional(),
   /** Company finder job id for discovery diagnostics lookup */
   finderJobId: z.string().uuid().optional(),
+  pipelineFunnel: pipelineFunnelDiagnosticsSchema.nullable().optional(),
 });
 
 export type AiRecruiterRunSettings = z.infer<typeof aiRecruiterRunSettingsSchema>;

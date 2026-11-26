@@ -36,6 +36,13 @@ export type CompanyFinderCriteria = {
   regions?: string[];
   sectors?: string[];
   desiredRoles?: string[];
+  /** AI Recruiter: run id for tenant-scoped slot reservation (P0-R3.1). */
+  aiRecruiterRunId?: string;
+  /** Hard cap for discovery company persistence aligned with search plan. */
+  persistenceMaximumCompanies?: number;
+  discoveryMode?: "open" | "targeted";
+  targetEmployerNames?: string[];
+  targetEmployerDomains?: string[];
 };
 
 /** Legacy slim candidate for backward-compatible stream events. */
@@ -122,12 +129,16 @@ export type CompanyFinderQualityReport = {
   government: number;
   social: number;
   jobboards: number;
+  forums?: number;
   unknown: number;
   realCompanies: number;
+  review?: number;
   saved: number;
   rejectedByHeuristics: number;
   rejectedByAiCategory: number;
   rejectedByHomepageSignals: number;
   rejectedByAiValidation: number;
   rejectedByScore: number;
+  rejectedByDuplicate?: number;
+  rejectedByLowConfidence?: number;
 };

@@ -11,6 +11,7 @@ import {
   recordProviderRetry,
   recordProviderSuccess,
 } from "@/features/lead-intelligence/providers/manager/provider-stats.store";
+import { resolveProviderRetryDecision } from "@/features/lead-intelligence/providers/manager/provider-retry-policy";
 
 export type ExecutorOptions = {
   providerId: string;
@@ -24,7 +25,9 @@ export type ExecutorOptions = {
 
 export async function executeWithResilience<T>(
   options: ExecutorOptions,
-  fn: () => Promise<{ data: T; responseSize: number; quotaRemaining?: number | null }>,
+  fn: (
+    requestTimeoutMs: number,
+  ) => Promise<{ data: T; responseSize: number; quotaRemaining?: number | null }>,
 ): Promise<{
   data: T;
   durationMs: number;
@@ -58,6 +61,7 @@ export async function executeWithResilience<T>(
 
   let lastError: Error | null = null;
   const started = Date.now();
+  let scheduledBackoffMs: number | null = null;
 
   for (let attempt = 0; attempt <= options.maxRetries; attempt += 1) {
     const attemptStarted = Date.now();
@@ -65,13 +69,15 @@ export async function executeWithResilience<T>(
     try {
       if (attempt > 0) {
         recordProviderRetry(options.providerId);
-        const backoffMs = Math.min(1000 * 2 ** attempt, 8000);
+        const backoffMs =
+          scheduledBackoffMs ?? Math.min(1000 * 2 ** attempt, 8000);
+        scheduledBackoffMs = null;
         pipelineDebug("provider.retry", { providerId: options.providerId, attempt, backoffMs });
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
 
       const result = await Promise.race([
-        fn(),
+        fn(options.timeoutMs),
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error(`Timeout na ${options.timeoutMs}ms`)),
@@ -103,6 +109,16 @@ export async function executeWithResilience<T>(
         attempt,
         message: lastError.message,
       });
+
+      const retryDecision = resolveProviderRetryDecision(
+        lastError.message,
+        attempt,
+        options.maxRetries,
+      );
+      if (!retryDecision.allowRetry) {
+        break;
+      }
+      scheduledBackoffMs = retryDecision.backoffMs ?? null;
     }
   }
 

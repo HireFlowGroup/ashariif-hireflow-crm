@@ -11,6 +11,9 @@ import {
   aiRecruiterSearchPlanRawSchema,
   sanitizeAiRecruiterSearchPlan,
 } from "@/features/ai-recruiter/validation/search-plan.schemas";
+import { clampAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-limits.service";
+import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import { extractTargetedEmployerConstraints } from "@/features/ai-recruiter/services/targeted-employer-constraint.service";
 import { DEFAULT_MODEL } from "@/lib/ai/config";
 import { getOpenAIClient } from "@/lib/ai/client";
 import { isOpenAIConfigured } from "@/platform/config/env";
@@ -62,11 +65,13 @@ STRICTE REGELS:
 Vul ALLE schema-velden in.`;
 
 function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
+  const { defaultMaximumCompanies, defaultMaximumDrafts } = getAiRecruiterConfig();
   const numbers = prompt.match(/\b(\d{1,3})\b/g)?.map(Number) ?? [];
-  const maxCompanies = numbers.find((n) => n >= 5 && n <= 100) ?? 25;
-  const maxDrafts = numbers.filter((n) => n >= 1 && n <= 50).slice(-1)[0] ?? 10;
+  const maxCompanies = numbers.find((n) => n >= 1 && n <= 100) ?? defaultMaximumCompanies;
+  const maxDrafts = numbers.filter((n) => n >= 1 && n <= 50).slice(-1)[0] ?? defaultMaximumDrafts;
 
-  return aiRecruiterSearchPlanSchema.parse({
+  return clampAiRecruiterSearchPlan(
+    aiRecruiterSearchPlanSchema.parse({
     locations: [],
     regions: [],
     sectors: [],
@@ -90,7 +95,8 @@ function buildFallbackPlan(prompt: string): AiRecruiterSearchPlan {
     exclusions: [],
     uncertainties: ["OpenAI niet geconfigureerd — beperkte parse, controleer plan handmatig."],
     reasoning: "Fallback parse op basis van prompt — controleer alle velden.",
-  });
+    }),
+  );
 }
 
 function parseStructuredPlanContent(rawContent: string | null | undefined, prompt: string): AiRecruiterSearchPlan {
@@ -139,7 +145,7 @@ function parseStructuredPlanContent(rawContent: string | null | undefined, promp
       );
     }
 
-    return validated.data;
+    return clampAiRecruiterSearchPlan(validated.data);
   } catch (error) {
     if (error instanceof SearchPlanParserError) throw error;
     throw new SearchPlanParserError(
@@ -200,6 +206,7 @@ export function searchPlanToCompanyFinderCriteria(
   const city = plan.locations[0] ?? undefined;
   const region = plan.regions[0] ?? undefined;
   const sector = plan.sectors[0] ?? undefined;
+  const targeted = extractTargetedEmployerConstraints(sourceQuery);
 
   return {
     city,
@@ -218,5 +225,9 @@ export function searchPlanToCompanyFinderCriteria(
     excludedNames: plan.exclusions,
     sourceQuery,
     fastMode: true,
+    discoveryMode: targeted.mode,
+    targetEmployerNames: targeted.employerNames,
+    targetEmployerDomains: targeted.employerDomains,
+    persistenceMaximumCompanies: plan.maximum_companies,
   };
 }

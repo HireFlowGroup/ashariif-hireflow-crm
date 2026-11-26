@@ -8,6 +8,7 @@ import {
 } from "@/features/commercial-pipeline/domain/types";
 import { CommercialPipelineRepositoryError } from "@/features/commercial-pipeline/repositories/commercial-pipeline.repository";
 import type { CommercialPipelineRepository } from "@/features/commercial-pipeline/repositories/commercial-pipeline.repository";
+import { isRecoverableSupabaseAccessError } from "@/features/dashboard/repositories/dashboard-db-access";
 import type { Database } from "@/types/database";
 
 type PipelineCardRow = Database["public"]["Tables"]["commercial_pipeline_cards"]["Row"];
@@ -50,7 +51,10 @@ export class SupabaseCommercialPipelineRepository implements CommercialPipelineR
       .order("stage")
       .order("position");
 
-    if (error) throw new CommercialPipelineRepositoryError(error.message);
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw new CommercialPipelineRepositoryError(error.message);
+    }
 
     return (data ?? []).map(mapRow);
   }

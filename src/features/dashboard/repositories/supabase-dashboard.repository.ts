@@ -19,6 +19,10 @@ import {
   periodToStartDate,
   todayStartIso,
 } from "@/features/dashboard/domain/dashboard.types";
+import {
+  isRecoverableSupabaseAccessError,
+  throwUnlessRecoverableSupabaseError,
+} from "@/features/dashboard/repositories/dashboard-db-access";
 import { loadBdDashboardMetrics } from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
 import { DashboardRepositoryError } from "@/features/dashboard/repositories/dashboard.repository";
 import type { DashboardRepository } from "@/features/dashboard/repositories/dashboard.repository";
@@ -30,8 +34,49 @@ import {
 import type { Database } from "@/types/database";
 import type { CompanyIntelligence } from "@/types/hiring-intelligence";
 
+const EMPTY_KPIS: DashboardKpis = {
+  newHiringSignals: 0,
+  newVacancies: 0,
+  newCompanies: 0,
+  newRecruiters: 0,
+  todaysIntelligence: 0,
+  unreadNotifications: 0,
+  warmLeadsCount: 0,
+};
+
+const EMPTY_BD_METRICS: import("@/features/dashboard/domain/dashboard.types").BdDashboardMetrics = {
+  today: {
+    companiesFound: 0,
+    analyzed: 0,
+    newContacts: 0,
+    draftEmails: 0,
+    sentEmails: 0,
+    openReplies: 0,
+    positiveReplies: 0,
+    intakes: 0,
+    newVacancies: 0,
+    candidatesProposed: 0,
+    placements: 0,
+    conversionRate: 0,
+    pipelineValue: 0,
+  },
+  trends: { "7d": [], "30d": [], "90d": [] },
+};
+
 export class SupabaseDashboardRepository implements DashboardRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
+
+  private async withDashboardSection<T>(section: string, fallback: T, load: () => Promise<T>): Promise<T> {
+    try {
+      return await load();
+    } catch (error) {
+      if (isRecoverableSupabaseAccessError(error)) {
+        console.warn(`[Dashboard] ${section} skipped (degraded):`, error instanceof Error ? error.message : error);
+        return fallback;
+      }
+      throw error;
+    }
+  }
 
   private async loadCompanyNames(
     organizationId: string,
@@ -76,18 +121,39 @@ export class SupabaseDashboardRepository implements DashboardRepository {
         todaysIntelligence,
         signalTrend,
       ] = await Promise.all([
-        this.loadKpis(organizationId, periodStart, todayStart),
-        loadBdDashboardMetrics(this.client, organizationId),
-        this.loadWarmLeads(organizationId, filters),
-        this.loadRecentSignals(organizationId, periodStart, filters),
-        this.loadRecentVacancies(organizationId, periodStart, filters),
-        this.loadRecruiterSignals(organizationId, periodStart),
-        this.loadPriorityDistribution(organizationId, filters),
-        this.loadPipelineStages(organizationId),
-        this.loadOutreachDistribution(organizationId),
-        this.loadAiRecommendations(organizationId, filters),
-        this.loadTodaysIntelligence(organizationId, todayStart),
-        this.loadSignalTrend(organizationId, filters.period),
+        this.withDashboardSection("kpis", EMPTY_KPIS, () =>
+          this.loadKpis(organizationId, periodStart, todayStart)),
+        this.withDashboardSection("bdMetrics", EMPTY_BD_METRICS, () =>
+          loadBdDashboardMetrics(this.client, organizationId)),
+        this.withDashboardSection("warmLeads", [], () => this.loadWarmLeads(organizationId, filters)),
+        this.withDashboardSection("recentSignals", [], () =>
+          this.loadRecentSignals(organizationId, periodStart, filters)),
+        this.withDashboardSection("recentVacancies", [], () =>
+          this.loadRecentVacancies(organizationId, periodStart, filters)),
+        this.withDashboardSection("recruiterSignals", [], () =>
+          this.loadRecruiterSignals(organizationId, periodStart)),
+        this.withDashboardSection("priorityDistribution", [], () =>
+          this.loadPriorityDistribution(organizationId, filters)),
+        this.withDashboardSection("pipelineStages", [], () => this.loadPipelineStages(organizationId)),
+        this.withDashboardSection("outreachDistribution", [], () =>
+          this.loadOutreachDistribution(organizationId)),
+        this.withDashboardSection("aiRecommendations", [], () =>
+          this.loadAiRecommendations(organizationId, filters)),
+        this.withDashboardSection(
+          "todaysIntelligence",
+          {
+            scanStatus: null,
+            signalsCreated: 0,
+            signalsUpdated: 0,
+            notificationsCreated: 0,
+            companiesProcessed: 0,
+            companiesTotal: 0,
+            lastScanAt: null,
+            recentNotifications: [],
+          },
+          () => this.loadTodaysIntelligence(organizationId, todayStart),
+        ),
+        this.withDashboardSection("signalTrend", [], () => this.loadSignalTrend(organizationId, filters.period)),
       ]);
 
       return {
@@ -107,6 +173,34 @@ export class SupabaseDashboardRepository implements DashboardRepository {
         generatedAt: new Date().toISOString(),
       };
     } catch (error) {
+      if (isRecoverableSupabaseAccessError(error)) {
+        console.warn("[Dashboard] loadSnapshot degraded:", error instanceof Error ? error.message : error);
+        return {
+          filters,
+          kpis: EMPTY_KPIS,
+          bdMetrics: EMPTY_BD_METRICS,
+          warmLeads: [],
+          recentSignals: [],
+          recentVacancies: [],
+          recruiterSignals: [],
+          priorityDistribution: [],
+          pipelineStages: [],
+          outreachDistribution: [],
+          aiRecommendations: [],
+          todaysIntelligence: {
+            scanStatus: null,
+            signalsCreated: 0,
+            signalsUpdated: 0,
+            notificationsCreated: 0,
+            companiesProcessed: 0,
+            companiesTotal: 0,
+            lastScanAt: null,
+            recentNotifications: [],
+          },
+          signalTrend: [],
+          generatedAt: new Date().toISOString(),
+        };
+      }
       throw new DashboardRepositoryError(
         error instanceof Error ? error.message : "Dashboard laden mislukt.",
       );
@@ -196,14 +290,22 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       // intelligence tables may not exist until migration is applied
     }
 
+    const countOrZero = (result: { count: number | null; error: unknown }) => {
+      if (result.error) {
+        if (isRecoverableSupabaseAccessError(result.error)) return 0;
+        throw result.error;
+      }
+      return result.count ?? 0;
+    };
+
     return {
-      newHiringSignals: signalsResult.count ?? 0,
-      newVacancies: vacanciesResult.count ?? 0,
-      newCompanies: companiesResult.count ?? 0,
-      newRecruiters: recruitersResult.count ?? 0,
+      newHiringSignals: countOrZero(signalsResult),
+      newVacancies: countOrZero(vacanciesResult),
+      newCompanies: countOrZero(companiesResult),
+      newRecruiters: countOrZero(recruitersResult),
       todaysIntelligence,
       unreadNotifications,
-      warmLeadsCount: warmLeadsResult.count ?? 0,
+      warmLeadsCount: countOrZero(warmLeadsResult),
     };
   }
 
@@ -228,7 +330,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
 
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     return ((data ?? []) as CompanyIntelligence[]).map((row) => ({
       id: row.id,
@@ -356,7 +461,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     const counts = new Map<string, number>();
     for (const row of data ?? []) {
@@ -380,7 +488,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       .select("stage")
       .eq("organization_id", organizationId);
 
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     const counts = new Map<string, number>();
     for (const row of data ?? []) {
@@ -406,7 +517,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       .select("outreach_status")
       .eq("organization_id", organizationId);
 
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     const counts = new Map<string, number>();
     for (const row of data ?? []) {
@@ -438,7 +552,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     return ((data ?? []) as CompanyIntelligence[]).map((row) => {
       const outreach = row.outreach_status ?? "none";

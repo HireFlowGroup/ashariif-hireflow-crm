@@ -197,7 +197,7 @@ describe("Discovery validation integration", () => {
     const category = inferUrlCategoryHeuristic({
       url: "https://example.com/article/top-250-bedrijven-rotterdam",
       title: "Top 250 bedrijven in Rotterdam",
-      snippet: "Overzicht artikel",
+      description: "Overzicht artikel",
     });
     expect(category).not.toBe("company");
   });
@@ -206,7 +206,7 @@ describe("Discovery validation integration", () => {
     const category = inferUrlCategoryHeuristic({
       url: "https://techco.nl/over-ons",
       title: "TechCo BV — Over ons",
-      snippet: "Software bedrijf Rotterdam",
+      description: "Software bedrijf Rotterdam",
     });
     expect(["company", "unknown"]).toContain(category);
   });

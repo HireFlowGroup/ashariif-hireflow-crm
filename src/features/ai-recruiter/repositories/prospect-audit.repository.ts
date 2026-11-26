@@ -3,9 +3,13 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
-import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
+import type { VacancyAuditStatus } from "@/features/ai-recruiter/services/vacancy-audit-status.service";
+import { resolveVacancyAuditStatus } from "@/features/ai-recruiter/services/vacancy-audit-status.service";
+import { filterStrictVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { Company } from "@/features/companies/domain";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
+import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
+import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
 import type { Database } from "@/types/database";
 
 export type PersistProspectDecisionInput = {
@@ -14,6 +18,8 @@ export type PersistProspectDecisionInput = {
   runItemId: string;
   company: Company | null;
   eligibility: ConceptEligibilityResult;
+  commercialHiringScore?: number | null;
+  commercialOpportunityScore?: number | null;
   vacancies: VacancyEvidence[];
   contact: SelectedDiscoveredContact | null;
   contactStage: string;
@@ -21,6 +27,9 @@ export type PersistProspectDecisionInput = {
   manualEligibilityOverride?: boolean;
   sourceUrl?: string | null;
   sourceType?: string | null;
+  vacancyAuditStatus?: VacancyAuditStatus;
+  parsedVacancyCount?: number;
+  searchPlan?: AiRecruiterSearchPlan;
 };
 
 type ProspectDecisionRow = Record<string, unknown>;
@@ -33,7 +42,19 @@ export class ProspectAuditRepository {
   }
 
   async upsertDecision(input: PersistProspectDecisionInput): Promise<void> {
-    const primaryVacancy = input.vacancies[0] ?? null;
+    const strictVacancies = filterStrictVacancyEvidence(input.vacancies);
+    const primaryVacancy = strictVacancies[0] ?? null;
+    const vacancyAuditStatus = input.vacancyAuditStatus
+      ?? (input.searchPlan
+        ? resolveVacancyAuditStatus({
+            vacancies: input.vacancies,
+            plan: input.searchPlan,
+            parsedVacancyCount: input.parsedVacancyCount,
+          })
+        : strictVacancies.length > 0
+          ? "found"
+          : "none");
+
     const row: ProspectDecisionRow = {
       organization_id: input.organizationId,
       run_id: input.runId,
@@ -43,33 +64,46 @@ export class ProspectAuditRepository {
       company_domain: input.company?.domain ?? input.company?.website ?? null,
       source_url: input.sourceUrl ?? input.company?.sourceUrl ?? null,
       source_type: input.sourceType ?? null,
-      vacancy_title: primaryVacancy?.title ?? null,
-      vacancy_url: primaryVacancy?.sourceUrl ?? null,
+      vacancy_title: primaryVacancy?.jobTitle ?? primaryVacancy?.title ?? null,
+      vacancy_url: primaryVacancy?.jobUrl ?? null,
       vacancy_source: primaryVacancy?.sourceDomain ?? null,
       location: input.company?.city ?? primaryVacancy?.location ?? null,
       sector: input.company?.sector ?? null,
       employee_range: input.company?.employeeCountLabel ?? null,
       company_validation_status: input.company ? "validated" : null,
-      vacancy_validation_status: input.vacancies.length > 0 ? "found" : "none",
+      vacancy_validation_status: vacancyAuditStatus,
       contact_type: input.contact?.isGeneralMailbox ? "general_mailbox" : input.contact ? "personal" : null,
       contact_email: input.contact?.email ?? null,
       contact_verification_status: input.contact?.verificationStatus ?? null,
-      contact_score: input.eligibility.score,
-      opportunity_score: input.eligibility.score,
+      contact_score: input.contact?.relevanceScore ?? null,
+      opportunity_score:
+        input.commercialOpportunityScore
+        ?? input.eligibility.contract?.commercial.opportunityScore
+        ?? null,
       deterministic_score: input.eligibility.score,
-      eligibility_status: input.eligibility.eligible || input.manualEligibilityOverride
-        ? input.manualEligibilityOverride
-          ? "manual_override"
-          : "eligible"
-        : "ineligible",
+      eligibility_status: input.manualEligibilityOverride
+        ? "manual_override"
+        : input.eligibility.qualificationStatus === "needs_evidence"
+          ? "needs_evidence"
+          : input.eligibility.qualificationStatus === "eligible"
+            ? "eligible"
+            : "ineligible",
       concept_status: input.conceptStatus,
-      accepted_rules: input.eligibility.acceptedRules,
+      accepted_rules: [
+        ...input.eligibility.acceptedRules,
+        ...(input.eligibility.contract
+          ? [
+              `qualification_contract:${input.eligibility.contract.version}`,
+              `qualification_policy:${input.eligibility.contract.thresholds.conceptReadinessMin}/${input.eligibility.contract.thresholds.commercialHiringMin}/${input.eligibility.contract.thresholds.commercialOpportunityMin}`,
+            ]
+          : []),
+      ],
       rejected_rules: input.eligibility.rejectedRules,
-      final_decision: input.eligibility.eligible ? "eligible" : "rejected",
+      final_decision: input.eligibility.qualificationStatus,
       final_reason: input.eligibility.userMessage,
       reason_code: input.eligibility.reasonCode,
       manual_eligibility_override: input.manualEligibilityOverride ?? false,
-      vacancy_evidence: input.vacancies,
+      vacancy_evidence: strictVacancies,
       updated_at: new Date().toISOString(),
     };
 

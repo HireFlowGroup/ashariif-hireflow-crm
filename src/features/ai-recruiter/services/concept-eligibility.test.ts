@@ -10,8 +10,11 @@ import {
 } from "@/features/ai-recruiter/services/discovery-query-builder.service";
 import { computeDeterministicLeadScore } from "@/features/ai-recruiter/services/deterministic-lead-score.service";
 import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/evaluate-concept-eligibility.service";
-import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
+import { createVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
+
+/** Commerciële scores ≥ plan-minimum (30) voor tests die concept-eligibility raken. */
+const defaultCommercial = { opportunityScore: 50 as const };
 
 const basePlan: AiRecruiterSearchPlan = {
   locations: ["Rotterdam", "Den Haag"],
@@ -106,21 +109,17 @@ function makeContact(overrides: Partial<SelectedDiscoveredContact> = {}): Select
   };
 }
 
-const activeVacancy: VacancyEvidence = {
-  title: "Recruiter",
+const activeVacancy = createVacancyEvidence({
   companyName: "TechFlow BV",
-  location: "Rotterdam",
+  companyDomain: "techflow.nl",
+  jobTitle: "Recruiter",
+  jobUrl: "https://techflow.nl/vacatures/recruiter",
   sourceUrl: "https://techflow.nl/vacatures/recruiter",
-  sourceDomain: "techflow.nl",
-  publishedAt: null,
-  validThrough: null,
-  employmentType: null,
-  department: null,
-  hiringSignalStrength: 80,
-  isActive: true,
+  sourceType: "careers_page_crawl",
+  location: "Rotterdam",
+  desiredRoleMatch: true,
   validationReason: "Actieve vacature",
-  actuality: "unknown",
-};
+});
 
 describe("concept eligibility pipeline", () => {
   it("1. bedrijf met vacature en recruitment@ krijgt concept", () => {
@@ -128,6 +127,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 60,
+      ...defaultCommercial,
       vacancyCount: 2,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "recruitment@techflow.nl" }),
@@ -142,6 +142,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 55,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "info@techflow.nl" }),
@@ -150,18 +151,22 @@ describe("concept eligibility pipeline", () => {
     expect(result.eligible).toBe(true);
   });
 
-  it("3. bedrijf met vacature maar geen e-mail krijgt geen concept", () => {
+  it("3. bedrijf met vacature maar geen e-mail → needs_evidence (geen outreach-eligible)", () => {
     const result = evaluateConceptEligibility({
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 60,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: null,
       contactStage: "blocked_missing_contact",
     });
     expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("no_contact");
+    expect(result.qualificationStatus).toBe("needs_evidence");
+    expect(result.reasonCode).toBe("needs_evidence");
+    expect(result.contract?.commercial.passed).toBe(true);
+    expect(result.rejectedRules).toContain("needs_evidence:contact");
   });
 
   it("4. persoonlijk recruitercontact krijgt hogere score dan info@", () => {
@@ -219,19 +224,20 @@ describe("concept eligibility pipeline", () => {
     expect(result.shouldSaveAsCompany).toBe(false);
   });
 
-  it("8. score onder drempel toont exacte afwijsreden", () => {
+  it("8. verkeerde locatie toont exacte afwijsreden", () => {
     const result = evaluateConceptEligibility({
-      company: makeCompany({ vacancyCount: 0, careersUrl: null, city: "Groningen" }),
+      company: makeCompany({ city: "Groningen" }),
       plan: basePlan,
-      hiringScore: 5,
-      vacancyCount: 0,
-      vacancies: [],
+      hiringScore: 50,
+      vacancyCount: 1,
+      vacancies: [activeVacancy],
       contact: makeContact(),
       contactStage: "general_mailbox_found",
+      desiredRoleMatch: true,
     });
     expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("score_below_threshold");
-    expect(result.userMessage).toContain("drempel");
+    expect(result.reasonCode).toBe("wrong_location");
+    expect(result.userMessage).toContain("regio");
   });
 
   it("9. algemene mailbox wordt niet automatisch afgewezen", () => {
@@ -239,6 +245,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 50,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "hr@techflow.nl" }),
@@ -253,12 +260,36 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 50,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact(),
       contactStage: "general_mailbox_found",
     });
     expect(result.reasonCode).toBe("eligible");
+  });
+
+  it("10b. plan commercial minimum blokkeert lage hiring/opportunity ondanks prospectscore", () => {
+    const commercialPlan = {
+      ...basePlan,
+      minimum_hiring_score: 70,
+      minimum_opportunity_score: 70,
+    };
+    const result = evaluateConceptEligibility({
+      company: makeCompany(),
+      plan: commercialPlan,
+      hiringScore: 25,
+      opportunityScore: 20,
+      vacancyCount: 1,
+      vacancies: [activeVacancy],
+      contact: makeContact(),
+      contactStage: "general_mailbox_found",
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.reasonCode).toBe("commercial_hiring_below_plan");
+    expect(result.contract?.commercial.hiringThreshold).toBe(70);
+    expect(result.contract?.conceptReadiness.threshold).toBe(30);
+    expect(result.threshold).toBe(30);
   });
 
   it("11. duplicate outreach wordt geblokkeerd", () => {
@@ -304,9 +335,9 @@ describe("concept eligibility pipeline", () => {
       ),
     );
     expect(queries.length).toBeGreaterThanOrEqual(12);
-    expect(queries.some((q) => q.query.includes("indeed"))).toBe(true);
-    expect(queries.some((q) => q.query.includes("vacatures"))).toBe(true);
-    expect(queries.some((q) => q.intent === "company_discovery")).toBe(true);
+    expect(queries.some((q) => q.query.includes("vacature"))).toBe(true);
+    expect(queries.some((q) => q.location === "Den Haag")).toBe(true);
+    expect(queries.every((q) => q.intent !== "company_discovery")).toBe(true);
   });
 
   it("14. no-results onderscheiden van providerfout via classify unknown", () => {
@@ -316,11 +347,12 @@ describe("concept eligibility pipeline", () => {
   });
 
   it("15. actieve vacature zonder publicatiedatum blijft eligible", () => {
-    const vacancy: VacancyEvidence = { ...activeVacancy, publishedAt: null, actuality: "unknown" };
+    const vacancy = { ...activeVacancy, publishedAt: null, actuality: "unknown" as const };
     const result = evaluateConceptEligibility({
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 40,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [vacancy],
       contact: makeContact(),
@@ -376,6 +408,30 @@ describe("concept eligibility pipeline", () => {
       contactStage: "general_mailbox_found",
     });
     expect(result.reasonCode).toBe("no_active_vacancy");
+  });
+
+  it("19b. vacancy_required blokkeert bij verkeerde functie", () => {
+    const wrongRoleVacancy = createVacancyEvidence({
+      companyName: activeVacancy.companyName,
+      companyDomain: activeVacancy.companyDomain,
+      jobTitle: "Backend Developer",
+      jobUrl: "https://techflow.nl/vacatures/backend-developer",
+      sourceUrl: "https://techflow.nl/vacatures/backend-developer",
+      sourceType: "careers_page_crawl",
+      location: activeVacancy.location,
+      desiredRoleMatch: false,
+      validationReason: "careers_page_crawl",
+    });
+    const result = evaluateConceptEligibility({
+      company: makeCompany(),
+      plan: { ...basePlan, vacancy_required: true, desired_roles: ["Recruiter"] },
+      hiringScore: 10,
+      vacancyCount: 1,
+      vacancies: [wrongRoleVacancy],
+      contact: makeContact(),
+      contactStage: "general_mailbox_found",
+    });
+    expect(result.reasonCode).toBe("no_matching_role");
   });
 
   it("20. software vacatures rotterdam titel is directory of vacancy, geen bedrijf", () => {

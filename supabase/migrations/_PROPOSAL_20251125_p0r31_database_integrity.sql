@@ -1,0 +1,253 @@
+-- =============================================================================
+-- PROPOSAL ONLY — P0-R3.1 Database Integrity, Concurrency & Persistence
+-- DO NOT APPLY on test or production Supabase without explicit human approval.
+-- Target: vcmegbghsaqagikfxces (test) first, then production after validation.
+-- =============================================================================
+--
+-- GOAL
+-- - One canonical employer identity per organization (domain-first, nullable).
+-- - Idempotent CRM company writes; no cross-tenant leakage.
+-- - Atomic enforcement of maximum_companies / maximum_drafts per run under concurrency.
+-- - Durable qualification + evidence (extend P0-R2 proposal).
+--
+-- -----------------------------------------------------------------------------
+-- PREFLIGHT (run manually; do not auto-merge duplicates)
+-- -----------------------------------------------------------------------------
+--
+-- 1) Duplicate domains per tenant (candidates for merge review, not auto-delete):
+--    select organization_id, lower(trim(domain)) as d, count(*) as n, array_agg(id) as ids
+--    from public.companies
+--    where domain is not null and trim(domain) <> ''
+--    group by 1, 2 having count(*) > 1
+--    order by n desc;
+--
+-- 2) Same website, different domain field:
+--    select organization_id, website, count(*) from public.companies
+--    where website is not null group by 1, 2 having count(*) > 1;
+--
+-- 3) Run items pointing at same company in one run:
+--    select run_id, company_id, count(*) from public.ai_recruiter_run_items
+--    where company_id is not null group by 1, 2 having count(*) > 1;
+--
+-- 4) Orphan run_items (org mismatch):
+--    select ri.id from public.ai_recruiter_run_items ri
+--    join public.ai_recruiter_runs r on r.id = ri.run_id
+--    where ri.organization_id <> r.organization_id;
+--
+-- -----------------------------------------------------------------------------
+-- 1) CANONICAL DOMAIN ON COMPANIES
+-- -----------------------------------------------------------------------------
+-- Rationale: `domain` is free-text; job-board hosts and www variants create dupes.
+-- `canonical_domain` is normalized app-side (see canonical-domain-storage.service.ts).
+-- Shared hosting (github.io, etc.) stays NULL — no unique constraint for those rows.
+--
+alter table public.companies
+  add column if not exists canonical_domain text;
+
+comment on column public.companies.canonical_domain is
+  'Normalized employer hostname per org; NULL when unknown, job-board, or shared hosting.';
+
+-- Backfill (idempotent): prefer existing domain, else derive from website path in app migration script.
+-- update public.companies set canonical_domain = lower(regexp_replace(domain, '^www\.', ''))
+-- where canonical_domain is null and domain is not null;
+
+create unique index if not exists companies_org_canonical_domain_unique
+  on public.companies (organization_id, canonical_domain)
+  where canonical_domain is not null;
+
+-- Keep existing lookup index; canonical is authoritative for dedupe.
+create index if not exists companies_org_canonical_domain_idx
+  on public.companies (organization_id, canonical_domain)
+  where canonical_domain is not null;
+
+-- -----------------------------------------------------------------------------
+-- 2) IDEMPOTENT COMPANY UPSERT (SECURITY DEFINER, tenant-scoped)
+-- -----------------------------------------------------------------------------
+-- Application passes organization_id from JWT context; function MUST verify match.
+--
+-- create or replace function public.upsert_discovery_company(
+--   p_organization_id uuid,
+--   p_canonical_domain text,
+--   p_payload jsonb
+-- ) returns public.companies
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $$
+-- declare
+--   v_row public.companies;
+-- begin
+--   if p_canonical_domain is null or length(trim(p_canonical_domain)) = 0 then
+--     insert into public.companies (organization_id, name, website, domain, canonical_domain, status)
+--     values (
+--       p_organization_id,
+--       p_payload->>'name',
+--       p_payload->>'website',
+--       p_payload->>'domain',
+--       null,
+--       coalesce(p_payload->>'status', 'prospect')
+--     )
+--     returning * into v_row;
+--     return v_row;
+--   end if;
+--
+--   insert into public.companies (
+--     organization_id, name, website, domain, canonical_domain, status, city, sector
+--   ) values (
+--     p_organization_id,
+--     p_payload->>'name',
+--     p_payload->>'website',
+--     p_payload->>'domain',
+--     lower(trim(p_canonical_domain)),
+--     coalesce(p_payload->>'status', 'prospect'),
+--     p_payload->>'city',
+--     p_payload->>'sector'
+--   )
+--   on conflict (organization_id, canonical_domain)
+--   where canonical_domain is not null
+--   do update set
+--     name = excluded.name,
+--     website = coalesce(excluded.website, companies.website),
+--     domain = coalesce(excluded.domain, companies.domain),
+--     updated_at = now()
+--   returning * into v_row;
+--
+--   return v_row;
+-- end;
+-- $$;
+--
+-- revoke all on function public.upsert_discovery_company(uuid, text, jsonb) from public;
+-- grant execute on function public.upsert_discovery_company(uuid, text, jsonb) to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 3) RUN-LEVEL ATOMIC CAPS (companies + drafts)
+-- -----------------------------------------------------------------------------
+-- Unique constraint alone does NOT cap parallel saves — counters must be atomic.
+--
+-- create table if not exists public.ai_recruiter_run_commit_counters (
+--   run_id uuid primary key references public.ai_recruiter_runs (id) on delete cascade,
+--   organization_id uuid not null references public.organizations (id) on delete cascade,
+--   companies_committed integer not null default 0 check (companies_committed >= 0),
+--   drafts_committed integer not null default 0 check (drafts_committed >= 0),
+--   updated_at timestamptz not null default now()
+-- );
+--
+-- alter table public.ai_recruiter_run_commit_counters enable row level security;
+--
+-- create policy tenant_run_commit_counters on public.ai_recruiter_run_commit_counters
+--   for all using (organization_id = public.current_organization_id())
+--   with check (organization_id = public.current_organization_id());
+--
+-- create or replace function public.reserve_ai_recruiter_run_slot(
+--   p_run_id uuid,
+--   p_organization_id uuid,
+--   p_slot text, -- 'company' | 'draft'
+--   p_max integer
+-- ) returns boolean
+-- language plpgsql
+-- security definer
+-- set search_path = public
+-- as $$
+-- declare
+--   v_updated integer;
+-- begin
+--   if p_max < 0 then return false; end if;
+--
+--   insert into public.ai_recruiter_run_commit_counters (run_id, organization_id)
+--   values (p_run_id, p_organization_id)
+--   on conflict (run_id) do nothing;
+--
+--   if p_slot = 'company' then
+--     update public.ai_recruiter_run_commit_counters c
+--     set companies_committed = companies_committed + 1,
+--         updated_at = now()
+--     from public.ai_recruiter_runs r
+--     where c.run_id = p_run_id
+--       and c.organization_id = p_organization_id
+--       and r.id = p_run_id
+--       and r.organization_id = p_organization_id
+--       and c.companies_committed < p_max;
+--     get diagnostics v_updated = row_count;
+--     return v_updated = 1;
+--   elsif p_slot = 'draft' then
+--     update public.ai_recruiter_run_commit_counters c
+--     set drafts_committed = drafts_committed + 1,
+--         updated_at = now()
+--     from public.ai_recruiter_runs r
+--     where c.run_id = p_run_id
+--       and c.organization_id = p_organization_id
+--       and r.id = p_run_id
+--       and r.organization_id = p_organization_id
+--       and c.drafts_committed < p_max;
+--     get diagnostics v_updated = row_count;
+--     return v_updated = 1;
+--   end if;
+--
+--   return false;
+-- end;
+-- $$;
+
+-- -----------------------------------------------------------------------------
+-- 4) RUN ITEMS — IDEMPOTENCY
+-- -----------------------------------------------------------------------------
+-- Prevent duplicate CRM links for the same company within one run (retries / parallel).
+--
+-- create unique index if not exists ai_recruiter_run_items_run_company_unique
+--   on public.ai_recruiter_run_items (run_id, company_id)
+--   where company_id is not null;
+--
+-- Optional idempotency key for discovery events:
+-- alter table public.ai_recruiter_run_items
+--   add column if not exists source_idempotency_key text;
+-- create unique index if not exists ai_recruiter_run_items_run_idempotency_unique
+--   on public.ai_recruiter_run_items (run_id, source_idempotency_key)
+--   where source_idempotency_key is not null;
+
+-- -----------------------------------------------------------------------------
+-- 5) EVIDENCE & QUALIFICATION (extends P0-R2 proposal)
+-- -----------------------------------------------------------------------------
+-- Prefer first-class columns for query/reporting; keep JSON for raw provider payloads.
+--
+-- alter table public.ai_recruiter_prospect_decisions
+--   add column if not exists qualification_status text
+--     check (qualification_status in ('eligible', 'needs_evidence', 'rejected', 'manual_override')),
+--   add column if not exists evidence_bundle jsonb not null default '{}'::jsonb,
+--   add column if not exists enrichment_diagnostics jsonb not null default '{}'::jsonb,
+--   add column if not exists qualification_contract_version text;
+--
+-- alter table public.ai_recruiter_run_items
+--   add column if not exists qualification_status text,
+--   add column if not exists evidence_bundle jsonb not null default '{}'::jsonb;
+--
+-- create index if not exists ai_recruiter_run_items_needs_evidence_idx
+--   on public.ai_recruiter_run_items (organization_id, run_id)
+--   where (external_company_data->>'qualificationStatus') = 'needs_evidence'
+--     or qualification_status = 'needs_evidence';
+
+-- -----------------------------------------------------------------------------
+-- 6) RLS / TENANT ISOLATION
+-- -----------------------------------------------------------------------------
+-- Existing: ai_recruiter_* uses organization_id = current_organization_id() OR profiles join.
+-- Risk: mixed policies (current_organization_id vs profiles subquery) — standardize on
+-- public.current_organization_id() for all ai_recruiter tables after migration.
+-- companies RLS: must remain FOR ALL with organization_id check (already in 20250804200000).
+-- SECURITY DEFINER functions MUST verify p_organization_id = current_organization_id().
+--
+-- -----------------------------------------------------------------------------
+-- 7) ROLLBACK
+-- -----------------------------------------------------------------------------
+-- drop index companies_org_canonical_domain_unique;
+-- alter table companies drop column canonical_domain;
+-- drop table ai_recruiter_run_commit_counters;
+-- drop function reserve_ai_recruiter_run_slot;
+-- drop function upsert_discovery_company;
+-- (Reverse column additions on prospect_decisions / run_items if applied.)
+--
+-- -----------------------------------------------------------------------------
+-- 8) APP IMPACT
+-- -----------------------------------------------------------------------------
+-- - CompaniesService.createDiscoveryCompany → call upsert when canonical_domain eligible.
+-- - Orchestrator save loop → reserve_ai_recruiter_run_slot before insert.
+-- - On unique violation → fetch existing by canonical_domain (same org), link run_item.
+-- - Evidence queue API → read qualification_status column when present, else JSON fallback.
+-- =============================================================================

@@ -1,4 +1,4 @@
-export type PipelineLogPhase = "DISCOVERY" | "ENRICHMENT" | "AI" | "SAVE";
+export type PipelineLogPhase = "DISCOVERY" | "ENRICHMENT" | "AI" | "SAVE" | "REJECT";
 
 export type PipelineLogStatus = "started" | "completed" | "failed" | "skipped";
 
@@ -37,4 +37,24 @@ export function logPipelinePhase(input: {
   } else {
     console.info(`[${input.phase}]`, payload);
   }
+}
+
+/** Log the exact rejection reason for every afgewezen URL. */
+export function logDiscoveryRejection(input: {
+  url: string;
+  title: string;
+  reason: string;
+  detail: string;
+  score?: number;
+  jobId?: string;
+}): void {
+  console.info("[REJECT]", {
+    phase: "REJECT",
+    url: input.url,
+    title: input.title,
+    reason: input.reason,
+    detail: input.detail,
+    score: input.score ?? null,
+    jobId: input.jobId ?? null,
+  });
 }

@@ -1,16 +1,10 @@
-import {
-  bootstrapProviderRegistry,
-  createProviderRegistry,
-} from "@/features/lead-intelligence/providers/manager/provider-registry";
-import { registerAllProviderFactories } from "@/features/lead-intelligence/providers/manager/register-providers";
+import { ensureProviderRegistryBootstrapped } from "@/features/lead-intelligence/providers/manager/provider-registry";
 import { ProviderManager } from "@/features/lead-intelligence/providers/manager/provider-manager";
 
 let managerInstance: ProviderManager | null = null;
 
 export function createProviderManager(): ProviderManager {
-  const registry = createProviderRegistry();
-  registerAllProviderFactories(registry);
-  bootstrapProviderRegistry(registry);
+  const registry = ensureProviderRegistryBootstrapped();
   return new ProviderManager(registry);
 }
 

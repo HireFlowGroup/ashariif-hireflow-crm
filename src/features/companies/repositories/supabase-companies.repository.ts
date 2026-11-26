@@ -16,6 +16,7 @@ import {
   mapDiscoveryCreateInputToRow,
   mapUpdateInputToRow,
 } from "@/features/companies/repositories/company.mapper";
+import { toDbCompanyStatus } from "@/features/companies/repositories/company-status.mapper";
 import { CompaniesRepositoryError } from "@/features/companies/repositories/errors";
 import { escapeIlikePattern } from "@/features/companies/repositories/search-utils";
 import { logSupabaseError } from "@/lib/supabase/log-error";
@@ -181,9 +182,10 @@ export class SupabaseCompaniesRepository implements CompaniesRepository {
     } else if (
       input.status === "active" ||
       input.status === "inactive" ||
-      input.status === "prospect"
+      input.status === "prospect" ||
+      input.status === "review"
     ) {
-      query = query.eq("status", input.status);
+      query = query.eq("status", toDbCompanyStatus(input.status) as "active" | "inactive" | "prospect");
     }
 
     if (input.priority) {

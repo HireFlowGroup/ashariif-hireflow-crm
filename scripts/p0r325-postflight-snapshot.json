@@ -1,0 +1,35 @@
+{
+  "phase": "P0-R3.2.5",
+  "supabaseProjectRef": "vcmegbghsaqagikfxces",
+  "sourceOfTruthRepo": "HireFlow-AI-consolidation",
+  "sourceOfTruthBranch": "feature/candidate-discovery",
+  "localhostDevCwd": "HireFlow-AI-consolidation",
+  "runId": "febc7556-336b-4254-8495-db4c3af739f4",
+  "runNameDb": "AI Recruiter run",
+  "runNameUi": "P0-R3.2.5 Commercial E2E",
+  "runStatus": "failed",
+  "discovery": {
+    "errorCode": "provider_request_failed",
+    "provider": "tavily",
+    "responseCount": 14,
+    "rejectedCount": 14,
+    "validated": 0,
+    "uiNote": "Provider HTTP-budget bereikt voor tavily (0)"
+  },
+  "commitCountersRows": 0,
+  "aiSummariesRows": 0,
+  "aiSummariesGrants": {
+    "authenticatedInsert": true,
+    "appliedVia": "supabase db query --yes (2026-11-26)",
+    "migrationFile": "supabase/migrations/20251126101500_p0r325_ai_summaries_authenticated_grants.sql",
+    "rollbackScript": "scripts/p0r325-rollback-ai_summaries-grants.sql"
+  },
+  "discoverySmoke": {
+    "httpCalls": 2,
+    "rawCount": 10,
+    "employerSignalCount": 3,
+    "artifact": "scripts/p0r325-discovery-smoke-output.json"
+  },
+  "testsConsolidation": "546/546",
+  "generatedAt": "2026-11-26T10:18:30.000Z"
+}

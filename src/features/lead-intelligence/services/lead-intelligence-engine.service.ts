@@ -37,6 +37,7 @@ import { enrichRecruitmentCandidate } from "@/features/lead-intelligence/service
 import { createProviderVaultService } from "@/features/provider-vault/server";
 import { enterOrganizationContext } from "@/features/provider-vault/server";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   dedupeCandidates,
   isExcludedCandidate,
@@ -52,6 +53,12 @@ import {
 } from "@/features/company-finder/pipeline/pipeline-step-timer";
 import { runFastCompanyFinderPipeline } from "@/features/company-finder/services/fast-company-finder.pipeline";
 import { buildDiscoveryCreateInput } from "@/features/company-finder/services/discovery-save";
+import {
+  leadCandidateToQualifiedDiscovery,
+  saveDiscoveryCompanyWithDedupe,
+  type DiscoveryCompanyRunPersistenceContext,
+} from "@/features/company-finder/services/discovery-company-deduplication.service";
+import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import { withTimeout } from "@/features/lead-intelligence/config/providers.config";
 import { logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
 import { sanitizeDiscoveryUrl } from "@/lib/company-finder/sanitize-discovery-url";
@@ -61,7 +68,7 @@ export type LeadIntelligenceContext = CompaniesServiceContext;
 export type LeadIntelligenceRunEvent =
   | { type: "progress"; progress: CompanyFinderProgress }
   | { type: "event"; eventType: string; payload: Record<string, unknown> }
-  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean }
+  | { type: "candidate"; candidate: ExternalCompanyCandidate; saved: boolean; updated: boolean; skipped: boolean; companyId?: string }
   | { type: "pipeline"; event: PipelineStreamEvent }
   | { type: "complete"; job: CompanySearchJob }
   | { type: "error"; message: string };
@@ -88,6 +95,10 @@ function criteriaToSearchCriteria(criteria: CompanyFinderCriteria): CompanySearc
     regions: criteria.regions,
     sectors: criteria.sectors,
     desiredRoles: criteria.desiredRoles,
+    aiRecruiterRunId: criteria.aiRecruiterRunId,
+    discoveryMode: criteria.discoveryMode,
+    targetEmployerNames: criteria.targetEmployerNames,
+    targetEmployerDomains: criteria.targetEmployerDomains,
   };
 }
 
@@ -207,7 +218,13 @@ export class LeadIntelligenceEngine {
   constructor(
     private readonly jobRepository: CompanySearchJobRepository,
     private readonly companiesService: CompaniesService,
+    private readonly injectedSupabaseClient?: SupabaseClient | null,
   ) {}
+
+  private async resolveSupabaseClient(): Promise<SupabaseClient> {
+    if (this.injectedSupabaseClient) return this.injectedSupabaseClient;
+    return createClient();
+  }
 
   async createJob(
     context: LeadIntelligenceContext,
@@ -273,7 +290,7 @@ export class LeadIntelligenceEngine {
 
     let currentJob = job;
 
-    const supabase = await createClient();
+    const supabase = await this.resolveSupabaseClient();
     await createProviderVaultService(supabase).warmOrganizationCache(context.organizationId);
     enterOrganizationContext(context.organizationId);
 
@@ -402,6 +419,7 @@ export class LeadIntelligenceEngine {
     stepTimer.complete("provider_check", { resultCount: activeSearchProviders.length, provider: "tavily" });
 
     if (job.criteria.fastMode !== false) {
+      const supabaseClient = job.criteria.aiRecruiterRunId ? await this.resolveSupabaseClient() : null;
       const fastResult = yield* runFastCompanyFinderPipeline({
         context,
         jobId,
@@ -411,6 +429,7 @@ export class LeadIntelligenceEngine {
         companiesService: this.companiesService,
         emitProgress,
         currentJob,
+        supabaseClient,
       });
       completePipelineRun(pipelineRunId, fastResult.status === "failed" ? "failed" : "completed");
       stepTimer.logSummary();
@@ -549,6 +568,23 @@ export class LeadIntelligenceEngine {
       context,
     );
 
+    let runPersistence: DiscoveryCompanyRunPersistenceContext | null = null;
+    if (job.criteria.aiRecruiterRunId) {
+      const aiRecruiterConfig = getAiRecruiterConfig();
+      const persistenceCap = Math.min(
+        job.criteria.persistenceMaximumCompanies
+          ?? job.criteria.maxResults
+          ?? maxResults,
+        aiRecruiterConfig.planLimitMaximumCompanies,
+      );
+      runPersistence = {
+        organizationId: context.organizationId,
+        runId: job.criteria.aiRecruiterRunId,
+        maximumCompanies: persistenceCap,
+        client: await this.resolveSupabaseClient(),
+      };
+    }
+
     let discoverySavedCount = 0;
     yield emitProgress("saving", "Discovery-resultaten opslaan…", {
       foundCount: allCandidates.length,
@@ -561,11 +597,6 @@ export class LeadIntelligenceEngine {
           return { type: "skipped" as const, candidate };
         }
 
-        const match = matchAgainstExisting(candidate, existingCompanies);
-        if (match.isDuplicate) {
-          return { type: "exists" as const, candidate };
-        }
-
         const saveStarted = Date.now();
         logPipelinePhase({
           phase: "SAVE",
@@ -576,11 +607,18 @@ export class LeadIntelligenceEngine {
         });
 
         try {
-          const created = await this.companiesService.createDiscoveryCompany(
-            context,
-            buildDiscoveryCreateInput(candidate, context.userId, candidate.source ?? "tavily"),
+          const qualified = leadCandidateToQualifiedDiscovery(
+            candidate,
+            candidate.source ?? "lead_intelligence",
           );
-          existingCompanies.push(created);
+          const saveResult = await saveDiscoveryCompanyWithDedupe({
+            companiesService: this.companiesService,
+            context,
+            qualified,
+            existingCompanies,
+            runPersistence,
+          });
+
           logPipelinePhase({
             phase: "SAVE",
             provider: "supabase",
@@ -589,7 +627,22 @@ export class LeadIntelligenceEngine {
             durationMs: Date.now() - saveStarted,
             jobId,
           });
-          return { type: "saved" as const, candidate, companyId: created.id as string };
+
+          if (saveResult.type === "saved") {
+            return {
+              type: "saved" as const,
+              candidate,
+              companyId: saveResult.companyId,
+            };
+          }
+          if (saveResult.type === "updated") {
+            return {
+              type: "updated" as const,
+              candidate,
+              companyId: saveResult.companyId,
+            };
+          }
+          return { type: "skipped" as const, candidate };
         } catch (error) {
           logPipelinePhase({
             phase: "SAVE",
@@ -607,24 +660,41 @@ export class LeadIntelligenceEngine {
     );
 
     for (const result of discoverySaveResults) {
-      if (result.status === "rejected" || result.value.type !== "saved") {
+      if (result.status === "rejected") continue;
+      const value = result.value;
+      if (value.type === "skipped") {
+        skippedCount += 1;
         continue;
       }
-
-      discoverySavedCount += 1;
-      savedCount += 1;
-      yield {
-        type: "candidate",
-        candidate: toLegacyCandidate(result.value.candidate),
-        saved: true,
-        updated: false,
-        skipped: false,
-      };
-      yield {
-        type: "event",
-        eventType: "company_saved",
-        payload: { name: result.value.candidate.name, mode: "discovery" },
-      };
+      if (value.type === "updated") {
+        updatedCount += 1;
+        yield {
+          type: "candidate",
+          candidate: toLegacyCandidate(value.candidate),
+          saved: false,
+          updated: true,
+          skipped: false,
+          companyId: value.companyId,
+        };
+        continue;
+      }
+      if (value.type === "saved") {
+        discoverySavedCount += 1;
+        savedCount += 1;
+        yield {
+          type: "candidate",
+          candidate: toLegacyCandidate(value.candidate),
+          saved: true,
+          updated: false,
+          skipped: false,
+          companyId: value.companyId,
+        };
+        yield {
+          type: "event",
+          eventType: "company_saved",
+          payload: { name: value.candidate.name, mode: "discovery" },
+        };
+      }
     }
 
     currentJob = await this.jobRepository.update(context.organizationId, jobId, {

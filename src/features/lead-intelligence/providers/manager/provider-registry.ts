@@ -1,3 +1,4 @@
+import { registerAllProviderFactories } from "@/features/lead-intelligence/providers/manager/register-providers";
 import type { ProviderAdapter, ProviderAdapterFactory } from "@/features/lead-intelligence/providers/manager/provider-adapter.types";
 import {
   hasActiveSearchProviders,
@@ -101,4 +102,18 @@ export function bootstrapProviderRegistry(registry: ProviderRegistry): ProviderR
   registry.initialize();
   setProviderRegistry(registry);
   return registry;
+}
+
+/** Idempotent singleton bootstrap for discovery failover and provider executors. */
+export function ensureProviderRegistryBootstrapped(): ProviderRegistry {
+  if (defaultRegistry) {
+    return defaultRegistry;
+  }
+  const registry = createProviderRegistry();
+  registerAllProviderFactories(registry);
+  return bootstrapProviderRegistry(registry);
+}
+
+export function resetProviderRegistrySingleton(): void {
+  defaultRegistry = null;
 }

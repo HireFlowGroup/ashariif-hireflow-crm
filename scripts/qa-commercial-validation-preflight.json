@@ -1,0 +1,14 @@
+{
+  "projectRef": "vcmegbghsaqagikfxces",
+  "limits": {
+    "maximumEmployers": 3,
+    "maximumExternalDiscoveryHttpCalls": 10,
+    "maximumPaidAiCalls": 1,
+    "maximumOutreachDrafts": 1,
+    "sendEnabled": false,
+    "outreachMode": "draft_only"
+  },
+  "recommendedPrompt": "Targeted: Laurens (site:werkenbij.laurens.nl), 1 werkgever, Corporate Recruiter vacature, Nederland, maximum_companies=1, discovery targeted.",
+  "status": "awaiting_user_approval_before_execution",
+  "estimatedCostUsd": "0-0.05 excluding single optional OpenAI call"
+}

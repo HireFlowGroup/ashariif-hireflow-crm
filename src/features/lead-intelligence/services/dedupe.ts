@@ -1,7 +1,7 @@
 import type { Company, CreateCompanyInput } from "@/features/companies/domain";
 import type { ExternalCompanyCandidate } from "@/features/lead-intelligence/domain";
+import { canonicalCandidateDedupeKey } from "@/features/company-finder/discovery/canonical-company-identity.service";
 import {
-  createCandidateKey,
   extractDomain,
   fuzzyNameSimilarity,
   normalizeCompanyName,
@@ -27,7 +27,7 @@ export function dedupeCandidates(
   const seen = new Map<string, ExternalCompanyCandidate>();
 
   for (const candidate of candidates) {
-    const key = createCandidateKey(candidate);
+    const key = canonicalCandidateDedupeKey(candidate);
     const existing = seen.get(key);
 
     if (!existing || candidate.confidence > existing.confidence) {
@@ -83,8 +83,11 @@ export function matchAgainstExisting(
     }
 
     const similarity = fuzzyNameSimilarity(candidate.name, company.name);
+    const domainsAlign =
+      Boolean(candidateDomain && companyDomain)
+      && candidateDomain === companyDomain;
 
-    if (similarity >= 0.85) {
+    if (similarity >= 0.85 && domainsAlign) {
       return { isDuplicate: true, reason: "fuzzy_name", matchedCompanyId: company.id as string };
     }
   }

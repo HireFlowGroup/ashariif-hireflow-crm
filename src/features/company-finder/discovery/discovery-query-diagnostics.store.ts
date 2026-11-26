@@ -2,7 +2,11 @@ import type {
   DiscoveryFunnelMetrics,
   DiscoveryResultLogEntry,
 } from "@/features/company-finder/discovery/discovery-result.types";
+import type { UsableRecallDiagnostics } from "@/features/company-finder/discovery/discovery-usable-recall-diagnostics.types";
 import type { DiscoveryQueryDiagnostic } from "@/features/company-finder/services/fast-discovery.service";
+import type { ProviderRequestTelemetry } from "@/features/ai-recruiter/services/provider-request-telemetry.service";
+import type { ProviderDegradedModeReport } from "@/features/company-finder/discovery/provider-degraded-mode.service";
+import type { DiscoveryApiBudgetSnapshot } from "@/features/company-finder/discovery/discovery-run-api-budget.service";
 
 export type StoredDiscoveryQueryRun = {
   jobId: string;
@@ -14,6 +18,18 @@ export type StoredDiscoveryQueryRun = {
   funnel?: DiscoveryFunnelMetrics;
   resultLogs?: DiscoveryResultLogEntry[];
   recordedAt: string;
+  queriesGenerated?: string[];
+  serpApiFallbackTriggered?: boolean;
+  serpApiFallbackReason?: string | null;
+  tavilyUsefulRecall?: boolean;
+  employerHostedResults?: number;
+  concreteVacancyResults?: number;
+  desiredRoleVacancyResults?: number;
+  usableRecallDiagnostics?: UsableRecallDiagnostics;
+  providerRequestTelemetry?: ProviderRequestTelemetry;
+  providerDegradedMode?: ProviderDegradedModeReport;
+  discoveryQueryDuplicatesRemoved?: number;
+  apiBudgetSnapshot?: DiscoveryApiBudgetSnapshot;
 };
 
 const MAX_ENTRIES = 50;

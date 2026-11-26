@@ -25,6 +25,8 @@ const COMPETITOR_PATTERNS = [
   /\bPageGroup\b/i,
   /\bTempo-Team\b/i,
   /\bUnique\b.*\buitzend/i,
+  /\bmaven\s+professionals\b/i,
+  /\bprofessionals\b.*\b(recruitment|staffing|detachering)\b/i,
 ];
 
 const COMPETITOR_URL_SEGMENTS = [

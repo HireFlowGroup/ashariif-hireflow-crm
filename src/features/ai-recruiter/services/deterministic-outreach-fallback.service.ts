@@ -2,6 +2,10 @@ import type { Company } from "@/features/companies/domain";
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import type { PersonalizationFact } from "@/features/ai-recruiter/services/recruitment-outreach-writer.service";
 import { buildOutreachSalutation } from "@/features/contact-finder/services/contact-validation.service";
+import {
+  filterStrictVacancyEvidence,
+  strictVacancyEvidence,
+} from "@/features/ai-recruiter/services/vacancy-evidence.service";
 
 const MAX_FALLBACK_WORDS = 120;
 
@@ -33,40 +37,57 @@ export type DeterministicFallbackDraft = {
   personalizationFacts: PersonalizationFact[];
   sourceEvidence: PersonalizationFact[];
   warnings: string[];
+  blocked: boolean;
+  blockReason: string | null;
 };
 
 export function buildDeterministicOutreachFallback(
   input: DeterministicFallbackInput,
 ): DeterministicFallbackDraft {
-  const vacancyTitle = input.vacancies[0]?.title ?? "recruitmentfunctie";
   const salutation = buildOutreachSalutation(
     input.recipientName,
     input.isGeneralMailbox,
     input.recipientEmail,
   );
 
-  const facts: PersonalizationFact[] = [];
-  if (input.vacancies[0]) {
-    facts.push({
-      claim: `${input.company.name} heeft momenteel ${vacancyTitle} open staan.`,
-      sourceUrl: input.vacancies[0].sourceUrl,
-      sourceType: "vacancy",
-      confidence: input.vacancies[0].isActive ? 0.9 : 0.7,
-    });
+  const strictVacancies = filterStrictVacancyEvidence(input.vacancies);
+  const primary = strictVacancies[0];
+
+  if (!primary || !strictVacancyEvidence(primary)) {
+    return {
+      subject: "",
+      salutation,
+      bodyText: "",
+      cta: "",
+      closing: "",
+      personalizationFacts: [],
+      sourceEvidence: [],
+      warnings: ["blocked_no_vacancy_evidence_for_hiring_claim"],
+      blocked: true,
+      blockReason: "Geen concrete vacature-evidence voor recruitmentclaim.",
+    };
   }
 
-  const subject = "Ondersteuning bij jullie recruitmentvacature";
-  const cta =
-    "Staat u ervoor open dat wij vrijblijvend geschikte kandidaten voor deze vacature zoeken en aan u voorstellen?";
-  const support =
-    "HireFlow Group ondersteunt organisaties bij het vinden en selecteren van geschikte professionals voor moeilijk vervulbare functies.";
-  const opener = facts[0]?.claim ?? `Ik zag dat ${input.company.name} momenteel actief werft.`;
+  const vacancyTitle = primary.jobTitle;
+  const facts: PersonalizationFact[] = [
+    {
+      claim: `Ik zag dat jullie momenteel een ${vacancyTitle} zoeken.`,
+      sourceUrl: primary.jobUrl,
+      sourceType: "vacancy",
+      confidence: 0.95,
+    },
+  ];
 
+  const subject = `${input.company.name} · ${vacancyTitle}`;
+  const cta =
+    "Zou het passen als wij op basis van deze vacature vrijblijvend een paar geschikte profielen voor u selecteren?";
+  const support =
+    "HireFlow Group ondersteunt organisaties bij het vinden en selecteren van geschikte professionals.";
   const sender = input.senderName ?? "HireFlow Group";
   const closing = `Met vriendelijke groet,\n\n${sender}\nHireFlow Group`;
 
   const bodyText = truncateWords(
-    [salutation, "", opener, "", support, "", cta, "", closing].join("\n"),
+    [salutation, "", facts[0]!.claim, "", support, "", cta, "", closing].join("\n"),
     MAX_FALLBACK_WORDS,
   );
 
@@ -79,6 +100,8 @@ export function buildDeterministicOutreachFallback(
     personalizationFacts: facts,
     sourceEvidence: facts,
     warnings: ["ai_generation_failed_fallback_used"],
+    blocked: false,
+    blockReason: null,
   };
 }
 

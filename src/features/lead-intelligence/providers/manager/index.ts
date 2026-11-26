@@ -11,6 +11,8 @@ export {
   getProviderRegistry,
   setProviderRegistry,
   bootstrapProviderRegistry,
+  ensureProviderRegistryBootstrapped,
+  resetProviderRegistrySingleton,
   ProviderRegistry,
 } from "./provider-registry";
 export type { ProviderAdapter, ProviderAdapterFactory } from "./provider-adapter.types";

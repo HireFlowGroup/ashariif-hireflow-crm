@@ -1,5 +1,6 @@
 import type { ConceptGenerationCounters } from "@/features/ai-recruiter/domain/concept-generation.types";
 import { resolveConceptGenerationRunStatus } from "@/features/ai-recruiter/services/concept-generation-banner.service";
+import { allEligibleConceptsSkippedForExistingOutreach } from "@/features/ai-recruiter/services/concept-generation-result.helpers";
 import type { AiRecruiterRunCounters, AiRecruiterRunStatus } from "@/features/ai-recruiter/domain/types";
 import type { RunDiagnostics, RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { isProviderFailure } from "@/features/ai-recruiter/services/discovery-run-diagnostics.service";
@@ -43,6 +44,20 @@ export function resolveRunOutcome(input: {
       };
     }
 
+    if (allEligibleConceptsSkippedForExistingOutreach(conceptCounters)) {
+      return {
+        status: "partially_completed",
+        errorMessage: `${conceptCounters.conceptsSkipped} prospect(s) overgeslagen — actief concept bestaat al.`,
+      };
+    }
+
+    if (conceptCounters.conceptsSkipped > 0 && conceptCounters.conceptsCreated === 0 && conceptCounters.conceptsFailed === 0) {
+      return {
+        status: "partially_completed",
+        errorMessage: `${conceptCounters.conceptsSkipped} prospect(s) overgeslagen — actief concept bestaat al.`,
+      };
+    }
+
     if (conceptCounters.prospectsEligible > 0 && conceptCounters.conceptsStarted === 0) {
       return {
         status: "failed",
@@ -69,10 +84,10 @@ export function resolveRunOutcome(input: {
     const summaryParts = eligibilitySummary
       ? [
           `${eligibilitySummary.prospectsReviewed} prospects beoordeeld`,
-          `gem. score ${eligibilitySummary.averageScore}`,
-          `drempel ${eligibilitySummary.threshold}`,
+          `gem. prospectscore ${eligibilitySummary.averageScore}`,
+          eligibilitySummary.qualificationPolicySummary,
           conceptCounters
-            ? `${conceptCounters.conceptsCreated} concepten aangemaakt, ${conceptCounters.conceptsFailed} mislukt`
+            ? `${conceptCounters.conceptsCreated} concepten aangemaakt, ${conceptCounters.conceptsFailed} mislukt, ${conceptCounters.conceptsSkipped} overgeslagen`
             : null,
           eligibilitySummary.topRejectionReasons[0]
             ? `top afwijsreden: ${eligibilitySummary.topRejectionReasons[0].reason} (${eligibilitySummary.topRejectionReasons[0].count}x)`
@@ -87,8 +102,15 @@ export function resolveRunOutcome(input: {
       };
     }
 
+    const noConceptsStatus: AiRecruiterRunStatus =
+      conceptCounters?.conceptsCreated === 0
+        ? eligibilitySummary && eligibilitySummary.eligibleCount === 0
+          ? "partially_completed"
+          : "partially_completed"
+        : "partially_completed";
+
     return {
-      status: conceptCounters?.prospectsEligible === 0 ? "completed" : "partially_completed",
+      status: noConceptsStatus,
       errorMessage: summaryParts
         ? `Geen concepten aangemaakt — ${summaryParts}.`
         : "Geen concepten aangemaakt — geen eligible prospects na contact- en scoredrempels.",
@@ -116,5 +138,10 @@ export function resolveRunOutcome(input: {
 }
 
 export function discoveryStepFailed(errorCode: RunFailureCode | null): boolean {
-  return isProviderFailure(errorCode) || errorCode === "database_error" || errorCode === "unknown_error";
+  return (
+    isProviderFailure(errorCode)
+    || errorCode === "database_error"
+    || errorCode === "pipeline_timeout"
+    || errorCode === "unknown_error"
+  );
 }

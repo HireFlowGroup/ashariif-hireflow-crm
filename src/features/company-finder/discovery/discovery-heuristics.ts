@@ -4,101 +4,106 @@ import type {
   DiscoveryUrlInput,
   HeuristicClassification,
 } from "@/features/company-finder/discovery/discovery-quality.types";
+import { categoryToRejectionReason } from "@/features/company-finder/discovery/discovery-quality.types";
 
-const URL_REJECT_SEGMENTS = [
-  "/blog",
-  "/news",
-  "/article",
-  "/nieuws",
-  "/list",
-  "/top",
-  "/ranking",
-  "/gemeente",
-  "/wikipedia",
-  "/wiki/",
-  "/directory",
-  "/overzicht",
-  "/lijst",
-  "/best-of",
-  "/beste-",
-  "/guides/",
-  "/guide/",
-  "/magazine/",
-  "/press/",
-  "/media/",
-  "/tag/",
-  "/category/",
-  "/topics/",
-  "/search?",
+/**
+ * High-confidence host / path patterns that may block a URL.
+ * Heuristics MUST NOT reject outside these categories.
+ */
+type HighConfidenceBlock = {
+  match: RegExp;
+  category: DiscoveryUrlCategory;
+  reason: DiscoveryRejectionReason;
+  detail: string;
+};
+
+const HIGH_CONFIDENCE_BLOCKS: HighConfidenceBlock[] = [
+  {
+    match: /wikipedia\.org|\.wikipedia\.|\/wiki\//i,
+    category: "directory",
+    reason: "wikipedia",
+    detail: "Wikipedia",
+  },
+  {
+    match: /gemeente|overheid\.nl|rijksoverheid\.nl/i,
+    category: "government",
+    reason: "government",
+    detail: "Gemeente/overheid",
+  },
+  {
+    match: /(?:^|[/.])blog(?:[/.]|$)|\/blog\/|blogspot\.|medium\.com/i,
+    category: "blog",
+    reason: "blog",
+    detail: "Blog",
+  },
+  {
+    match: /\/nieuws\/|\/news\/|(?:^|[/.])nieuws(?:[/.]|$)|nos\.nl|nu\.nl|telegraaf\.nl|volkskrant\.nl|nrc\.nl|ad\.nl|fd\.nl/i,
+    category: "news",
+    reason: "news",
+    detail: "Nieuws",
+  },
+  {
+    match: /vacaturebank|indeed\.|glassdoor\.|nationalevacaturebank|werk\.nl\/vacatures|linkedin\.com\/jobs/i,
+    category: "jobboard",
+    reason: "jobboard",
+    detail: "Vacaturebank",
+  },
+  {
+    match: /\/directory\/|bedrijvengids|yellowpages|goudengids|company\.directory|crunchbase\.com\/lists|clutch\.co|sortlist\.|goodfirms\./i,
+    category: "directory",
+    reason: "directory",
+    detail: "Directory",
+  },
+  {
+    match: /\/forum\/|forum\.|reddit\.com|discourse\.|community\.forum/i,
+    category: "forum",
+    reason: "forum",
+    detail: "Forum",
+  },
+  {
+    match: /\/article\/.*top|\/top-\d+|\/top\/\d+|\/best-of\/|\/beste-\d+/i,
+    category: "listing",
+    reason: "directory",
+    detail: "Ranking/listicle URL",
+  },
 ];
 
-const TITLE_REJECT_PATTERNS: Array<{ pattern: RegExp; category: DiscoveryUrlCategory; detail: string }> = [
-  { pattern: /^top\s+\d+/i, category: "listing", detail: "Top-N lijst" },
-  { pattern: /\btop\s+\d+/i, category: "listing", detail: "Top-N ranking in titel" },
-  { pattern: /\b(nieuws|news)\b/i, category: "news", detail: "Nieuws in titel" },
-  { pattern: /\b(welkom|welcome)\b/i, category: "government", detail: "Welkomstpagina" },
-  { pattern: /\bblog\b/i, category: "blog", detail: "Blog in titel" },
-  { pattern: /\b(lijst|list|directory|gids|guide)\b/i, category: "directory", detail: "Lijst/directory in titel" },
-  { pattern: /\bbeste\s+\d+/i, category: "listing", detail: "Beste-N lijst" },
-  { pattern: /^bedrijven\s+/i, category: "directory", detail: "Bedrijven-overzicht" },
-  { pattern: /\bbedrijven\s+(in|rotterdam|amsterdam|utrecht|den haag|nederland)\b/i, category: "directory", detail: "Bedrijven-overzicht per regio" },
-  { pattern: /^\d+\s+(beste|grootste|top)/i, category: "listing", detail: "Rankinglijst" },
-];
-
-const CITY_ONLY_TITLES = new Set(
-  [
-    "rotterdam",
-    "amsterdam",
-    "utrecht",
-    "den haag",
-    "eindhoven",
-    "groningen",
-    "tilburg",
-    "almere",
-    "breda",
-    "nijmegen",
-    "haarlem",
-    "arnhem",
-    "enschede",
-    "nederland",
-  ].map((city) => city.toLowerCase()),
-);
-
-const BLOCKED_HOSTS = [
-  "wikipedia.org",
-  "facebook.com",
-  "instagram.com",
-  "twitter.com",
-  "x.com",
-  "youtube.com",
-  "linkedin.com/in/",
-  "indeed.nl/viewjob",
-  "glassdoor.",
-  "reddit.com",
-  "medium.com",
-  "wordpress.com",
-  "blogspot.",
-  "tumblr.com",
-  "pinterest.com",
-  "tiktok.com",
-  "gemeente",
-  "overheid.nl",
-  "rijksoverheid.nl",
-  "nos.nl",
-  "nu.nl",
-  "ad.nl",
-  "telegraaf.nl",
-  "volkskrant.nl",
-  "nrc.nl",
-  "fd.nl",
-  "rtl.nl",
-  "tripadvisor.",
-  "yelp.",
-  "trustpilot.",
-  "crunchbase.com/lists",
-  "clutch.co",
-  "sortlist.",
-  "goodfirms.",
+const TITLE_HIGH_CONFIDENCE: Array<{
+  pattern: RegExp;
+  category: DiscoveryUrlCategory;
+  reason: DiscoveryRejectionReason;
+  detail: string;
+}> = [
+  {
+    pattern: /\b(bedrijvengids|company directory|yellow pages)\b/i,
+    category: "directory",
+    reason: "directory",
+    detail: "Directory in titel",
+  },
+  {
+    pattern: /^top\s+\d+/i,
+    category: "listing",
+    reason: "directory",
+    detail: "Top-N lijst in titel",
+  },
+  {
+    pattern: /\btop\s+\d+\s+bedrijven\b/i,
+    category: "listing",
+    reason: "directory",
+    detail: "Top-N bedrijvenlijst",
+  },
+  {
+    pattern: /\bvacaturebank\b/i,
+    category: "jobboard",
+    reason: "jobboard",
+    detail: "Vacaturebank in titel",
+  },
+  {
+    pattern: /\b(wikipedia)\b/i,
+    category: "directory",
+    reason: "wikipedia",
+    detail: "Wikipedia in titel",
+  },
 ];
 
 function normalizeTitle(title: string): string {
@@ -108,24 +113,10 @@ function normalizeTitle(title: string): string {
     .trim();
 }
 
-function inferCategoryFromUrl(url: string): DiscoveryUrlCategory | null {
-  const lower = url.toLowerCase();
-
-  if (lower.includes("gemeente") || lower.includes("overheid.nl")) return "government";
-  if (URL_REJECT_SEGMENTS.some((segment) => lower.includes(segment))) {
-    if (lower.includes("/blog") || lower.includes("blog.")) return "blog";
-    if (lower.includes("/news") || lower.includes("/nieuws")) return "news";
-    if (lower.includes("/list") || lower.includes("/top") || lower.includes("/ranking")) return "listing";
-    return "directory";
-  }
-
-  if (lower.includes("indeed.") || lower.includes("glassdoor.") || lower.includes("vacatures.nl")) {
-    return "jobboard";
-  }
-
-  return null;
-}
-
+/**
+ * Heuristics may only block when wikipedia / gemeente / blog / nieuws /
+ * vacaturebank / directory / forum are detected with high confidence.
+ */
 export function applyDiscoveryHeuristics(input: DiscoveryUrlInput): HeuristicClassification {
   const url = input.url.trim();
   const title = normalizeTitle(input.title);
@@ -136,103 +127,59 @@ export function applyDiscoveryHeuristics(input: DiscoveryUrlInput): HeuristicCla
       reason: "missing_website",
       category: "unknown",
       detail: "Geen geldige URL",
+      highConfidence: true,
     };
   }
 
-  const lowerUrl = url.toLowerCase();
+  const haystack = `${url} ${title}`.toLowerCase();
 
-  for (const host of BLOCKED_HOSTS) {
-    if (lowerUrl.includes(host)) {
-      const category: DiscoveryUrlCategory = host.includes("gemeente") || host.includes("overheid")
-        ? "government"
-        : host.includes("indeed") || host.includes("glassdoor")
-          ? "jobboard"
-          : host.includes("nos.") || host.includes("nu.nl") || host.includes("telegraaf")
-            ? "news"
-            : "social";
-
+  for (const block of HIGH_CONFIDENCE_BLOCKS) {
+    if (block.match.test(haystack)) {
       return {
         rejected: true,
-        reason: "heuristic_blocked_host",
-        category,
-        detail: `Geblokkeerd domein: ${host}`,
+        reason: block.reason,
+        category: block.category,
+        detail: `Hoge zekerheid: ${block.detail}`,
+        highConfidence: true,
       };
     }
   }
 
-  for (const segment of URL_REJECT_SEGMENTS) {
-    if (lowerUrl.includes(segment)) {
-      const category = inferCategoryFromUrl(url) ?? "directory";
-      return {
-        rejected: true,
-        reason: "heuristic_url",
-        category,
-        detail: `URL-segment: ${segment}`,
-      };
-    }
-  }
-
-  for (const rule of TITLE_REJECT_PATTERNS) {
+  for (const rule of TITLE_HIGH_CONFIDENCE) {
     if (rule.pattern.test(title)) {
       return {
         rejected: true,
-        reason: "heuristic_title",
+        reason: rule.reason,
         category: rule.category,
-        detail: rule.detail,
+        detail: `Hoge zekerheid: ${rule.detail}`,
+        highConfidence: true,
       };
     }
   }
 
-  const titleLower = title.toLowerCase();
-
-  if (CITY_ONLY_TITLES.has(titleLower)) {
-    return {
-      rejected: true,
-      reason: "heuristic_title",
-      category: "government",
-      detail: "Alleen plaatsnaam als titel",
-    };
+  if (title.length < 1) {
+    return { rejected: false, highConfidence: false };
   }
 
-  if (/^welcome to\s+/i.test(title) || /^welkom in\s+/i.test(title) || /^welkom bij\s+/i.test(title)) {
-    return {
-      rejected: true,
-      reason: "heuristic_title",
-      category: "government",
-      detail: "Welkomstpagina titel",
-    };
-  }
-
-  if (/^top\s*\d*$/i.test(title) || titleLower === "top 250") {
-    return {
-      rejected: true,
-      reason: "heuristic_title",
-      category: "listing",
-      detail: "Generieke rankingtitel",
-    };
-  }
-
-  if (title.length < 2) {
-    return {
-      rejected: true,
-      reason: "heuristic_title",
-      category: "unknown",
-      detail: "Titel te kort",
-    };
-  }
-
-  return { rejected: false };
+  return { rejected: false, highConfidence: false };
 }
 
-/** Heuristic fallback when AI is unavailable. */
+/** Soft category hint when AI is unavailable — never used alone to hard-reject outside blocklist. */
 export function inferUrlCategoryHeuristic(input: DiscoveryUrlInput): DiscoveryUrlCategory {
   const heuristic = applyDiscoveryHeuristics(input);
   if (heuristic.rejected && heuristic.category) {
     return heuristic.category;
   }
 
-  const urlCategory = inferCategoryFromUrl(input.url);
-  if (urlCategory) return urlCategory;
-
+  const lower = input.url.toLowerCase();
+  if (lower.includes("linkedin.com") || lower.includes("facebook.com")) return "social";
   return "company";
+}
+
+export function rejectionReasonFromHeuristic(
+  heuristic: HeuristicClassification,
+): DiscoveryRejectionReason {
+  if (heuristic.reason) return heuristic.reason;
+  if (heuristic.category) return categoryToRejectionReason(heuristic.category);
+  return "low_confidence";
 }

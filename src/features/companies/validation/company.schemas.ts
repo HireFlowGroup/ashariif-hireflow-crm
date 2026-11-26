@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const companyStatusSchema = z.enum(["active", "inactive", "prospect", "archived"]);
+const companyStatusSchema = z.enum(["active", "inactive", "prospect", "archived", "review"]);
 
 const companyPrioritySchema = z.enum(["low", "medium", "high"]);
 
@@ -56,6 +56,45 @@ const scoreBreakdownSchema = z
   })
   .passthrough();
 
+const hiringSignalsSchema = z
+  .array(
+    z.object({
+      type: z.string(),
+      description: z.string(),
+      source: z.string(),
+      confidence: z.number(),
+    }),
+  )
+  .optional();
+
+/** Discovery + vacancy fields shared between create and update validation. */
+const companyDiscoveryVacancyFields = {
+  domain: z.string().trim().max(200).nullable().optional(),
+  linkedinUrl: optionalUrlSchema,
+  region: z.string().trim().max(120).nullable().optional(),
+  country: z.string().trim().max(80).nullable().optional(),
+  careersUrl: optionalUrlSchema,
+  vacancyPageUrl: optionalUrlSchema,
+  vacancyCount: z.number().int().min(0).optional(),
+  hiringSignals: hiringSignalsSchema,
+  sourceUrl: optionalUrlSchema,
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  companyType: z.string().trim().max(80).nullable().optional(),
+  companyConfidence: z.number().int().min(0).max(100).nullable().optional(),
+  discoveryReason: z.string().trim().max(2000).nullable().optional(),
+  discoveryProvider: z.string().trim().max(120).nullable().optional(),
+  lastVerifiedAt: z.string().datetime().nullable().optional(),
+  leadScore: z.number().int().min(0).max(100).nullable().optional(),
+  leadPriority: leadPrioritySchema.nullable().optional(),
+  scoreReason: z.string().trim().max(500).nullable().optional(),
+  scoreBreakdown: scoreBreakdownSchema.nullable().optional(),
+  generalEmail: optionalEmailSchema,
+  hrEmail: optionalEmailSchema,
+  kvkNumber: z.string().trim().max(40).nullable().optional(),
+  aiSummary: z.string().trim().max(8000).nullable().optional(),
+  outreachStatus: z.enum(["none", "queued", "draft", "review", "sent", "blocked"]).optional(),
+} as const;
+
 export const createCompanyInputSchema = z.object({
   name: z
     .string()
@@ -64,38 +103,17 @@ export const createCompanyInputSchema = z.object({
     .max(200, "Bedrijfsnaam is te lang."),
   ownerId: z.string().uuid("Ongeldige ownerId.").nullable().optional(),
   website: optionalUrlSchema,
-  domain: z.string().trim().max(200).nullable().optional(),
-  linkedinUrl: optionalUrlSchema,
   email: optionalEmailSchema,
   phone: z.string().trim().max(40, "Telefoonnummer is te lang.").nullable().optional(),
   sector: z.string().trim().max(120, "Sector is te lang.").nullable().optional(),
   city: z.string().trim().max(120, "Plaats is te lang.").nullable().optional(),
-  region: z.string().trim().max(120).nullable().optional(),
-  country: z.string().trim().max(80).nullable().optional(),
   employeeCount: z.number().int().positive().nullable().optional(),
   employeeCountMin: z.number().int().positive().nullable().optional(),
   employeeCountMax: z.number().int().positive().nullable().optional(),
+  employeeCountLabel: z.string().trim().max(200).nullable().optional(),
   priority: companyPrioritySchema.nullable().optional(),
-  leadScore: z.number().int().min(0).max(100).nullable().optional(),
-  leadPriority: leadPrioritySchema.nullable().optional(),
-  scoreReason: z.string().trim().max(500).nullable().optional(),
-  scoreBreakdown: scoreBreakdownSchema.nullable().optional(),
-  vacancyCount: z.number().int().min(0).optional(),
-  hiringSignals: z.array(z.object({
-    type: z.string(),
-    description: z.string(),
-    source: z.string(),
-    confidence: z.number(),
-  })).optional(),
+  ...companyDiscoveryVacancyFields,
   source: z.string().trim().max(120).nullable().optional(),
-  sourceUrl: optionalUrlSchema,
-  confidence: z.number().min(0).max(1).nullable().optional(),
-  companyType: z.string().trim().max(80).nullable().optional(),
-  companyConfidence: z.number().int().min(0).max(100).nullable().optional(),
-  discoveryReason: z.string().trim().max(2000).nullable().optional(),
-  discoveryProvider: z.string().trim().max(120).nullable().optional(),
-  lastVerifiedAt: z.string().datetime().nullable().optional(),
-  outreachStatus: z.enum(["none", "queued", "draft", "review", "sent", "blocked"]).optional(),
   status: companyStatusSchema.optional(),
   notes: z.string().trim().max(5000, "Notities zijn te lang.").nullable().optional(),
 });
@@ -122,7 +140,12 @@ export const updateCompanyInputSchema = z
       .positive("Aantal medewerkers moet positief zijn.")
       .nullable()
       .optional(),
+    employeeCountMin: z.number().int().positive().nullable().optional(),
+    employeeCountMax: z.number().int().positive().nullable().optional(),
+    employeeCountLabel: z.string().trim().max(200).nullable().optional(),
     priority: companyPrioritySchema.nullable().optional(),
+    ...companyDiscoveryVacancyFields,
+    source: z.string().trim().max(120).nullable().optional(),
   })
   .refine(
     (value) =>

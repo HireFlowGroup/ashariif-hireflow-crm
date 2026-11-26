@@ -3,6 +3,10 @@ import "server-only";
 import type { Company } from "@/features/companies/domain";
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import {
+  filterStrictVacancyEvidence,
+  strictVacancyEvidence,
+} from "@/features/ai-recruiter/services/vacancy-evidence.service";
+import {
   analyzeBdOutreachContext,
   pickVariantIndex,
 } from "@/features/ai-recruiter/services/bd-outreach-analyzer.service";
@@ -126,45 +130,20 @@ function firstNameReliable(
 }
 
 function buildPersonalizationFacts(
-  company: Company,
-  hiring: HiringIntelligenceProfile,
+  _company: Company,
+  _hiring: HiringIntelligenceProfile,
   vacancies: VacancyEvidence[],
 ): PersonalizationFact[] {
   const facts: PersonalizationFact[] = [];
+  const strictVacancies = filterStrictVacancyEvidence(vacancies);
+  const primaryVacancy = strictVacancies[0];
 
-  const primaryVacancy = vacancies[0];
-  if (primaryVacancy) {
+  if (primaryVacancy && strictVacancyEvidence(primaryVacancy)) {
     facts.push({
-      claim: `Jullie zoeken momenteel een ${primaryVacancy.title}.`,
-      sourceUrl: primaryVacancy.sourceUrl,
+      claim: `Ik zag dat jullie momenteel een ${primaryVacancy.jobTitle} zoeken.`,
+      sourceUrl: primaryVacancy.jobUrl,
       sourceType: "vacancy",
-      confidence: primaryVacancy.isActive ? 0.97 : 0.75,
-    });
-  } else if (hiring.vacancyTitles[0]) {
-    facts.push({
-      claim: `Jullie zoeken momenteel een ${hiring.vacancyTitles[0]}.`,
-      sourceUrl: company.website ?? null,
-      sourceType: "vacancy",
-      confidence: 0.8,
-    });
-  }
-
-  if (hiring.vacancyCount >= 2) {
-    facts.push({
-      claim: `${company.name} heeft ${hiring.vacancyCount} vacatures open staan.`,
-      sourceUrl: company.website ?? null,
-      sourceType: "careers_page",
-      confidence: 0.85,
-    });
-  }
-
-  const signal = hiring.signals[0];
-  if (signal && facts.length < 2) {
-    facts.push({
-      claim: signal.description ?? signal.title,
-      sourceUrl: company.website ?? null,
-      sourceType: "hiring_signal",
-      confidence: 0.7,
+      confidence: 0.97,
     });
   }
 
@@ -207,7 +186,7 @@ function buildFallbackDraft(input: RecruitmentOutreachDraftInput): RecruitmentOu
     };
 
   const facts = buildPersonalizationFacts(company, hiring, vacancies);
-  const vacancyTitle = vacancies[0]?.title ?? hiring.vacancyTitles[0] ?? null;
+  const vacancyTitle = facts.length > 0 ? vacancies.find((v) => v.jobTitle)?.jobTitle ?? null : null;
 
   const salutation = buildOutreachSalutation(
     selectedContact.recipientName,
@@ -218,9 +197,24 @@ function buildFallbackDraft(input: RecruitmentOutreachDraftInput): RecruitmentOu
     },
   );
 
-  const opener =
-    facts[0]?.claim
-    ?? `${company.name} lijkt actief te werven — daarom neem ik contact op.`;
+  const opener = facts[0]?.claim ?? null;
+  if (!opener) {
+    return {
+      subject: "",
+      salutation,
+      body: "",
+      cta: "",
+      closing: "",
+      personalizationFacts: [],
+      sourceEvidence: [],
+      warnings: ["blocked_no_vacancy_evidence_for_hiring_claim"],
+      confidence: 0,
+      model: "blocked",
+      promptVersion: RECRUITMENT_OUTREACH_PROMPT_VERSION,
+      bodyText: "",
+      recommendedSubject: "",
+    };
+  }
 
   const cta = buildPermissionCta(company, vacancyTitle);
   const support = buildSupportLine();
