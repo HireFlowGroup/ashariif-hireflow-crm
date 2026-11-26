@@ -84,10 +84,13 @@ export async function applyManualEligibilityOverride(
     throw new Error("Geen contact beschikbaar — pas eerst contact aan");
   }
 
+  const opportunityScore = opportunity.opportunityScore;
+
   const pipelineDecision = evaluateProspectPipeline({
     company,
     plan: run.searchCriteria,
     hiring,
+    opportunityScore,
     analysis: null,
     contact,
     contactStage: external?.contactDiscovery?.stage ?? item.stage,

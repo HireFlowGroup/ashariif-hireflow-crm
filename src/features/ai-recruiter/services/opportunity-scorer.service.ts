@@ -29,6 +29,11 @@ const GROWTH_SIGNAL_TYPES = ["growth", "expansion", "funding", "new_office", "sc
 const INTERNAL_RECRUITER_SIGNALS = ["new_recruiter", "internal_recruiter", "ta_team", "recruitment_team"];
 const STALE_SIGNAL_TYPES = ["stale_vacancy", "long_open_vacancy", "vacancy_30_days"];
 
+export type OpportunityScoringContext = {
+  hiringScore?: number;
+  desiredRoleMatch?: boolean;
+};
+
 const RECRUITER_ROLE_KEYWORDS = [
   "recruiter",
   "recruitment",
@@ -128,6 +133,57 @@ function deriveUrgency(
   return "low";
 }
 
+function hasVerifiedRoleVacancy(company: Company, plan: AiRecruiterSearchPlan): boolean {
+  const concreteUrl = company.vacancyPageUrl?.trim() ?? "";
+  if (concreteUrl && /\/(vacature|vacancies|jobs)\//i.test(concreteUrl)) {
+    if (plan.desired_roles.length === 0) return true;
+    return plan.desired_roles.some((role) => {
+      const slug = role.toLowerCase().replace(/\s+/g, "-");
+      return (
+        concreteUrl.toLowerCase().includes(slug)
+        || company.hiringSignals.some((s) => s.description.toLowerCase().includes(role.toLowerCase()))
+      );
+    });
+  }
+  return false;
+}
+
+/** Positief bewijs uit hiring/vacature — onbekende FTE wordt niet als negatief geteld. */
+function scoreVerifiedRecruitmentIntent(
+  company: Company,
+  plan: AiRecruiterSearchPlan,
+  context?: OpportunityScoringContext,
+): { points: number; why: string[] } {
+  const why: string[] = [];
+  let points = 0;
+
+  const roleMatch = context?.desiredRoleMatch ?? hasVerifiedRoleVacancy(company, plan);
+  const hiringScore = context?.hiringScore ?? 0;
+  const concreteVacancy = Boolean(company.vacancyPageUrl?.trim());
+
+  if (roleMatch && concreteVacancy) {
+    points += 28;
+    why.push("Geverifieerde vacature-URL met rolpad-match (positief recruitmentbewijs).");
+  }
+
+  if (hiringScore >= plan.minimum_hiring_score && concreteVacancy) {
+    points += 20;
+    why.push(
+      `Hiring-intelligence ${hiringScore} bevestigt actuele vacature (drempel plan ${plan.minimum_hiring_score}).`,
+    );
+  } else if (hiringScore >= plan.minimum_hiring_score) {
+    points += 8;
+    why.push(`Hiring score ${hiringScore} ≥ planminimum — beperkt opportunitybewijs zonder concrete vacature-URL.`);
+  }
+
+  if (roleMatch && (company.vacancyCount ?? 0) >= 1 && hiringScore >= 50) {
+    points += 12;
+    why.push("Combine vacaturetelling + rolpad + hiring-signaal.");
+  }
+
+  return { points: Math.min(45, points), why };
+}
+
 function deriveBestApproach(
   breakdown: OpportunityAssessment["breakdown"],
   company: Company,
@@ -150,6 +206,7 @@ function deriveBestApproach(
 export function computeOpportunityAssessment(
   company: Company,
   plan: AiRecruiterSearchPlan,
+  context?: OpportunityScoringContext,
 ): OpportunityAssessment {
   const why: string[] = [];
   const vacancyCount = company.vacancyCount ?? 0;
@@ -195,9 +252,12 @@ export function computeOpportunityAssessment(
     why.push("Bedrijfsomvang past bij schaalbare recruitmentopdrachten (20–500 FTE sweet spot).");
   }
 
+  const verifiedIntent = scoreVerifiedRecruitmentIntent(company, plan, context);
+  why.push(...verifiedIntent.why);
+
   const opportunityScore = Math.min(
     100,
-    growth + multipleVacancies + noInternalRecruiter + staleVacancies + scalability,
+    growth + multipleVacancies + noInternalRecruiter + staleVacancies + scalability + verifiedIntent.points,
   );
 
   const agencyNeedLikelihood: OpportunityAssessment["agencyNeedLikelihood"] =

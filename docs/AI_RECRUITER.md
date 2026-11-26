@@ -33,7 +33,7 @@ flowchart TB
 
 ## Database
 
-Migration: `supabase/migrations/20250806100000_ai_recruiter.sql`
+Migration: `supabase/migrations/20250805125000_ai_recruiter.sql`
 
 - `ai_recruiter_runs` — run lifecycle + counters + pipeline_steps
 - `ai_recruiter_run_items` — per-bedrijf voortgang + scores
@@ -151,7 +151,7 @@ OPENAI_API_KEY=...
 ## Gewijzigde / nieuwe bestanden
 
 ```
-supabase/migrations/20250806100000_ai_recruiter.sql
+supabase/migrations/20250805125000_ai_recruiter.sql
 src/features/ai-recruiter/
 src/app/api/ai-recruiter/
 src/components/ai-recruiter/

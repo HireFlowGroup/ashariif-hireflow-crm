@@ -4,7 +4,7 @@ import path from "path";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "!src/**/*.integration.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     env: {
       NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",

@@ -1,5 +1,9 @@
 import type { Company } from "@/features/companies/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
+import {
+  formatQualificationRunSummary,
+  resolveQualificationThresholds,
+} from "@/features/ai-recruiter/services/qualification-contract.service";
 import type { ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import type { VacancyEvidence } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/evaluate-concept-eligibility.service";
@@ -17,6 +21,7 @@ export type ProspectPipelineContext = {
   company: Company;
   plan: AiRecruiterSearchPlan;
   hiring: HiringIntelligenceProfile;
+  opportunityScore: number;
   analysis: RecruitmentIntelligenceAnalysis | null;
   contact: SelectedDiscoveredContact | null;
   contactStage: string;
@@ -42,10 +47,14 @@ export function evaluateProspectPipeline(context: ProspectPipelineContext): Pros
     ? desiredRoleMatchesVacancy(primaryTitle, context.plan)
     : false;
 
+  const opportunityForCommercial =
+    context.analysis?.recruitment_opportunity_score ?? context.opportunityScore;
+
   const eligibility = evaluateConceptEligibility({
     company: context.company,
     plan: context.plan,
     hiringScore: context.hiring.hiringScore,
+    opportunityScore: opportunityForCommercial,
     vacancyCount: vacancies.filter((vacancy) => vacancy.isActive).length,
     vacancies,
     contact: context.contact,
@@ -70,16 +79,20 @@ export type EligibilityRunSummary = {
   eligibleCount: number;
   rejectedCount: number;
   averageScore: number;
+  /** Concept readiness drempel (deterministische score). */
   threshold: number;
+  qualificationPolicySummary: string;
   topRejectionReasons: Array<{ reason: string; count: number }>;
 };
 
 export function summarizeEligibilityDecisions(
   decisions: ConceptEligibilityResult[],
-  threshold: number,
+  plan: AiRecruiterSearchPlan,
 ): EligibilityRunSummary {
-  const eligible = decisions.filter((d) => d.eligible);
-  const rejected = decisions.filter((d) => !d.eligible);
+  const thresholds = resolveQualificationThresholds(plan);
+  const threshold = thresholds.conceptReadinessMin;
+  const eligible = decisions.filter((d) => d.qualificationStatus === "eligible");
+  const rejected = decisions.filter((d) => d.qualificationStatus === "rejected" || d.qualificationStatus === "needs_evidence");
   const averageScore =
     decisions.length > 0
       ? Math.round(decisions.reduce((sum, d) => sum + d.score, 0) / decisions.length)
@@ -102,6 +115,7 @@ export function summarizeEligibilityDecisions(
     rejectedCount: rejected.length,
     averageScore,
     threshold,
+    qualificationPolicySummary: formatQualificationRunSummary(thresholds),
     topRejectionReasons,
   };
 }

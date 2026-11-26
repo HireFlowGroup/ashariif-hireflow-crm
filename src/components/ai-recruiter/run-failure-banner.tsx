@@ -30,17 +30,32 @@ export function RunFailureBanner({ run }: RunFailureBannerProps) {
   if (!uiMessage && !run.errorMessage) return null;
   if (run.status === "awaiting_approval" || run.status === "completed") return null;
 
+  const isPartialQualification = run.status === "partially_completed";
   const showBanner =
     run.status === "failed"
-    || (run.status === "partially_completed" && Boolean(run.errorMessage))
+    || (isPartialQualification && Boolean(run.errorMessage || uiMessage))
     || Boolean(uiMessage);
 
   if (!showBanner) return null;
 
+  const tone = run.status === "failed"
+    ? "destructive"
+  : isPartialQualification
+    ? "warning"
+    : "destructive";
+
+  const borderClass = tone === "warning"
+    ? "border-amber-500/30 bg-amber-500/5"
+    : "border-destructive/30 bg-destructive/5";
+  const titleClass = tone === "warning" ? "text-amber-800 dark:text-amber-200" : "text-destructive";
+  const bodyClass = tone === "warning" ? "text-amber-900/90 dark:text-amber-100/90" : "text-destructive/90";
+
   return (
-    <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-      <p className="font-medium text-destructive">{uiMessage?.title ?? "Run mislukt"}</p>
-      <p className="mt-1 text-destructive/90">{uiMessage?.body ?? run.errorMessage}</p>
+    <div className={`mb-4 rounded-md border px-4 py-3 text-sm ${borderClass}`}>
+      <p className={`font-medium ${titleClass}`}>
+        {uiMessage?.title ?? (isPartialQualification ? "Run deels afgerond" : "Run mislukt")}
+      </p>
+      <p className={`mt-1 ${bodyClass}`}>{uiMessage?.body ?? run.errorMessage}</p>
       {diagnostics?.providerName ? (
         <p className="mt-1 text-muted-foreground">
           Provider: {diagnostics.providerName}

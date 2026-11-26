@@ -1,5 +1,6 @@
 import type { Company } from "@/features/companies/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
+import { vacancyTitleMatchesDesiredRoleList } from "@/features/ai-recruiter/services/desired-role-matching.service";
 
 export type HiringIntelligenceProfile = {
   hiringScore: number;
@@ -47,14 +48,23 @@ export function computeHiringIntelligenceProfile(
     warnings.push("Vacature vereist maar geen vacatures gevonden.");
   }
 
-  const roleMatches = plan.desired_roles.filter((role) => {
-    const lower = role.toLowerCase();
-    return company.hiringSignals.some((s) => s.description.toLowerCase().includes(lower));
-  });
+  const vacancyTitleCandidates = [
+    ...company.hiringSignals.map((signal) => signal.description),
+    ...(company as Company & { vacancyTitles?: string[] }).vacancyTitles ?? [],
+  ].filter(Boolean);
+
+  const roleMatches = plan.desired_roles.filter((role) =>
+    vacancyTitleCandidates.some((title) => vacancyTitleMatchesDesiredRoleList(title, [role])),
+  );
 
   if (roleMatches.length > 0) {
+    breakdown.relevant_roles = 25;
+    explanations.push(`Relevante vacature-functies: ${roleMatches.join(", ")}.`);
+  } else if (plan.desired_roles.some((role) =>
+    vacancyTitleCandidates.some((title) => title.toLowerCase().includes(role.toLowerCase())),
+  )) {
     breakdown.relevant_roles = 15;
-    explanations.push(`Relevante functies: ${roleMatches.join(", ")}.`);
+    explanations.push("Gerelateerde vacaturetitel gevonden (semantische hint).");
   }
 
   const recentSignal = company.hiringSignals[0];

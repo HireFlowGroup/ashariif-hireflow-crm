@@ -7,11 +7,17 @@ import { ProspectDossierPanel } from "@/components/ai-recruiter/prospect-dossier
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDecisionLabel } from "@/features/ai-recruiter/services/prospect-decision.service";
+import {
+  isActionableOutreachReviewItem,
+  qualificationDisplayLabel,
+} from "@/features/ai-recruiter/services/run-review-queue.service";
 import type { AiRecruiterRun, AiRecruiterRunItem } from "@/features/ai-recruiter/domain/types";
 import { cn } from "@/lib/utils";
 
 export type ReviewFilter =
   | "all"
+  | "actionable"
+  | "rejected"
   | "priority_a"
   | "priority_b"
   | "general_mailbox"
@@ -32,6 +38,8 @@ type Props = {
 
 const FILTERS: Array<{ key: ReviewFilter; label: string }> = [
   { key: "all", label: "Alles" },
+  { key: "actionable", label: "Actie" },
+  { key: "rejected", label: "Afgewezen" },
   { key: "priority_a", label: "Prioriteit A" },
   { key: "priority_b", label: "Prioriteit B" },
   { key: "general_mailbox", label: "Algemene mailbox" },
@@ -47,15 +55,24 @@ function matchesFilter(item: AiRecruiterRunItem, filter: ReviewFilter): boolean 
   const external = item.externalCompanyData as {
     contactDiscovery?: { selected?: { isGeneralMailbox?: boolean; email?: string } };
     vacancyEvidence?: unknown[];
-    eligibility?: { eligible?: boolean };
+    vacancyValidation?: { vacancies?: unknown[] };
+    eligibility?: { eligible?: boolean; qualificationStatus?: string };
   } | null;
 
   const isGeneral = external?.contactDiscovery?.selected?.isGeneralMailbox ?? item.stage === "general_mailbox_found";
-  const hasVacancy = (external?.vacancyEvidence?.length ?? 0) > 0 || (item.hiringScore ?? 0) > 0;
+  const hasVacancy =
+    (external?.vacancyEvidence?.length ?? 0) > 0
+    || (external?.vacancyValidation?.vacancies?.length ?? 0) > 0
+    || (item.hiringScore ?? 0) > 0;
   const hasDraft = Boolean(item.outreachMessageId);
   const blocked = item.status === "skipped" || item.status === "failed";
+  const rejected = external?.eligibility?.qualificationStatus === "rejected" || blocked;
 
   switch (filter) {
+    case "actionable":
+      return isActionableOutreachReviewItem(item);
+    case "rejected":
+      return rejected;
     case "priority_a":
       return priority === "A";
     case "priority_b":
@@ -100,7 +117,7 @@ export function ProspectReviewWorkspace({
     <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
       <div className="flex flex-col rounded-xl border xl:max-h-[calc(100vh-10rem)] xl:overflow-hidden">
         <div className="border-b bg-muted/30 px-3 py-2">
-          <p className="text-sm font-medium">Review queue ({filteredItems.length})</p>
+          <p className="text-sm font-medium">Runresultaten ({filteredItems.length})</p>
           <div className="mt-2 flex flex-wrap gap-1">
             {FILTERS.map((f) => (
               <Button
@@ -122,9 +139,14 @@ export function ProspectReviewWorkspace({
             filteredItems.map((item) => {
               const external = item.externalCompanyData as {
                 vacancyEvidence?: Array<{ title?: string }>;
+                vacancyValidation?: { vacancies?: Array<{ title?: string }> };
                 contactDiscovery?: { selected?: { isGeneralMailbox?: boolean } };
               } | null;
-              const vacancyTitle = external?.vacancyEvidence?.[0]?.title ?? "—";
+              const vacancyTitle =
+                external?.vacancyValidation?.vacancies?.[0]?.title
+                ?? external?.vacancyEvidence?.[0]?.title
+                ?? "—";
+              const qualificationLabel = qualificationDisplayLabel(item);
               const isGeneral = external?.contactDiscovery?.selected?.isGeneralMailbox;
 
               return (
@@ -144,8 +166,13 @@ export function ProspectReviewWorkspace({
                       {item.totalScore ?? "—"}
                     </Badge>
                     <Badge variant="outline" className="text-[10px]">
-                      {formatDecisionLabel(item.scoreBreakdown?.decision)}
+                      {qualificationLabel}
                     </Badge>
+                    {item.scoreBreakdown?.decision ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        {formatDecisionLabel(item.scoreBreakdown.decision)}
+                      </Badge>
+                    ) : null}
                     {isGeneral ? (
                       <Badge variant="secondary" className="text-[10px]">Mailbox</Badge>
                     ) : (

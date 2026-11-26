@@ -3,6 +3,9 @@ import type {
   OutreachReadinessProspect,
   OutreachReadinessResult,
 } from "@/features/ai-recruiter/domain/outreach-readiness.types";
+import { isProspectDraftCapable } from "@/features/ai-recruiter/services/prospect-lifecycle.service";
+import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
+import type { ConceptEligibilityResult } from "@/features/ai-recruiter/domain/concept-eligibility.types";
 import {
   filterStrictVacancyEvidence,
   strictVacancyEvidence,
@@ -45,6 +48,26 @@ function buildEvidence(prospect: OutreachReadinessProspect): OutreachReadinessEv
   }
 
   return evidence;
+}
+
+export function evaluateConceptDraftReadiness(input: {
+  prospect: OutreachReadinessProspect;
+  eligibility: ConceptEligibilityResult;
+  plan: AiRecruiterSearchPlan;
+}): OutreachReadinessResult {
+  const base = evaluateOutreachReadiness(input.prospect);
+  const draftCapable = isProspectDraftCapable(input.eligibility, input.plan);
+  const draftHardBlock = base.blockingReasons.filter(
+    (reason) =>
+      !["needs_evidence", "score_below_threshold", "no_contact", "employee_range_unknown"].includes(reason),
+  );
+  return {
+    ...base,
+    readyForConceptDraft:
+      draftCapable
+      && filterStrictVacancyEvidence(input.prospect.vacancies).length > 0
+      && draftHardBlock.length === 0,
+  };
 }
 
 export function evaluateOutreachReadiness(prospect: OutreachReadinessProspect): OutreachReadinessResult {
@@ -102,6 +125,9 @@ export function evaluateOutreachReadiness(prospect: OutreachReadinessProspect): 
 
   return {
     ready: uniqueBlocking.length === 0,
+    readyForConceptDraft: !uniqueBlocking.some((reason) =>
+      ["no_vacancy_evidence", "concurrent_uitgesloten", "generieke_bedrijfsidentiteit", "duplicate_outreach", "cooldown_active"].includes(reason),
+    ) && strictVacancyCount > 0,
     companyId: prospect.companyId,
     vacancyId: prospect.vacancyId ?? null,
     contactId: prospect.contactId,

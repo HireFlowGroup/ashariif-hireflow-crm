@@ -21,11 +21,26 @@ import {
 import { buildDeterministicOutreachFallback } from "@/features/ai-recruiter/services/deterministic-outreach-fallback.service";
 import { filterStrictVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import { computeHiringIntelligenceProfile } from "@/features/ai-recruiter/services/hiring-intelligence-scorer.service";
-import { generateRecruitmentOutreachDraftWithValidation } from "@/features/ai-recruiter/services/recruitment-outreach-writer.service";
-import { evaluateOutreachReadiness } from "@/features/ai-recruiter/services/evaluate-outreach-readiness.service";
+import {
+  generateRecruitmentOutreachDraftWithValidation,
+  type RecruitmentOutreachDraft,
+} from "@/features/ai-recruiter/services/recruitment-outreach-writer.service";
+import {
+  evaluateConceptDraftReadiness,
+  evaluateOutreachReadiness,
+} from "@/features/ai-recruiter/services/evaluate-outreach-readiness.service";
+import {
+  isProspectDraftCapable,
+  resolveCrmPublishedMailbox,
+} from "@/features/ai-recruiter/services/prospect-lifecycle.service";
 import type { OutreachEngine } from "@/features/outreach-engine/services/outreach-engine.service";
 import { OutreachEngineError } from "@/features/outreach-engine/services/outreach-engine.service";
 import { getOutreachSendConfig } from "@/features/outreach-engine/domain/send-rules.config";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  releaseAiRecruiterRunSlot,
+  reserveAiRecruiterRunSlot,
+} from "@/features/ai-recruiter/services/run-slot-persistence.service";
 
 const DEFAULT_CONCEPT_TIMEOUT_MS = 90_000;
 
@@ -61,14 +76,30 @@ function terminalConceptStatus(success: boolean, usedFallback: boolean): Concept
   return usedFallback ? "generated_with_fallback" : "generated";
 }
 
+export function filterProspectsForDraftGeneration(
+  prospects: EligibleProspectForConcept[],
+  plan: AiRecruiterSearchPlan,
+): EligibleProspectForConcept[] {
+  return prospects
+    .map((prospect) => {
+      if (prospect.selected.email?.trim()) return prospect;
+      const crm = resolveCrmPublishedMailbox(prospect.company);
+      if (!crm) return null;
+      return { ...prospect, selected: crm };
+    })
+    .filter((prospect): prospect is EligibleProspectForConcept => {
+      if (!prospect) return false;
+      if (!prospect.selected.email?.trim()) return false;
+      if (prospect.eligibility.qualificationStatus === "eligible") return true;
+      return isProspectDraftCapable(prospect.eligibility, plan);
+    });
+}
+
 export function filterEligibleProspectsForConceptGeneration(
   prospects: EligibleProspectForConcept[],
+  plan: AiRecruiterSearchPlan,
 ): EligibleProspectForConcept[] {
-  return prospects.filter((prospect) => {
-    if (!prospect.eligibility.eligible) return false;
-    if (!prospect.selected.email?.trim()) return false;
-    return true;
-  });
+  return filterProspectsForDraftGeneration(prospects, plan);
 }
 
 async function persistConceptForProspect(
@@ -108,6 +139,7 @@ async function processEligibleProspect(
   repository: AiRecruiterRepository,
   prospectAudit: ProspectAuditRepository,
   conceptTimeoutMs: number,
+  supabaseClient: SupabaseClient | null,
 ): Promise<ConceptGenerationProspectResult> {
   const { itemId, companyId, company, selected, vacancies, contactStage, opportunity, eligibility } = prospect;
   const strictVacancies = filterStrictVacancyEvidence(vacancies);
@@ -174,11 +206,41 @@ async function processEligibleProspect(
     evidenceCount: readiness.evidence.length,
   });
 
-  if (!readiness.ready) {
+  const draftReadiness = evaluateConceptDraftReadiness({
+    prospect: {
+      companyId,
+      vacancyId: prospect.vacancyId ?? null,
+      companyName: company.name,
+      isCompetitor: false,
+      isGenericIdentity: false,
+      score: eligibility.score,
+      decision: eligibility.priority,
+      threshold: eligibility.threshold,
+      eligible: eligibility.eligible,
+      contactEmail: selected.email,
+      contactId: selected.contactId,
+      isGeneralMailbox: selected.isGeneralMailbox,
+      contactVerificationStatus: selected.verificationStatus,
+      duplicateOutreach: false,
+      cooldownActive: false,
+      suppressedContact: false,
+      bouncedContact: false,
+      invalidContact: false,
+      hasVacancyEvidence: strictVacancies.length > 0,
+      vacancies: strictVacancies,
+      hiringSignalCount: hiring.signals.length,
+      reasonCode: eligibility.reasonCode,
+      userMessage: eligibility.userMessage,
+    },
+    eligibility,
+    plan,
+  });
+
+  if (!draftReadiness.ready && !draftReadiness.readyForConceptDraft) {
     await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
       conceptStatus: "skipped",
-      finalReason: readiness.blockingReasons.join(", "),
-      reasonCode: readiness.blockingReasons[0] ?? "missing_required_data",
+      finalReason: draftReadiness.blockingReasons.join(", "),
+      reasonCode: draftReadiness.blockingReasons[0] ?? "missing_required_data",
     });
     return {
       itemId,
@@ -188,11 +250,13 @@ async function processEligibleProspect(
       outreachMessageId: null,
       conceptStatus: "skipped",
       errorCode: readiness.blockingReasons[0] ?? "missing_required_data",
-      errorMessage: readiness.blockingReasons.join(", "),
+      errorMessage: draftReadiness.blockingReasons.join(", "),
       usedFallback: false,
-      warnings: readiness.warnings,
+      warnings: draftReadiness.warnings,
     };
   }
+
+  const outreachSendReady = draftReadiness.ready;
 
   await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
     conceptStatus: "generating",
@@ -210,7 +274,13 @@ async function processEligibleProspect(
   };
 
   try {
-    const generation = await withTimeout(
+    if (!outreachSendReady) {
+      warnings.push("concept_niet_verzendklaar");
+      warnings.push("deterministic_fallback_for_review");
+    }
+
+    const generation = outreachSendReady
+      ? await withTimeout(
       generateRecruitmentOutreachDraftWithValidation({
         company,
         vacancy: strictVacancies[0]
@@ -230,7 +300,68 @@ async function processEligibleProspect(
       }),
       conceptTimeoutMs,
       itemId,
-    );
+    )
+      : {
+        draft: buildDeterministicOutreachFallback({
+          company,
+          vacancies: strictVacancies,
+          recipientEmail: selected.email,
+          recipientName: selected.recipientName,
+          isGeneralMailbox: selected.isGeneralMailbox,
+          senderName: getOutreachSendConfig().senderName ?? undefined,
+        }),
+        meta: {
+          provider: "deterministic",
+          model: "deterministic_fallback",
+          durationMs: 0,
+          responseReceived: true,
+          finishReason: "draft_review_only",
+          rawResponseLength: 0,
+          parsedSuccessfully: true,
+          schemaValid: true,
+          validationErrors: [] as string[],
+        },
+        usedFallback: true,
+      };
+
+    if ("blocked" in generation.draft && generation.draft.blocked) {
+      await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
+        conceptStatus: "skipped",
+        finalReason: generation.draft.blockReason ?? "Geen vacature-evidence",
+        reasonCode: "no_active_vacancy",
+      });
+      return {
+        itemId,
+        companyId,
+        companyName: company.name,
+        success: false,
+        outreachMessageId: null,
+        conceptStatus: "skipped",
+        errorCode: "no_active_vacancy",
+        errorMessage: generation.draft.blockReason,
+        usedFallback: false,
+        warnings: generation.draft.warnings,
+      };
+    }
+
+    const normalizedDraft =
+      "recommendedSubject" in generation.draft
+        ? generation.draft
+        : {
+            recommendedSubject: generation.draft.subject,
+            subject: generation.draft.subject,
+            salutation: generation.draft.salutation,
+            bodyText: generation.draft.bodyText,
+            body: generation.draft.bodyText,
+            cta: generation.draft.cta,
+            closing: generation.draft.closing,
+            personalizationFacts: generation.draft.personalizationFacts,
+            sourceEvidence: generation.draft.sourceEvidence,
+            warnings: generation.draft.warnings,
+            model: "deterministic_fallback",
+            confidence: 0.45,
+            promptVersion: "deterministic_v1",
+          };
 
     aiMeta = generation.meta;
     logConceptGenerationAiResult({
@@ -246,11 +377,11 @@ async function processEligibleProspect(
       validationErrors: generation.meta.validationErrors,
     });
 
-    let draft = generation.draft;
+    let draft = normalizedDraft as RecruitmentOutreachDraft;
     usedFallback = generation.usedFallback;
-    warnings = [...draft.warnings];
+    warnings = [...(Array.isArray((draft as { warnings?: string[] }).warnings) ? (draft as { warnings: string[] }).warnings : [])];
 
-    if (!generation.meta.schemaValid) {
+    if (outreachSendReady && !generation.meta.schemaValid) {
       const fallback = buildDeterministicOutreachFallback({
         company,
         vacancies: strictVacancies,
@@ -291,8 +422,9 @@ async function processEligibleProspect(
         sourceEvidence: fallback.sourceEvidence,
         warnings: [...fallback.warnings, ...warnings],
         model: "deterministic_fallback",
+        promptVersion: "deterministic_v1",
         confidence: 0.45,
-      };
+      } as RecruitmentOutreachDraft;
       usedFallback = true;
     }
 
@@ -318,15 +450,57 @@ async function processEligibleProspect(
       usedFallback,
     };
 
-    const { messageId, reviewStatus } = await persistConceptForProspect(context, outreachEngine, {
+    const slotCtx = {
+      organizationId: context.organizationId,
       runId,
-      companyId,
-      selected,
-      subject: draft.recommendedSubject,
-      bodyText: draft.bodyText,
-      personalizationData,
-      vacancyId: prospect.vacancyId ?? null,
+      caps: {
+        maximumCompanies: plan.maximum_companies,
+        maximumDrafts: plan.maximum_drafts,
+      },
+    };
+    const draftSlot = await reserveAiRecruiterRunSlot(supabaseClient, "draft", slotCtx, {
+      requireDatabaseGuarantees: true,
     });
+    if (!draftSlot.reserved) {
+      await prospectAudit.updateConceptStatus(context.organizationId, itemId, {
+        conceptStatus: "skipped",
+        finalReason: `Over serverlimiet van ${plan.maximum_drafts} concepten`,
+        reasonCode: "draft_limit_reached",
+      });
+      return {
+        itemId,
+        companyId,
+        companyName: company.name,
+        success: false,
+        outreachMessageId: null,
+        conceptStatus: "skipped",
+        errorCode: "draft_limit_reached",
+        errorMessage: `Over serverlimiet van ${plan.maximum_drafts} concepten`,
+        usedFallback,
+        warnings,
+      };
+    }
+
+    let messageId: string;
+    let reviewStatus: string;
+    try {
+      const persisted = await persistConceptForProspect(context, outreachEngine, {
+        runId,
+        companyId,
+        selected,
+        subject: draft.recommendedSubject,
+        bodyText: draft.bodyText,
+        personalizationData,
+        vacancyId: prospect.vacancyId ?? null,
+      });
+      messageId = persisted.messageId;
+      reviewStatus = persisted.reviewStatus;
+    } catch (persistError) {
+      await releaseAiRecruiterRunSlot(supabaseClient, "draft", slotCtx, {
+        requireDatabaseGuarantees: true,
+      });
+      throw persistError;
+    }
 
     const existingItem = await repository.getRunItem(context.organizationId, itemId);
     const external = (existingItem?.externalCompanyData ?? {}) as Record<string, unknown>;
@@ -475,8 +649,9 @@ export async function dispatchConceptGeneration(input: {
   prospectAudit: ProspectAuditRepository;
   maxConcepts: number;
   conceptTimeoutMs?: number;
+  supabaseClient?: SupabaseClient | null;
 }): Promise<ConceptGenerationDispatchResult> {
-  const eligibleProspects = filterEligibleProspectsForConceptGeneration(input.eligibleProspects);
+  const eligibleProspects = filterEligibleProspectsForConceptGeneration(input.eligibleProspects, input.plan);
   const limited = eligibleProspects.slice(0, Math.max(0, input.maxConcepts));
   const counters: ConceptGenerationCounters = {
     ...createInitialConceptCounters(),
@@ -500,6 +675,7 @@ export async function dispatchConceptGeneration(input: {
   counters.conceptsGenerating = limited.length;
 
   const timeoutMs = input.conceptTimeoutMs ?? DEFAULT_CONCEPT_TIMEOUT_MS;
+  const supabaseClient = input.supabaseClient ?? null;
   const settled = await Promise.allSettled(
     limited.map((prospect) =>
       processEligibleProspect(
@@ -511,6 +687,7 @@ export async function dispatchConceptGeneration(input: {
         input.repository,
         input.prospectAudit,
         timeoutMs,
+        supabaseClient,
       ),
     ),
   );

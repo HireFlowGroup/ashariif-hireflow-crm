@@ -146,6 +146,10 @@ export type DiscoveryQualityReport = {
   rejectedByScore: number;
   rejectedByDuplicate: number;
   rejectedByLowConfidence: number;
+  /** Qualified after quality gate (before plan persistence cap). */
+  foundQualified?: number;
+  persistedCap?: number;
+  deferredOverPlanLimit?: number;
 };
 
 /** Accept as company when AI confidence is strictly above this. */

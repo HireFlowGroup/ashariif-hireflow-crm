@@ -1,4 +1,5 @@
 import type { ExternalCompanyCandidate } from "@/features/lead-intelligence/domain";
+import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 import { extractDomain, normalizeCompanyName } from "@/features/lead-intelligence/services/normalize";
 
 export function cleanCompanyTitle(title: string): string {
@@ -60,6 +61,15 @@ export function findCareersUrl(html: string, baseUrl: string): string | null {
   return null;
 }
 
+function preferVacancyPageUrl(
+  existing: string | null | undefined,
+  incoming: string | null | undefined,
+): string | null {
+  const existingConcrete = existing && hasConcreteJobUrl(existing) ? existing : null;
+  const incomingConcrete = incoming && hasConcreteJobUrl(incoming) ? incoming : null;
+  return incomingConcrete ?? existingConcrete ?? incoming ?? existing ?? null;
+}
+
 export function mergeEnrichment(
   candidate: ExternalCompanyCandidate,
   patch: Partial<ExternalCompanyCandidate>,
@@ -70,5 +80,6 @@ export function mergeEnrichment(
     email: patch.generalEmail ?? patch.email ?? candidate.email,
     hiringSignals: patch.hiringSignals ?? candidate.hiringSignals,
     vacancyTitles: patch.vacancyTitles ?? candidate.vacancyTitles,
+    vacancyPageUrl: preferVacancyPageUrl(candidate.vacancyPageUrl, patch.vacancyPageUrl),
   };
 }

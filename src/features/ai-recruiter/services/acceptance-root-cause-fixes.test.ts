@@ -196,6 +196,24 @@ describe("root cause 4: vacancy audit status semantics", () => {
     expect(result.vacancies).toHaveLength(0);
   });
 
+  it("filters department noise such as Sales & Marketing (Run G)", () => {
+    const result = assessParsedVacancies({
+      company: makeCompany(),
+      plan,
+      parsedVacancies: [
+        {
+          title: "Sales & Marketing",
+          url: "https://techflow.nl/vacatures/sales-marketing/",
+          isActive: true,
+          inactiveReason: null,
+        },
+      ],
+      evidenceSource: "careers_page_crawl",
+    });
+    expect(result.auditStatus).toBe("noise");
+    expect(result.status).toBe("no_active_vacancy");
+  });
+
   it("reports no_matching_role for concrete but unrelated vacancy", () => {
     const result = assessParsedVacancies({
       company: makeCompany(),
@@ -241,7 +259,7 @@ describe("root cause 5: employee range unknown blocks qualification", () => {
     ).toBe("unknown");
   });
 
-  it("blocks eligibility when employee range is required but unknown", () => {
+  it("routes unknown employee range to needs_evidence", () => {
     const evidence = createVacancyEvidence({
       companyName: "TechFlow BV",
       companyDomain: "techflow.nl",
@@ -257,6 +275,7 @@ describe("root cause 5: employee range unknown blocks qualification", () => {
       company: makeCompany({ employeeCountMin: null, employeeCountMax: null }),
       plan,
       hiringScore: 80,
+      opportunityScore: 80,
       vacancyCount: 1,
       vacancies: [evidence],
       contact: {
@@ -278,7 +297,7 @@ describe("root cause 5: employee range unknown blocks qualification", () => {
       desiredRoleMatch: true,
     });
 
-    expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("employee_range_unknown");
+    expect(result.qualificationStatus).toBe("needs_evidence");
+    expect(result.reasonCode).toBe("needs_evidence");
   });
 });

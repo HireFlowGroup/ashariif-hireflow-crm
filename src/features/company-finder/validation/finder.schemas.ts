@@ -65,9 +65,22 @@ export const companyFinderCriteriaSchema = z.object({
   regions: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
   sectors: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
   desiredRoles: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
-}).refine(hasSearchDimensions, {
-  message: "Vul minimaal plaats, regio, branche, zoekwoorden, vacaturetitels of hiring signals in.",
-});
+  /** AI Recruiter: gekoppelde run voor DB slot/caps (mag niet worden gestript bij job-create). */
+  aiRecruiterRunId: z.string().uuid().optional(),
+  /** Harde persistentie-cap per AI Recruiter-run. */
+  persistenceMaximumCompanies: z.coerce.number().int().min(1).max(100).optional(),
+  discoveryMode: z.enum(["open", "targeted"]).optional(),
+  targetEmployerNames: z.array(z.string().trim().min(1).max(120)).max(5).optional(),
+  targetEmployerDomains: z.array(z.string().trim().min(3).max(200)).max(5).optional(),
+}).refine(
+  (value) =>
+    hasSearchDimensions(value)
+    || (value.targetEmployerNames?.length ?? 0) > 0
+    || (value.targetEmployerDomains?.length ?? 0) > 0,
+  {
+    message: "Vul minimaal plaats, regio, branche, zoekwoorden, vacaturetitels, hiring signals of een doelwerkgever in.",
+  },
+);
 
 export const createCompanySearchJobSchema = companyFinderCriteriaSchema;
 

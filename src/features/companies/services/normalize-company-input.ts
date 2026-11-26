@@ -46,53 +46,33 @@ export function normalizeCreateCompanyInput(input: CreateCompanyInput): CreateCo
 }
 
 export function normalizeUpdateCompanyInput(input: UpdateCompanyInput): UpdateCompanyInput {
-  const normalized: UpdateCompanyInput = {};
-
-  if (input.name !== undefined) {
-    normalized.name = collapseWhitespace(input.name);
-  }
-
-  if (input.website !== undefined) {
-    normalized.website = normalizeOptionalUrl(input.website);
-  }
-
-  if (input.sector !== undefined) {
-    normalized.sector = normalizeOptionalString(input.sector);
-  }
-
-  if (input.city !== undefined) {
-    normalized.city = normalizeOptionalString(input.city);
-  }
-
-  if (input.notes !== undefined) {
-    normalized.notes = normalizeOptionalString(input.notes);
-  }
-
-  if (input.email !== undefined) {
-    normalized.email = normalizeOptionalString(input.email);
-  }
-
-  if (input.phone !== undefined) {
-    normalized.phone = normalizeOptionalString(input.phone);
-  }
-
-  if (input.ownerId !== undefined) {
-    normalized.ownerId = input.ownerId;
-  }
-
-  if (input.employeeCount !== undefined) {
-    normalized.employeeCount = input.employeeCount;
-  }
-
-  if (input.priority !== undefined) {
-    normalized.priority = input.priority;
-  }
-
-  if (input.status !== undefined) {
-    normalized.status = input.status;
-  }
-
-  return normalized;
+  return {
+    ...input,
+    ...(input.name !== undefined ? { name: collapseWhitespace(input.name) } : {}),
+    ...(input.website !== undefined ? { website: normalizeOptionalUrl(input.website) } : {}),
+    ...(input.linkedinUrl !== undefined ? { linkedinUrl: normalizeOptionalUrl(input.linkedinUrl) } : {}),
+    ...(input.careersUrl !== undefined ? { careersUrl: normalizeOptionalUrl(input.careersUrl) } : {}),
+    ...(input.vacancyPageUrl !== undefined ? { vacancyPageUrl: normalizeOptionalUrl(input.vacancyPageUrl) } : {}),
+    ...(input.sourceUrl !== undefined ? { sourceUrl: normalizeOptionalUrl(input.sourceUrl) } : {}),
+    ...(input.sector !== undefined ? { sector: normalizeOptionalString(input.sector) } : {}),
+    ...(input.city !== undefined ? { city: normalizeOptionalString(input.city) } : {}),
+    ...(input.region !== undefined ? { region: normalizeOptionalString(input.region) } : {}),
+    ...(input.notes !== undefined ? { notes: normalizeOptionalString(input.notes) } : {}),
+    ...(input.email !== undefined ? { email: normalizeOptionalString(input.email) } : {}),
+    ...(input.phone !== undefined ? { phone: normalizeOptionalString(input.phone) } : {}),
+    ...(input.generalEmail !== undefined ? { generalEmail: normalizeOptionalString(input.generalEmail) } : {}),
+    ...(input.hrEmail !== undefined ? { hrEmail: normalizeOptionalString(input.hrEmail) } : {}),
+    ...(input.kvkNumber !== undefined ? { kvkNumber: normalizeOptionalString(input.kvkNumber) } : {}),
+    ...(input.aiSummary !== undefined ? { aiSummary: normalizeOptionalString(input.aiSummary) } : {}),
+    ...(input.discoveryReason !== undefined
+      ? { discoveryReason: normalizeOptionalString(input.discoveryReason) }
+      : {}),
+    ...(input.discoveryProvider !== undefined
+      ? { discoveryProvider: normalizeOptionalString(input.discoveryProvider) }
+      : {}),
+    ...(input.scoreReason !== undefined ? { scoreReason: normalizeOptionalString(input.scoreReason) } : {}),
+    ...(input.source !== undefined ? { source: normalizeOptionalString(input.source) } : {}),
+  };
 }
 
 export function composeCompanyNotes(input: {

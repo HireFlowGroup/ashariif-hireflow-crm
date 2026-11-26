@@ -13,6 +13,7 @@ import { aiRecruiterRunSettingsSchema } from "@/features/ai-recruiter/domain/typ
 import { SupabaseAiRecruiterRepository } from "@/features/ai-recruiter/repositories/supabase-ai-recruiter.repository";
 import { ProspectAuditRepository } from "@/features/ai-recruiter/repositories/prospect-audit.repository";
 import { AiRecruiterOrchestrator } from "@/features/ai-recruiter/services/ai-recruiter-orchestrator.service";
+import { clampAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-limits.service";
 import { createOutreachEngineService } from "@/features/outreach-engine/create-outreach-engine-service";
 
 /** Lightweight accessor for list/get/create — avoids spinning up finder engines. */
@@ -33,7 +34,8 @@ export async function createAiRecruiterRun(
   });
 
   const repository = await createAiRecruiterRepository();
-  return repository.createRun(context.organizationId, context.userId, input, settings);
+  const searchPlan = clampAiRecruiterSearchPlan(input.searchPlan);
+  return repository.createRun(context.organizationId, context.userId, { ...input, searchPlan }, settings);
 }
 
 export async function createAiRecruiterOrchestrator(): Promise<AiRecruiterOrchestrator> {

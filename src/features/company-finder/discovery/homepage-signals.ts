@@ -57,28 +57,14 @@ export async function fetchHomepageSignals(
 }
 
 export async function fetchHomepageHtml(url: string, timeoutMs: number): Promise<string> {
-  const normalized = url.startsWith("http") ? url : `https://${url}`;
-
-  const response = await fetch(normalized, {
-    headers: {
-      Accept: "text/html,application/xhtml+xml",
-      "User-Agent": "HireFlow-CompanyFinder/2.0 (business discovery)",
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: "follow",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Homepage status ${response.status}`);
+  const { safeFetchWebsiteText } = await import(
+    "@/features/company-finder/discovery/safe-website-fetch.service"
+  );
+  const result = await safeFetchWebsiteText(url, { timeoutMs });
+  if (!result.ok) {
+    throw new Error(result.message);
   }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-    throw new Error("Geen HTML homepage");
-  }
-
-  const text = await response.text();
-  return text.slice(0, 300_000);
+  return result.text;
 }
 
 export function detectHomepageSignals(html: string): HomepageSignals {

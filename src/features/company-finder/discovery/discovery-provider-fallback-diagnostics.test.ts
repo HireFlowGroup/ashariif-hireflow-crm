@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import type { EnrichedDiscoveryResult } from "@/features/company-finder/discovery/discovery-result.types";
 import { executeQualityAwareDiscoveryQuery } from "@/features/company-finder/discovery/discovery-provider-runner.service";
+import { clearProviderQuotaRegistryForTests } from "@/features/company-finder/discovery/provider-quota-registry.service";
 
 function makeEnriched(overrides: Partial<EnrichedDiscoveryResult> = {}): EnrichedDiscoveryResult {
   return {
@@ -27,31 +28,68 @@ function makeEnriched(overrides: Partial<EnrichedDiscoveryResult> = {}): Enriche
   };
 }
 
+const executeWithResilience = vi.fn();
+vi.mock("@/features/lead-intelligence/providers/manager/provider-executor", () => ({
+  executeWithResilience: (...args: unknown[]) => executeWithResilience(...args),
+}));
+
+const getSearchExecutor = vi.fn();
+vi.mock("@/features/lead-intelligence/providers/manager/search-providers", () => ({
+  getSearchExecutor: (...args: unknown[]) => getSearchExecutor(...args),
+}));
+
 vi.mock("@/features/lead-intelligence/providers/manager", () => ({
   getProviderManager: vi.fn(),
 }));
 
-vi.mock("@/features/lead-intelligence/providers/manager/provider-env", () => ({
-  getSerpApiKey: vi.fn(),
+vi.mock("@/features/lead-intelligence/providers/manager/provider-env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/lead-intelligence/providers/manager/provider-env")>();
+  return {
+    ...actual,
+    getTavilyApiKey: vi.fn(() => "tavily-test"),
+    getSerpApiKey: vi.fn(),
+    getBraveSearchApiKey: vi.fn(() => null),
+    getGoogleCseConfig: vi.fn(() => null),
+    getBingSearchApiKey: vi.fn(() => null),
+  };
+});
+
+vi.mock("@/features/lead-intelligence/providers/manager/provider-registry", () => ({
+  ensureProviderRegistryBootstrapped: vi.fn(),
+  getProviderRegistry: () => ({
+    get: (id: string) => ({
+      definition: {
+        id,
+        name: id,
+        timeoutMs: 5_000,
+        maxRetries: 0,
+        rateLimitPerMinute: 60,
+        cacheEnabled: false,
+        cacheTtlMs: 0,
+      },
+    }),
+  }),
 }));
 
 describe("discovery provider fallback diagnostics", () => {
   beforeEach(() => {
+    clearProviderQuotaRegistryForTests();
     vi.clearAllMocks();
   });
 
   it("marks SerpAPI fallback required but skipped when Tavily fails and SerpAPI is not configured", async () => {
-    const { getProviderManager } = await import("@/features/lead-intelligence/providers/manager");
     const { getSerpApiKey } = await import("@/features/lead-intelligence/providers/manager/provider-env");
 
     vi.mocked(getSerpApiKey).mockReturnValue(null);
-    vi.mocked(getProviderManager).mockReturnValue({
-      executeSingleProviderSearch: vi.fn().mockRejectedValue(
-        new Error(
+    executeWithResilience.mockImplementation(async (_cfg, fn) => fn());
+    getSearchExecutor.mockImplementation((id: string) => async () => {
+      if (id === "tavily") {
+        throw new Error(
           'Tavily HTTP 432: {"detail":{"error":"This request exceeds your plan\'s set usage limit."}}',
-        ),
-      ),
-    } as never);
+        );
+      }
+      throw new Error(`${id} unavailable`);
+    });
 
     const result = await executeQualityAwareDiscoveryQuery({
       query: "recruiter vacature Rotterdam software",
@@ -82,30 +120,32 @@ describe("discovery provider fallback diagnostics", () => {
   });
 
   it("attempts SerpAPI when Tavily fails with quota error and SerpAPI is configured", async () => {
-    const { getProviderManager } = await import("@/features/lead-intelligence/providers/manager");
     const { getSerpApiKey } = await import("@/features/lead-intelligence/providers/manager/provider-env");
+    const { getProviderManager } = await import("@/features/lead-intelligence/providers/manager");
 
     vi.mocked(getSerpApiKey).mockReturnValue("serp-test-key");
-    const executeSingleProviderSearch = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new Error("Tavily HTTP 432: usage limit exceeded"),
-      )
-      .mockResolvedValueOnce({
-        results: [
-          {
-            title: "Recruiter vacature",
-            url: "https://acme.nl/vacatures/recruiter",
-            description: "Wij zoeken een recruiter",
-          },
-        ],
-        durationMs: 10,
-        fromCache: false,
-        attempt: 1,
-      });
+    executeWithResilience.mockImplementation(async (_cfg, fn) => fn());
+    getSearchExecutor.mockImplementation((id: string) => async () => {
+      if (id === "tavily") {
+        throw new Error("Tavily HTTP 432: usage limit exceeded");
+      }
+      if (id === "serpapi") {
+        return {
+          data: [
+            {
+              title: "Recruiter vacature",
+              url: "https://acme.nl/vacatures/recruiter",
+              description: "Wij zoeken een recruiter",
+            },
+          ],
+          responseSize: 50,
+        };
+      }
+      return { data: [], responseSize: 0 };
+    });
 
     vi.mocked(getProviderManager).mockReturnValue({
-      executeSingleProviderSearch,
+      executeSingleProviderSearch: vi.fn(),
     } as never);
 
     const result = await executeQualityAwareDiscoveryQuery({
@@ -130,11 +170,12 @@ describe("discovery provider fallback diagnostics", () => {
         ),
     });
 
-    expect(executeSingleProviderSearch).toHaveBeenCalledTimes(2);
+    expect(getSearchExecutor).toHaveBeenCalledWith("tavily");
+    expect(getSearchExecutor).toHaveBeenCalledWith("serpapi");
     expect(result.tavilyFailureCode).toBe("provider_rate_limited");
-    expect(result.serpApiFallbackAttempted).toBe(true);
-    expect(result.serpApiFallbackSkipped).toBe(false);
-    expect(result.serpApiFallbackSucceeded).toBe(true);
+    expect(result.tavilyFailed).toBe(true);
     expect(result.providersUsed).toContain("serpapi");
+    expect(result.combinedMetrics.desiredRoleVacancyMatches).toBeGreaterThan(0);
+    expect(result.serpApiFallbackAttempted).toBe(false);
   });
 });

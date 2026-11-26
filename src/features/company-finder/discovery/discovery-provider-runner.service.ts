@@ -8,12 +8,20 @@ import {
   type UsefulRecallMetrics,
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
 import type { DiscoveryQueryVariant } from "@/features/ai-recruiter/services/discovery-query-builder.service";
+import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import {
   classifyProviderError,
   parseProviderHttpStatus,
   sanitizeDiscoveryProviderError,
 } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
 import type { RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
+import { executeDiscoverySearchWithFailover } from "@/features/company-finder/discovery/discovery-provider-failover.service";
+import type {
+  DiscoveryProviderDebugEntry,
+  DiscoverySearchProviderId,
+} from "@/features/company-finder/discovery/discovery-provider-failover.types";
+import type { DiscoveryRunApiBudget } from "@/features/company-finder/discovery/discovery-run-api-budget.service";
+import { isProviderQuotaExhausted } from "@/features/company-finder/discovery/provider-quota-registry.service";
 import { getProviderManager } from "@/features/lead-intelligence/providers/manager";
 import { getSerpApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 import type { SearchResultItem } from "@/features/lead-intelligence/providers/manager/types";
@@ -39,6 +47,7 @@ export type QualityAwareQueryResult = {
   tavilyFailed: boolean;
   tavilyFailureCode: RunFailureCode | null;
   tavilyErrorSanitized: string | null;
+  providerRuns: DiscoveryProviderDebugEntry[];
 };
 
 const TAVILY_PROVIDER_ID = "tavily";
@@ -101,12 +110,14 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   maxResults: number;
   timeoutMs: number;
   desiredRoles: string[];
+  skipProviderIds?: ReadonlySet<DiscoverySearchProviderId>;
+  apiBudget?: DiscoveryRunApiBudget;
   processHits: (
     hits: SearchResultItem[],
     providerId: string,
   ) => EnrichedDiscoveryResult[];
 }): Promise<QualityAwareQueryResult> {
-  const manager = getProviderManager();
+  const config = getAiRecruiterConfig();
   const providersUsed: string[] = [];
   let serpApiFallbackTriggered = false;
   let serpApiFallbackAttempted = false;
@@ -123,35 +134,67 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   let tavilyFailureCode: RunFailureCode | null = null;
   let serpApiFallbackRequired = false;
   let serpApiFallbackSkipped = false;
+  const providerRuns: DiscoveryProviderDebugEntry[] = [];
 
-  try {
-    const tavilyExecution = await manager.executeSingleProviderSearch(
-      TAVILY_PROVIDER_ID,
-      input.query,
-      input.maxResults,
-      input.timeoutMs,
-    );
-    tavilyHits = tavilyExecution.results;
-    tavilyRawHitCount = tavilyExecution.results.length;
-    providersUsed.push(TAVILY_PROVIDER_ID);
-    tavilyEnriched = input.processHits(tavilyHits, TAVILY_PROVIDER_ID);
-    tavilyMetrics = evaluateUsefulRecall(tavilyEnriched, input.desiredRoles, tavilyRawHitCount);
-  } catch (error) {
-    tavilyFailed = true;
-    tavilyError = error instanceof Error ? error.message : "Tavily query mislukt";
-    tavilyFailureCode = classifyProviderError(
-      tavilyError,
-      parseProviderHttpStatus(tavilyError),
-    );
-    tavilyMetrics = evaluateUsefulRecall([], input.desiredRoles, 0);
+  const tavilySkipped =
+    input.skipProviderIds?.has(TAVILY_PROVIDER_ID) || isProviderQuotaExhausted(TAVILY_PROVIDER_ID);
+  const failover = await executeDiscoverySearchWithFailover(input.query, input.maxResults, {
+    stopOnFirstSuccess: !tavilySkipped,
+    maxProviderAttempts: config.discoveryMaxProviderAttemptsPerQuery,
+    skipProviderIds: input.skipProviderIds,
+    apiBudget: input.apiBudget,
+    providerPriority: tavilySkipped
+      ? ([SERPAPI_PROVIDER_ID] as const)
+      : undefined,
+  });
+
+  const hitsByProvider = new Map<string, SearchResultItem[]>();
+  for (const row of failover.results) {
+    const bucket = hitsByProvider.get(row.providerId) ?? [];
+    bucket.push({ title: row.title, url: row.url, description: row.description });
+    hitsByProvider.set(row.providerId, bucket);
   }
 
-  let combinedEnriched = tavilyEnriched;
-  let combinedHits = tavilyHits;
-  let providerId = TAVILY_PROVIDER_ID;
+  tavilyHits = hitsByProvider.get(TAVILY_PROVIDER_ID) ?? [];
+  tavilyRawHitCount = tavilyHits.length;
+  tavilyEnriched = tavilyHits.length > 0 ? input.processHits(tavilyHits, TAVILY_PROVIDER_ID) : [];
+  tavilyMetrics = evaluateUsefulRecall(tavilyEnriched, input.desiredRoles, tavilyRawHitCount);
+
+  const tavilyRun = failover.providerRuns.find((run) => run.providerId === TAVILY_PROVIDER_ID);
+  if (tavilyRun && !tavilyRun.success && tavilyRawHitCount === 0) {
+    tavilyFailed = true;
+    tavilyError = tavilyRun.errorMessage ?? "Tavily query mislukt";
+    tavilyFailureCode = classifyProviderError(tavilyError, parseProviderHttpStatus(tavilyError));
+  }
+
+  if (failover.allProvidersSkipped) {
+    tavilyFailed = true;
+    const primary =
+      failover.providerRuns.find((run) => run.errorMessage)
+      ?? failover.providerRuns.find((run) => run.providerId === TAVILY_PROVIDER_ID);
+    tavilyError = primary?.errorMessage ?? "Geen werkende searchprovider beschikbaar.";
+    tavilyFailureCode = classifyProviderError(tavilyError, parseProviderHttpStatus(tavilyError));
+  }
+
+  let combinedEnriched: EnrichedDiscoveryResult[] = [];
+  let combinedHits: SearchResultItem[] = [];
+  for (const [hitProviderId, hits] of hitsByProvider) {
+    combinedHits.push(...hits);
+    combinedEnriched.push(...input.processHits(hits, hitProviderId));
+    providersUsed.push(hitProviderId);
+    if (hitProviderId === SERPAPI_PROVIDER_ID) {
+      serpApiRawHitCount += hits.length;
+    }
+  }
+
+  let providerId = failover.successfulProviderIds[0] ?? TAVILY_PROVIDER_ID;
+  if (failover.successfulProviderIds.length > 1) {
+    providerId = failover.successfulProviderIds.join("+");
+  }
 
   const vacancyFocusedQuery = isVacancyFocusedDiscoveryIntent(input.intent);
   const serpConfigured = Boolean(getSerpApiKey());
+  const serpAlreadyUsed = failover.successfulProviderIds.includes(SERPAPI_PROVIDER_ID);
   const fallbackNeeded = shouldTriggerSerpApiFallback(tavilyMetrics, {
     serpApiAvailable: true,
     tavilyFailed,
@@ -160,10 +203,13 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   serpApiFallbackRequired = fallbackNeeded.trigger;
   serpApiFallbackReason = fallbackNeeded.reason;
 
-  if (fallbackNeeded.trigger && serpConfigured) {
+  providerRuns.push(...failover.providerRuns);
+
+  if (fallbackNeeded.trigger && serpConfigured && !serpAlreadyUsed) {
     serpApiFallbackTriggered = true;
     serpApiFallbackAttempted = true;
 
+    const serpStarted = Date.now();
     const serpExecution = await executeSerpApiDiscoveryQuery({
       query: input.query,
       maxResults: input.maxResults,
@@ -172,6 +218,19 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     });
 
     serpApiRawHitCount = serpExecution.rawHitCount;
+    providerRuns.push({
+      providerId: SERPAPI_PROVIDER_ID,
+      name: "SerpAPI fallback",
+      configured: true,
+      started: true,
+      success: !serpExecution.error && (serpExecution.enrichedResults.length > 0 || serpExecution.rawHitCount > 0),
+      skipped: false,
+      skipReason: null,
+      resultCount: serpExecution.rawHitCount,
+      durationMs: Date.now() - serpStarted,
+      errorMessage: serpExecution.error,
+    });
+
     if (serpExecution.error) {
       serpApiFallbackError = serpExecution.error;
     } else if (serpExecution.enrichedResults.length > 0 || serpExecution.rawHitCount > 0) {
@@ -217,5 +276,6 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     tavilyFailed,
     tavilyFailureCode,
     tavilyErrorSanitized: tavilyFailed ? sanitizeDiscoveryProviderError(tavilyError ?? "") : null,
+    providerRuns,
   };
 }

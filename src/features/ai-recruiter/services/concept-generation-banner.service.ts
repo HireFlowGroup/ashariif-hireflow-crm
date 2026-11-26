@@ -81,8 +81,12 @@ export function resolveConceptGenerationRunStatus(input: {
     return "awaiting_approval";
   }
 
-  if (conceptCounters.prospectsEligible === 0) {
+  if (conceptCounters.prospectsEligible === 0 && conceptCounters.prospectsEvaluated === 0) {
     return "completed";
+  }
+
+  if (conceptCounters.prospectsEligible === 0) {
+    return "partially_completed";
   }
 
   if (conceptCounters.conceptsFailed > 0 && conceptCounters.conceptsCreated === 0) {

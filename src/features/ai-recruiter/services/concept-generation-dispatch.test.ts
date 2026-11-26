@@ -42,7 +42,8 @@ const plan: AiRecruiterSearchPlan = {
   reasoning: "",
 };
 
-function makeCompany(name = "Enigmatry"): Company {
+function makeCompany(overrides: Partial<Company> & { name?: string } = {}): Company {
+  const name = overrides.name ?? "Enigmatry";
   return {
     id: toCompanyId("co-enigmatry"),
     organizationId: "org-1",
@@ -88,6 +89,7 @@ function makeCompany(name = "Enigmatry"): Company {
     notes: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
@@ -112,6 +114,7 @@ function makeContact(overrides: Partial<SelectedDiscoveredContact> = {}): Select
 
 const eligibility: ConceptEligibilityResult = {
   eligible: true,
+  qualificationStatus: "eligible",
   score: 66,
   threshold: 30,
   priority: "priority_b",
@@ -162,7 +165,7 @@ describe("filterEligibleProspectsForConceptGeneration", () => {
         },
         eligibility,
       },
-    ]);
+    ], plan);
 
     expect(result).toHaveLength(1);
   });
@@ -172,7 +175,7 @@ describe("filterEligibleProspectsForConceptGeneration", () => {
       {
         itemId: "item-1",
         companyId: "co-enigmatry",
-        company: makeCompany(),
+        company: makeCompany({ hrEmail: null, generalEmail: null, email: null }),
         selected: makeContact({ email: "" }),
         vacancies: [vacancy],
         contactStage: "general_mailbox_found",
@@ -193,9 +196,14 @@ describe("filterEligibleProspectsForConceptGeneration", () => {
             scalability: 0,
           },
         },
-        eligibility: { ...eligibility, eligible: false },
+        eligibility: {
+          ...eligibility,
+          eligible: false,
+          qualificationStatus: "rejected",
+          reasonCode: "score_below_threshold",
+        },
       },
-    ]);
+    ], plan);
 
     expect(result).toHaveLength(0);
   });
@@ -240,7 +248,7 @@ describe("recruitment draft schema normalization", () => {
 describe("deterministic Enigmatry fallback", () => {
   it("creates recruitment mailbox concept for Enigmatry", () => {
     const draft = buildDeterministicOutreachFallback({
-      company: makeCompany("Enigmatry"),
+      company: makeCompany(),
       vacancies: [vacancy],
       recipientEmail: "recruitment@enigmatry.com",
       recipientName: null,
@@ -256,7 +264,7 @@ describe("deterministic Enigmatry fallback", () => {
 
   it("keeps fallback under 120 words", () => {
     const draft = buildDeterministicOutreachFallback({
-      company: makeCompany("Enigmatry"),
+      company: makeCompany(),
       vacancies: [vacancy],
       recipientEmail: "recruitment@enigmatry.com",
       recipientName: null,
@@ -268,7 +276,7 @@ describe("deterministic Enigmatry fallback", () => {
 
   it("does not claim candidates are already available", () => {
     const draft = buildDeterministicOutreachFallback({
-      company: makeCompany("Enigmatry"),
+      company: makeCompany(),
       vacancies: [vacancy],
       recipientEmail: "recruitment@enigmatry.com",
       recipientName: null,
@@ -336,6 +344,24 @@ describe("concept generation banner and run status", () => {
     expect(status).toBe("awaiting_approval");
   });
 
+  it("returns partially_completed when prospects were reviewed but none eligible", () => {
+    const status = resolveConceptGenerationRunStatus({
+      draftsCreated: 0,
+      conceptCounters: {
+        prospectsEvaluated: 3,
+        prospectsEligible: 0,
+        conceptsStarted: 0,
+        conceptsCreated: 0,
+        conceptsFailed: 0,
+        conceptsSkipped: 0,
+        conceptsPending: 0,
+        conceptsGenerating: 0,
+      },
+    });
+
+    expect(status).toBe("partially_completed");
+  });
+
   it("reports partial completion when some concepts fail", () => {
     const status = resolveConceptGenerationRunStatus({
       draftsCreated: 2,
@@ -393,7 +419,7 @@ describe("maxConcepts guard", () => {
         },
         eligibility,
       },
-    ]);
+    ], plan);
 
     const limited = eligible.slice(0, Math.max(0, 0));
     expect(limited).toHaveLength(0);

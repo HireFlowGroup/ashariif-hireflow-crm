@@ -1,0 +1,53 @@
+{
+  "phase": "P0-R3.2.3-postflight",
+  "runId": "4a1d7412-e2f9-46df-93f8-9e2c2a5cac78",
+  "jobId": "f6ca8f7a-0967-4bd8-b2d8-b461b9fc06ed",
+  "organizationId": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
+  "supabaseProjectRef": "vcmegbghsaqagikfxces",
+  "status": "partially_completed",
+  "counters": {
+    "found": 4,
+    "validated": 4,
+    "withVacancies": 2,
+    "draftsCreated": 0,
+    "sent": 0,
+    "blockedMissingContact": 3,
+    "generalMailboxFound": 1
+  },
+  "providerSmokeHttpCalls": 2,
+  "discoveryActualHttpCalls": 3,
+  "pipelineFunnelSummary": {
+    "searchQueries": 3,
+    "providerRequests": 3,
+    "actualHttpCalls": 3,
+    "budgetBlocked": 3,
+    "primaryProvider": "serpapi",
+    "degraded": false,
+    "eligibleProspects": 0,
+    "needsEvidenceProspects": 1,
+    "rejectedProspects": 3,
+    "concepts": 0
+  },
+  "items": [
+    {
+      "company": "OranjeIT",
+      "qualification": "needs_evidence",
+      "stage": "general_mailbox_found"
+    },
+    {
+      "company": "Maven professionals",
+      "qualification": "rejected",
+      "reason": "no_contact"
+    },
+    {
+      "company": "stays hidden until you approve a profile or CV.",
+      "qualification": "rejected",
+      "reason": "no_contact"
+    },
+    {
+      "company": "BBTG",
+      "qualification": "rejected",
+      "reason": "no_contact"
+    }
+  ]
+}

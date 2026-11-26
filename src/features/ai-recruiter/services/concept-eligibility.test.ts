@@ -13,6 +13,9 @@ import { evaluateConceptEligibility } from "@/features/ai-recruiter/services/eva
 import { createVacancyEvidence } from "@/features/ai-recruiter/services/vacancy-evidence.service";
 import type { SelectedDiscoveredContact } from "@/features/contact-finder/services/contact-validation.service";
 
+/** Commerciële scores ≥ plan-minimum (30) voor tests die concept-eligibility raken. */
+const defaultCommercial = { opportunityScore: 50 as const };
+
 const basePlan: AiRecruiterSearchPlan = {
   locations: ["Rotterdam", "Den Haag"],
   regions: [],
@@ -124,6 +127,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 60,
+      ...defaultCommercial,
       vacancyCount: 2,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "recruitment@techflow.nl" }),
@@ -138,6 +142,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 55,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "info@techflow.nl" }),
@@ -146,18 +151,22 @@ describe("concept eligibility pipeline", () => {
     expect(result.eligible).toBe(true);
   });
 
-  it("3. bedrijf met vacature maar geen e-mail krijgt geen concept", () => {
+  it("3. bedrijf met vacature maar geen e-mail → needs_evidence (geen outreach-eligible)", () => {
     const result = evaluateConceptEligibility({
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 60,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: null,
       contactStage: "blocked_missing_contact",
     });
     expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("no_contact");
+    expect(result.qualificationStatus).toBe("needs_evidence");
+    expect(result.reasonCode).toBe("needs_evidence");
+    expect(result.contract?.commercial.passed).toBe(true);
+    expect(result.rejectedRules).toContain("needs_evidence:contact");
   });
 
   it("4. persoonlijk recruitercontact krijgt hogere score dan info@", () => {
@@ -236,6 +245,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 50,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact({ email: "hr@techflow.nl" }),
@@ -250,12 +260,36 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 50,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [activeVacancy],
       contact: makeContact(),
       contactStage: "general_mailbox_found",
     });
     expect(result.reasonCode).toBe("eligible");
+  });
+
+  it("10b. plan commercial minimum blokkeert lage hiring/opportunity ondanks prospectscore", () => {
+    const commercialPlan = {
+      ...basePlan,
+      minimum_hiring_score: 70,
+      minimum_opportunity_score: 70,
+    };
+    const result = evaluateConceptEligibility({
+      company: makeCompany(),
+      plan: commercialPlan,
+      hiringScore: 25,
+      opportunityScore: 20,
+      vacancyCount: 1,
+      vacancies: [activeVacancy],
+      contact: makeContact(),
+      contactStage: "general_mailbox_found",
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.reasonCode).toBe("commercial_hiring_below_plan");
+    expect(result.contract?.commercial.hiringThreshold).toBe(70);
+    expect(result.contract?.conceptReadiness.threshold).toBe(30);
+    expect(result.threshold).toBe(30);
   });
 
   it("11. duplicate outreach wordt geblokkeerd", () => {
@@ -318,6 +352,7 @@ describe("concept eligibility pipeline", () => {
       company: makeCompany(),
       plan: basePlan,
       hiringScore: 40,
+      ...defaultCommercial,
       vacancyCount: 1,
       vacancies: [vacancy],
       contact: makeContact(),

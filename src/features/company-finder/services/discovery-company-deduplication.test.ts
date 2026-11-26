@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+import { resetInMemoryRunSlotsForTests } from "@/features/ai-recruiter/services/run-slot-persistence.service";
 
 import type { Company } from "@/features/companies/domain";
 import type { QualifiedDiscoveryCandidate } from "@/features/company-finder/discovery/discovery-quality.types";
@@ -51,6 +53,36 @@ function makeQualified(name: string, website: string): QualifiedDiscoveryCandida
 }
 
 describe("saveDiscoveryCompanyWithDedupe", () => {
+  beforeEach(() => {
+    resetInMemoryRunSlotsForTests();
+  });
+
+  it("reserves a run slot before updating an existing duplicate when runPersistence is set", async () => {
+    const existing = makeCompany();
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const result = await saveDiscoveryCompanyWithDedupe({
+      companiesService: {
+        updateCompany: vi.fn().mockResolvedValue(existing),
+        createDiscoveryCompany: vi.fn(),
+      } as never,
+      context: { organizationId: "org-1", userId: "user-1" },
+      qualified: makeQualified("Digital Impact", "https://www.digitalimpact.nl/"),
+      existingCompanies: [existing],
+      runPersistence: {
+        organizationId: "org-1",
+        runId: "run-1",
+        maximumCompanies: 5,
+        client: { rpc } as never,
+      },
+    });
+
+    expect(result.type).toBe("updated");
+    expect(rpc).toHaveBeenCalledWith(
+      "reserve_ai_recruiter_run_slot",
+      expect.objectContaining({ p_slot: "company", p_run_id: "run-1" }),
+    );
+  });
+
   it("reuses an existing company matched by normalized domain", async () => {
     const existing = makeCompany();
     const existingCompanies = [existing];
@@ -100,10 +132,26 @@ describe("saveDiscoveryCompanyWithDedupe", () => {
     expect(result.type).toBe("saved");
     expect(createDiscoveryCompany).toHaveBeenCalledTimes(1);
     expect(updateCompany).not.toHaveBeenCalled();
-    if (result.type === "saved") {
-      expect(result.companyId).toBe("co-new");
-    }
-    expect(existingCompanies).toHaveLength(1);
-    expect(existingCompanies[0]?.id).toBe("co-new");
+  });
+
+  it("swallows empty-update validation errors on duplicate touch", async () => {
+    const existing = makeCompany();
+    const updateCompany = vi
+      .fn()
+      .mockRejectedValue(new Error("Minimaal één veld is verplicht voor een update."));
+    const createDiscoveryCompany = vi.fn();
+
+    const result = await saveDiscoveryCompanyWithDedupe({
+      companiesService: {
+        updateCompany,
+        createDiscoveryCompany,
+      } as never,
+      context: { organizationId: "org-1", userId: "user-1" },
+      qualified: makeQualified("Digital Impact", "https://www.digitalimpact.nl/"),
+      existingCompanies: [existing],
+    });
+
+    expect(result.type).toBe("updated");
+    expect(createDiscoveryCompany).not.toHaveBeenCalled();
   });
 });

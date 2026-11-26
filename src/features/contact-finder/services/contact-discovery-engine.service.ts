@@ -70,6 +70,31 @@ export class ContactDiscoveryEngine {
 
       const allCandidates: DiscoveredContactCandidate[] = [];
 
+      const crmPublished = [company.hrEmail, company.generalEmail, company.email].filter(
+        (value): value is string => Boolean(value?.includes("@")),
+      );
+      for (const email of crmPublished) {
+        const local = email.split("@")[0]?.toLowerCase() ?? "";
+        const isGeneral = /^(info|contact|hr|recruitment|recruiter|vacatures|werkenbij|careers|jobs)/.test(local);
+        allCandidates.push({
+          firstName: isGeneral ? "Team" : "Contact",
+          lastName: company.name,
+          fullName: null,
+          email,
+          phone: null,
+          jobTitle: isGeneral ? "Recruitment/HR mailbox" : null,
+          department: null,
+          linkedinUrl: null,
+          sourceUrl: company.website,
+          sourceType: "existing_crm",
+          emailOrigin: "existing",
+          isGeneralMailbox: isGeneral,
+          isDecisionMaker: false,
+          confidence: 0.9,
+          externalId: `crm:${email}`,
+        });
+      }
+
       // A. Existing CRM
       const crmStarted = Date.now();
       const crmCandidates = searchExistingCrmContacts(existingContacts, company);

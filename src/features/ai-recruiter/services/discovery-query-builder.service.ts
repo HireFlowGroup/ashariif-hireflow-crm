@@ -1,6 +1,10 @@
 import type { CompanySearchCriteria } from "@/features/lead-intelligence/domain";
 import type { AiRecruiterSearchPlan } from "@/features/ai-recruiter/domain/types";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import {
+  buildTargetedDiscoveryQueryVariants,
+  extractTargetedEmployerConstraints,
+} from "@/features/ai-recruiter/services/targeted-employer-constraint.service";
 
 export type DiscoveryQueryVariant = {
   query: string;
@@ -39,6 +43,34 @@ function uniqueQueries(queries: DiscoveryQueryVariant[]): DiscoveryQueryVariant[
 
 function joinParts(parts: Array<string | null | undefined>): string {
   return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+/** Plan-driven negative terms: recruitment bureaus, competitors, explicit exclusions. */
+export function buildDiscoveryExclusionTerms(plan?: AiRecruiterSearchPlan): string {
+  const config = getAiRecruiterConfig();
+  const terms: string[] = [];
+  if (config.excludeRecruitmentAgencies) {
+    terms.push(
+      "-uitzendbureau",
+      "-recruitmentbureau",
+      "-detachering",
+      "-staffing",
+      "-recruitment agency",
+    );
+  }
+  for (const exclusion of plan?.exclusions ?? []) {
+    const trimmed = exclusion.trim().replace(/"/g, "");
+    if (trimmed) terms.push(`-"${trimmed}"`);
+  }
+  return terms.join(" ");
+}
+
+export function applyDiscoveryPlanConstraints(
+  query: string,
+  plan?: AiRecruiterSearchPlan,
+): string {
+  const exclusions = buildDiscoveryExclusionTerms(plan);
+  return exclusions ? joinParts([query, exclusions]) : query;
 }
 
 function expandSynonyms(value: string, map: Record<string, string[]>): string[] {
@@ -108,6 +140,35 @@ export function buildVacancyDrivenDiscoveryQueries(
   criteria: CompanySearchCriteria,
   plan?: AiRecruiterSearchPlan,
 ): DiscoveryQueryVariant[] {
+  const targetedConstraints =
+    criteria.discoveryMode === "targeted"
+      ? {
+          mode: "targeted" as const,
+          employerNames: criteria.targetEmployerNames ?? [],
+          employerDomains: criteria.targetEmployerDomains ?? [],
+          notFoundMessage: "Doelwerkgever niet gevonden.",
+        }
+      : extractTargetedEmployerConstraints(
+          plan?.reasoning?.trim() ? plan.reasoning : "",
+        );
+
+  if (targetedConstraints.mode === "targeted") {
+    const roles = plan?.desired_roles?.length
+      ? plan.desired_roles
+      : criteria.desiredRoles?.length
+        ? criteria.desiredRoles
+        : criteria.vacancyTitles ?? ["Corporate Recruiter"];
+    return buildTargetedDiscoveryQueryVariants({ constraints: targetedConstraints, roles }).map(
+      (entry) => ({
+        query: entry.query,
+        intent: entry.intent,
+        label: entry.label,
+        location: "targeted",
+        role: roles[0] ?? "recruiter",
+      }),
+    );
+  }
+
   const sector = criteria.sector ?? plan?.sectors?.[0] ?? criteria.sectors?.[0] ?? "software";
 
   const locations = [
@@ -134,7 +195,10 @@ export function buildVacancyDrivenDiscoveryQueries(
     }
   }
 
-  return uniqueQueries(queries);
+  return uniqueQueries(queries).map((entry) => ({
+    ...entry,
+    query: applyDiscoveryPlanConstraints(entry.query, plan),
+  }));
 }
 
 /**

@@ -7,6 +7,7 @@ import type {
 } from "@/features/company-finder/domain";
 import type { CompanySearchJobRepository } from "@/features/company-finder/repositories";
 import { LeadIntelligenceEngine } from "@/features/lead-intelligence/services/lead-intelligence-engine.service";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type CompanyFinderServiceContext = CompaniesServiceContext;
 
@@ -25,8 +26,9 @@ export class CompanyFinderService {
   constructor(
     jobRepository: CompanySearchJobRepository,
     companiesService: CompaniesService,
+    supabaseClient?: SupabaseClient | null,
   ) {
-    this.engine = new LeadIntelligenceEngine(jobRepository, companiesService);
+    this.engine = new LeadIntelligenceEngine(jobRepository, companiesService, supabaseClient);
   }
 
   async createJob(

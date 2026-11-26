@@ -16,6 +16,10 @@ export const conceptEligibilityReasonCodeSchema = z.enum([
   "missing_required_data",
   "employee_range_unknown",
   "employee_range_mismatch",
+  "needs_evidence",
+  "commercial_hiring_below_plan",
+  "commercial_opportunity_below_plan",
+  "commercial_scores_missing",
   "manual_override",
   "unknown",
 ]);
@@ -35,15 +39,23 @@ export const prospectResultTypeSchema = z.enum([
 
 export type ProspectResultType = z.infer<typeof prospectResultTypeSchema>;
 
+export type QualificationStatus = "eligible" | "needs_evidence" | "rejected";
+
 export type ConceptEligibilityResult = {
+  /** @deprecated Use qualificationStatus === "eligible". */
   eligible: boolean;
+  qualificationStatus: QualificationStatus;
+  /** Deterministische prospectscore (concept readiness). */
   score: number;
+  /** Concept readiness drempel (meestal `conceptScoreThreshold`, niet plan-70). */
   threshold: number;
   priority: "priority_a" | "priority_b" | "priority_c" | "low_priority" | "reject";
   acceptedRules: string[];
   rejectedRules: string[];
   reasonCode: ConceptEligibilityReasonCode;
   userMessage: string;
+  /** Centraal qualification contract (P0-R1). */
+  contract?: import("@/features/ai-recruiter/domain/qualification-contract.types").QualificationContractSnapshot;
 };
 
 export type VacancyEvidenceSourceType =

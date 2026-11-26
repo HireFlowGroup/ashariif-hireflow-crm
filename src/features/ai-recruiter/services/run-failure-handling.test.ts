@@ -187,6 +187,16 @@ describe("RecruiterPipelineTracker terminal runs", () => {
 });
 
 describe("buildRunFailureUiMessage", () => {
+  it("uses partial-completion copy for degraded providers with saved companies", () => {
+    const diagnostics = createEmptyRunDiagnostics();
+    diagnostics.errorCode = "provider_rate_limited";
+    diagnostics.errorMessage = "Tavily HTTP 432";
+    diagnostics.providerName = "tavily";
+
+    const ui = buildRunFailureUiMessage(diagnostics, "partially_completed");
+    expect(ui?.title).toBe("Run deels afgerond");
+    expect(ui?.body).toMatch(/Geen geschikte prospects|afwijzingsredenen/i);
+  });
   it("shows provider settings link for not configured", () => {
     const diagnostics = createEmptyRunDiagnostics();
     diagnostics.errorCode = "provider_not_configured";

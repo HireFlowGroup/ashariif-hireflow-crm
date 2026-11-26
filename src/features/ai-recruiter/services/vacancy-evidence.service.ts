@@ -9,6 +9,11 @@ import type { ClassifiedSearchResult } from "@/features/company-finder/discovery
 import { vacancyTitleMatchesDesiredRoles } from "@/features/ai-recruiter/services/desired-role-matching.service";
 import type { ParsedCareerVacancy } from "@/features/ai-recruiter/services/careers-vacancy-parser.service";
 import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
+import { isDepartmentOrCategoryVacancyLabel } from "@/features/ai-recruiter/services/vacancy-title-noise.service";
+import {
+  isNegativeVacancyUrl,
+  isPlaceholderOpenVacancyTitle,
+} from "@/features/ai-recruiter/services/vacancy-negative-signals.service";
 
 export { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
 
@@ -42,7 +47,12 @@ function normalizeTitle(title: string): string {
 }
 
 export function isGenericVacancyTitle(title: string): boolean {
-  return GENERIC_VACANCY_TITLES.has(normalizeTitle(title));
+  const normalized = normalizeTitle(title);
+  return (
+    GENERIC_VACANCY_TITLES.has(normalized)
+    || isDepartmentOrCategoryVacancyLabel(title)
+    || isPlaceholderOpenVacancyTitle(title)
+  );
 }
 
 export function createVacancyEvidence(input: {
@@ -96,6 +106,7 @@ export function strictVacancyEvidence(evidence: VacancyEvidence): boolean {
     && evidence.isActive
     && title.trim().length > 2
     && !isGenericVacancyTitle(title)
+    && !isNegativeVacancyUrl(jobUrl)
     && hasConcreteJobUrl(jobUrl)
     && Boolean(evidence.companyDomain)
     && Boolean(evidence.validationReason)
@@ -128,11 +139,29 @@ export function parsedVacanciesToEvidence(
   );
 }
 
+function titleFromConcreteVacancyUrl(jobUrl: string): string | null {
+  try {
+    const slug = new URL(jobUrl).pathname.split("/").filter(Boolean).pop() ?? "";
+    if (!slug || slug.length < 3) return null;
+    return slug
+      .split("-")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  } catch {
+    return null;
+  }
+}
+
 function discoveryVacancyTitleFromCompany(company: Company): string | null {
   const signalTitle = company.hiringSignals.find(
     (signal) => signal.type === "active_vacancy" || signal.type === "vacancy",
   )?.description;
   if (signalTitle?.trim()) return signalTitle.trim();
+  const jobUrl = company.vacancyPageUrl;
+  if (jobUrl && hasConcreteJobUrl(jobUrl)) {
+    return titleFromConcreteVacancyUrl(jobUrl);
+  }
   return null;
 }
 

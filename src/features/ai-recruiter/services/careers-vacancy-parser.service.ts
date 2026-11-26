@@ -1,4 +1,9 @@
 import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.validation";
+import { isDepartmentOrCategoryVacancyLabel } from "@/features/ai-recruiter/services/vacancy-title-noise.service";
+import {
+  isNegativeVacancyUrl,
+  isPlaceholderOpenVacancyTitle,
+} from "@/features/ai-recruiter/services/vacancy-negative-signals.service";
 
 const CAREERS_PATH_PATTERN =
   /\/(vacatures?|careers?|jobs?|werken-bij|openings|join-us|work-with-us|vacancy)(\/|$|\?|#)/i;
@@ -81,6 +86,8 @@ export function isNonJobCareerLabel(title: string): boolean {
   if (/\bbedrijf rotterdam\b/i.test(normalized)) return true;
   if (/^(vacatures|careers|jobs)$/i.test(normalized)) return true;
   if (/momenteel geen openstaande vacatures/i.test(normalized)) return true;
+  if (isPlaceholderOpenVacancyTitle(normalized)) return true;
+  if (isDepartmentOrCategoryVacancyLabel(normalized)) return true;
   if (/^(waarom|why|how|what|who)\b/i.test(normalized)) return true;
   if (normalized.endsWith("?") && !JOB_TITLE_PATTERN.test(normalized)) return true;
   if (!/[a-zà-ÿ]/i.test(normalized)) return true;
@@ -127,6 +134,7 @@ function vacancyInactiveReason(title: string, surrounding: string): string | nul
 
 function acceptParsedVacancy(title: string, url: string, pageUrl: string): boolean {
   if (!hasConcreteJobUrl(url)) return false;
+  if (isNegativeVacancyUrl(url)) return false;
   if (url.split("#")[0] === pageUrl.split("#")[0]) return false;
   if (!isJobLikeCareerTitle(title)) return false;
   return true;

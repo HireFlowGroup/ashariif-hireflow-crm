@@ -61,7 +61,10 @@ export function classifyProviderError(message: string, httpStatus: number | null
   if (/supabase|database|postgres|opslaan mislukt|kon niet worden opgeslagen|duplicate key|rls/.test(lower)) {
     return "database_error";
   }
-  if (/geen bedrijven opgeslagen|0 urls|no results|geen resultaten/.test(lower)) {
+  if (
+    /geen bedrijven opgeslagen|0 urls|no results|geen resultaten/.test(lower)
+    && !/http\s+4\d{2}|quota|usage limit|rate limit|432|429|provider/.test(lower)
+  ) {
     return "no_results";
   }
   if (/afgewezen|rejected|quality gate|directories|geen echte bedrijven/.test(lower)) {
@@ -78,6 +81,36 @@ export function buildRunFailureUiMessage(
   diagnostics: RunDiagnostics,
   runStatus: string,
 ): RunFailureUiMessage | null {
+  if (runStatus === "partially_completed") {
+    if (
+      diagnostics.errorCode === "provider_rate_limited"
+      || diagnostics.errorCode === "provider_timeout"
+      || diagnostics.errorCode === "provider_request_failed"
+    ) {
+      return {
+        title: "Run deels afgerond",
+        body:
+          "Zoekproviders hadden beperkingen, maar er zijn wel bedrijven verwerkt. "
+          + "Geen geschikte prospects voor concepten — zie afwijzingsredenen per bedrijf.",
+        retryRecommended: false,
+        showProviderSettings: false,
+        providerName: diagnostics.providerName,
+      };
+    }
+
+    if (!diagnostics.errorCode || diagnostics.errorCode === "no_valid_companies") {
+      return {
+        title: "Run deels afgerond",
+        body:
+          diagnostics.errorMessage
+          ?? "Geen concepten aangemaakt — geen eligible prospects na kwalificatie.",
+        retryRecommended: diagnostics.retryRecommended,
+        showProviderSettings: false,
+        providerName: diagnostics.providerName,
+      };
+    }
+  }
+
   if (!diagnostics.errorCode && runStatus !== "failed" && runStatus !== "partially_completed") {
     return null;
   }
@@ -176,6 +209,39 @@ export function buildRunFailureUiMessage(
     };
   }
 
+  return null;
+}
+
+export type DiscoveryQueryFailureHint = {
+  error?: string | null;
+  tavilyFailureCode?: RunFailureCode | null;
+  rawResultCount?: number;
+  serpApiFallbackAttempted?: boolean;
+  serpApiFallbackSucceeded?: boolean;
+};
+
+export function resolvePrimaryDiscoveryProviderFailure(
+  queries: DiscoveryQueryFailureHint[],
+): { code: RunFailureCode; message: string } | null {
+  for (const query of queries) {
+    const serpRecovered =
+      query.serpApiFallbackSucceeded === true
+      || (query.serpApiFallbackAttempted === true && (query.rawResultCount ?? 0) > 0);
+    if (serpRecovered) continue;
+
+    if (query.tavilyFailureCode && isProviderFailure(query.tavilyFailureCode)) {
+      return {
+        code: query.tavilyFailureCode,
+        message: sanitizeDiscoveryProviderError(query.error ?? "Zoekprovider mislukt"),
+      };
+    }
+    if (query.error) {
+      const code = classifyProviderError(query.error);
+      if (isProviderFailure(code)) {
+        return { code, message: sanitizeDiscoveryProviderError(query.error) };
+      }
+    }
+  }
   return null;
 }
 

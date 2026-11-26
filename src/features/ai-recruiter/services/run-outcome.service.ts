@@ -84,8 +84,8 @@ export function resolveRunOutcome(input: {
     const summaryParts = eligibilitySummary
       ? [
           `${eligibilitySummary.prospectsReviewed} prospects beoordeeld`,
-          `gem. score ${eligibilitySummary.averageScore}`,
-          `drempel ${eligibilitySummary.threshold}`,
+          `gem. prospectscore ${eligibilitySummary.averageScore}`,
+          eligibilitySummary.qualificationPolicySummary,
           conceptCounters
             ? `${conceptCounters.conceptsCreated} concepten aangemaakt, ${conceptCounters.conceptsFailed} mislukt, ${conceptCounters.conceptsSkipped} overgeslagen`
             : null,
@@ -102,8 +102,15 @@ export function resolveRunOutcome(input: {
       };
     }
 
+    const noConceptsStatus: AiRecruiterRunStatus =
+      conceptCounters?.conceptsCreated === 0
+        ? eligibilitySummary && eligibilitySummary.eligibleCount === 0
+          ? "partially_completed"
+          : "partially_completed"
+        : "partially_completed";
+
     return {
-      status: conceptCounters?.prospectsEligible === 0 ? "completed" : "partially_completed",
+      status: noConceptsStatus,
       errorMessage: summaryParts
         ? `Geen concepten aangemaakt — ${summaryParts}.`
         : "Geen concepten aangemaakt — geen eligible prospects na contact- en scoredrempels.",

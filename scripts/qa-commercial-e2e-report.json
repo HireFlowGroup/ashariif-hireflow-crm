@@ -1,0 +1,162 @@
+{
+  "startedAt": "2026-11-26T13:20:02.363Z",
+  "prompt": "Commerciële validatie E2E — exact 1 werkgever: Laurens (officieel domein werkenbij.laurens.nl) in Nederland. Targeted discovery. Zoek Corporate Recruiter vacature op werkenbij.laurens.nl. Geen andere werkgevers accepteren. Maximum 1 concept. maximum_companies=1.",
+  "limits": {
+    "maxEmployers": 3,
+    "maxHttp": 10,
+    "maxDrafts": 1,
+    "maxPaidAi": 1
+  },
+  "organizationId": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
+  "runId": "b07cb1aa-486b-4e07-970e-09412b9c157b",
+  "runStatus": "awaiting_approval",
+  "counters": {
+    "sent": 0,
+    "found": 1,
+    "failed": 0,
+    "replies": 0,
+    "skipped": 0,
+    "approved": 0,
+    "validated": 1,
+    "withSignals": 1,
+    "contactFound": 0,
+    "draftsCreated": 1,
+    "withVacancies": 1,
+    "generalMailboxFound": 1,
+    "blockedMissingContact": 0
+  },
+  "terminalError": null,
+  "eventTypes": [
+    "connected",
+    "run_status",
+    "pipeline",
+    "item",
+    "counters",
+    "complete"
+  ],
+  "commitCounters": {
+    "run_id": "b07cb1aa-486b-4e07-970e-09412b9c157b",
+    "organization_id": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
+    "companies_committed": 1,
+    "drafts_committed": 1,
+    "updated_at": "2026-11-26T13:20:25.47005+00:00"
+  },
+  "outreachMessage": null,
+  "prospects": [
+    {
+      "companyName": "Laurens",
+      "domain": "werkenbij.laurens.nl",
+      "vacancyPageUrl": "https://werkenbij.laurens.nl/vacature/corporate-recruiter/",
+      "stage": "draft_created",
+      "status": "completed",
+      "eligibility": {
+        "score": 68,
+        "contract": {
+          "version": "p0-r2-v1",
+          "commercial": {
+            "passed": true,
+            "summary": "Commercieel voldoende: hiring 75 (min 70), opportunity 74 (min 70).",
+            "hiringScore": 75,
+            "hiringPassed": true,
+            "hiringThreshold": 70,
+            "opportunityScore": 74,
+            "opportunityPassed": true,
+            "opportunityThreshold": 70
+          },
+          "thresholds": {
+            "contractVersion": "p0-r2-v1",
+            "commercialHiringMin": 70,
+            "conceptReadinessMin": 30,
+            "responsibilityNotes": {
+              "commercial_hiring": "Hiring-intelligence score ≥ 70 (uit parsed search plan — commerciële opdrachtrelevantie).",
+              "concept_readiness": "Deterministische prospectscore ≥ 30 (platformdrempel voor conceptgeneratie).",
+              "commercial_opportunity": "Opportunity score ≥ 70 (uit parsed search plan — recruitment potential)."
+            },
+            "commercialOpportunityMin": 70
+          },
+          "evaluatedAt": "2026-11-26T13:20:24.383Z",
+          "userMessage": "Prospect kwalificeert op vacature/contact; ontbrekend bewijs: employee_range — enrichment of review.",
+          "hardSelection": {
+            "passed": false,
+            "failedCriteria": [],
+            "blockingReasonCode": "needs_evidence"
+          },
+          "conceptEligible": false,
+          "evidenceQuality": {
+            "sector": "verified",
+            "summary": "medewerkersaantal onbekend",
+            "location": "verified",
+            "employeeRange": "unknown",
+            "hasUnknownDimensions": true
+          },
+          "missingEvidence": [],
+          "conceptReadiness": {
+            "passed": true,
+            "priority": "priority_b",
+            "threshold": 30,
+            "deterministicScore": 68
+          },
+          "primaryReasonCode": "needs_evidence",
+          "qualificationStatus": "needs_evidence",
+          "enrichmentBlockedReason": "Nog ontbrekend: employee_range"
+        },
+        "eligible": false,
+        "priority": "priority_b",
+        "threshold": 30,
+        "reasonCode": "needs_evidence",
+        "userMessage": "Prospect kwalificeert op vacature/contact; ontbrekend bewijs: employee_range — enrichment of review.",
+        "acceptedRules": [
+          "soft_evidence_gaps_deferred",
+          "active_vacancy_found",
+          "relevant_focus_role",
+          "location_match",
+          "sector_match",
+          "employee_range_unknown",
+          "relevant_general_mailbox",
+          "recent_vacancy"
+        ],
+        "rejectedRules": [
+          "needs_evidence:employee_range"
+        ],
+        "qualificationStatus": "needs_evidence"
+      },
+      "outreachMessageId": "a55f4641-29f5-48b1-a79d-a8449fa62013"
+    }
+  ],
+  "employerLaurens": true,
+  "employerEnecoRejected": true,
+  "discoveryDiagnostics": null,
+  "runDiagnostics": {
+    "errorCode": null,
+    "timestamp": "2026-11-26T13:20:07.117Z",
+    "durationMs": 3308,
+    "httpStatus": null,
+    "errorMessage": null,
+    "providerName": "tavily",
+    "rejectedCount": 0,
+    "responseCount": 1,
+    "providerActive": true,
+    "normalizedCount": 1,
+    "requestCriteria": {
+      "regions": [],
+      "sectors": [
+        "zorg"
+      ],
+      "locations": [
+        "Nederland"
+      ],
+      "exclusions": [],
+      "desired_roles": [
+        "Corporate Recruiter"
+      ],
+      "employee_range": {
+        "max": 500,
+        "min": 20
+      },
+      "maximum_companies": 1
+    },
+    "rejectionReasons": [],
+    "retryRecommended": false
+  },
+  "finishedAt": "2026-11-26T13:20:27.285Z"
+}

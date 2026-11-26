@@ -34,6 +34,7 @@ import {
   isEmployerHostedDiscoveryResult,
   matchesDesiredRoleTitle,
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
+import { ensureProviderRegistryBootstrapped } from "@/features/lead-intelligence/providers/manager/provider-registry";
 import { getSerpApiKey } from "@/features/lead-intelligence/providers/manager/provider-env";
 import {
   sanitizeDiscoveryProviderError,
@@ -45,8 +46,29 @@ import {
   type DiscoveryQueryVariant,
 } from "@/features/ai-recruiter/services/discovery-query-builder.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import {
+  employerMatchesTargetedConstraints,
+  extractTargetedEmployerConstraints,
+  type TargetedDiscoveryConstraints,
+} from "@/features/ai-recruiter/services/targeted-employer-constraint.service";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
 import type { SearchResultItem } from "@/features/lead-intelligence/providers/manager/types";
+import type { ProviderRequestTelemetry } from "@/features/ai-recruiter/services/provider-request-telemetry.service";
+import {
+  createEmptyProviderRequestTelemetry,
+  recordDiscoveryQueryTelemetry,
+} from "@/features/ai-recruiter/services/provider-request-telemetry.service";
+import type { DiscoveryProviderDebugEntry } from "@/features/company-finder/discovery/discovery-provider-failover.types";
+import { dedupeDiscoveryQueryVariants } from "@/features/company-finder/discovery/discovery-query-dedupe.service";
+import {
+  createDiscoveryRunApiBudget,
+  type DiscoveryApiBudgetSnapshot,
+} from "@/features/company-finder/discovery/discovery-run-api-budget.service";
+import {
+  buildProviderDegradedModeReport,
+  type ProviderDegradedModeReport,
+} from "@/features/company-finder/discovery/provider-degraded-mode.service";
+import { isProviderQuotaExhausted } from "@/features/company-finder/discovery/provider-quota-registry.service";
 
 export type DiscoveryQueryDiagnostic = {
   query: string;
@@ -69,6 +91,7 @@ export type DiscoveryQueryDiagnostic = {
   serpApiFallbackTriggered: boolean;
   serpApiFallbackReason: string | null;
   serpApiFallbackAttempted: boolean;
+  serpApiFallbackSucceeded?: boolean;
   serpApiFallbackSkipped: boolean;
   tavilyFailed: boolean;
   tavilyFailureCode: RunFailureCode | null;
@@ -90,6 +113,10 @@ export type MultiQueryDiscoveryResult = {
   serpApiFallbackReason: string | null;
   tavilyUsefulRecall: boolean;
   usableRecallDiagnostics: UsableRecallDiagnostics;
+  providerRequestTelemetry: ProviderRequestTelemetry;
+  providerDegradedMode?: ProviderDegradedModeReport;
+  discoveryQueryDuplicatesRemoved?: number;
+  apiBudgetSnapshot?: DiscoveryApiBudgetSnapshot;
 };
 
 function canonicalUrl(url: string): string {
@@ -100,6 +127,22 @@ function canonicalUrl(url: string): string {
     return parsed.toString().toLowerCase();
   } catch {
     return url.toLowerCase().trim();
+  }
+}
+
+function vacancyTitleFromHit(title: string, url: string): string {
+  const trimmed = title.replace(/\s*[|\-–—].*$/, "").trim();
+  if (trimmed && !/^(werken bij|vacatures?)$/i.test(trimmed)) return trimmed;
+  try {
+    const slug = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+    if (!slug) return trimmed || "Vacature";
+    return slug
+      .split("-")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  } catch {
+    return trimmed || "Vacature";
   }
 }
 
@@ -131,6 +174,7 @@ function processRawResult(input: {
   excludeRecruitmentAgencies: boolean;
   discoveryLocation?: string | null;
   discoveryRole?: string | null;
+  targetedConstraints?: TargetedDiscoveryConstraints;
 }): EnrichedDiscoveryResult {
   const classified = classifyDiscoveryResult({
     title: input.title,
@@ -213,6 +257,20 @@ function processRawResult(input: {
     rejectionReason = "competitor";
   }
 
+  if (
+    accepted
+    && input.targetedConstraints?.mode === "targeted"
+    && !employerMatchesTargetedConstraints({
+      companyName: resolvedName ?? input.title,
+      domain: officialDomain,
+      website: officialDomain ? `https://${officialDomain}` : input.url,
+      constraints: input.targetedConstraints,
+    })
+  ) {
+    accepted = false;
+    rejectionReason = "wrong_employer";
+  }
+
   return {
     title: input.title,
     url: input.url,
@@ -226,8 +284,10 @@ function processRawResult(input: {
     officialDomain,
     domainConfidence,
     domainSource,
-    vacancyTitle: classified.vacancyTitle,
-    vacancyUrl: classified.vacancyTitle ? input.url : null,
+    vacancyTitle:
+      classified.vacancyTitle
+      ?? (hasConcreteJobUrl(input.url) ? vacancyTitleFromHit(input.title, input.url) : null),
+    vacancyUrl: hasConcreteJobUrl(input.url) ? input.url : null,
     vacancySource: classified.vacancyTitle ? input.providerId : null,
     excludedCompetitor: classified.excludedCompetitor,
     accepted,
@@ -243,6 +303,7 @@ function processHits(
   providerId: string,
   variant: DiscoveryQueryVariant,
   excludeRecruitmentAgencies: boolean,
+  targetedConstraints?: TargetedDiscoveryConstraints,
 ): EnrichedDiscoveryResult[] {
   return hits.map((result) =>
     processRawResult({
@@ -254,6 +315,7 @@ function processHits(
       excludeRecruitmentAgencies,
       discoveryLocation: variant.location,
       discoveryRole: variant.role,
+      targetedConstraints,
     }),
   );
 }
@@ -287,6 +349,17 @@ function pickBestEnrichedPerDomain(enriched: EnrichedDiscoveryResult[]): Enriche
 
     if (entryConcrete && existingConcrete && entry.vacancyTitle && !existing.vacancyTitle) {
       byDomain.set(key, entry);
+      continue;
+    }
+
+    if (!existing.vacancyUrl && entry.vacancyUrl && hasConcreteJobUrl(entry.vacancyUrl)) {
+      byDomain.set(key, {
+        ...existing,
+        vacancyUrl: entry.vacancyUrl,
+        vacancyTitle: entry.vacancyTitle ?? existing.vacancyTitle,
+        vacancySource: entry.vacancySource ?? existing.vacancySource,
+        resultType: isConcreteVacancyDiscoveryResult(entry) ? entry.resultType : existing.resultType,
+      });
     }
   }
 
@@ -408,12 +481,25 @@ export async function runFastTavilySearch(
     searchPlan?: import("@/features/ai-recruiter/domain/types").AiRecruiterSearchPlan;
   },
 ): Promise<MultiQueryDiscoveryResult> {
+  ensureProviderRegistryBootstrapped();
   const config = getAiRecruiterConfig();
-  const queryVariants = selectDiscoveryQueries(
+  const selectedQueries = selectDiscoveryQueries(
     buildVacancyDrivenDiscoveryQueries(criteria, options.searchPlan),
     options.searchPlan?.maximum_companies ?? options.maxResults,
   );
+  const dedupedQueries = dedupeDiscoveryQueryVariants(selectedQueries);
+  const queryVariants = dedupedQueries.unique;
   const queriesGenerated = queryVariants.map((variant) => variant.query);
+  const apiBudget = createDiscoveryRunApiBudget(criteria.aiRecruiterRunId ?? null);
+  const targetedConstraints: TargetedDiscoveryConstraints =
+    criteria.discoveryMode === "targeted"
+      ? {
+          mode: "targeted",
+          employerNames: criteria.targetEmployerNames ?? [],
+          employerDomains: criteria.targetEmployerDomains ?? [],
+          notFoundMessage: "Doelwerkgever niet gevonden.",
+        }
+      : extractTargetedEmployerConstraints(options.searchPlan?.reasoning ?? "");
   const desiredRoles = options.searchPlan?.desired_roles
     ?? criteria.desiredRoles
     ?? criteria.vacancyTitles
@@ -450,6 +536,13 @@ export async function runFastTavilySearch(
     rejected: 0,
   };
 
+  const skipProviderIds = new Set<import("@/features/company-finder/discovery/discovery-provider-failover.types").DiscoverySearchProviderId>();
+  if (isProviderQuotaExhausted("tavily") || config.discoveryMaxHttpAttemptsTavily <= 0) {
+    skipProviderIds.add("tavily");
+  }
+  let providerRequestTelemetry = createEmptyProviderRequestTelemetry();
+  const aggregateProviderRuns: DiscoveryProviderDebugEntry[] = [];
+
   const queryTasks = queryVariants.map((variant) => async () => {
     const started = Date.now();
     let error: string | null = null;
@@ -466,6 +559,7 @@ export async function runFastTavilySearch(
     let querySerpFallback = false;
     let querySerpFallbackReason: string | null = null;
     let querySerpFallbackAttempted = false;
+    let querySerpFallbackSucceeded = false;
     let querySerpFallbackSkipped = false;
     let queryTavilyFailed = false;
     let queryTavilyFailureCode: RunFailureCode | null = null;
@@ -477,9 +571,20 @@ export async function runFastTavilySearch(
         maxResults: perQueryMax,
         timeoutMs: options.timeoutMs,
         desiredRoles,
+        skipProviderIds,
+        apiBudget,
         processHits: (hits, hitProviderId) =>
-          processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies),
+          processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies, targetedConstraints),
       });
+
+      aggregateProviderRuns.push(...execution.providerRuns);
+
+      if (
+        execution.tavilyFailureCode === "provider_rate_limited"
+        || (execution.tavilyFailed && /432|usage limit|quota exceeded/i.test(execution.tavilyErrorSanitized ?? ""))
+      ) {
+        skipProviderIds.add("tavily");
+      }
 
       providerId = execution.providerId;
       queryProvider = execution.providerId;
@@ -491,6 +596,7 @@ export async function runFastTavilySearch(
       querySerpFallback = execution.serpApiFallbackTriggered;
       querySerpFallbackReason = execution.serpApiFallbackReason;
       querySerpFallbackAttempted = execution.serpApiFallbackAttempted;
+      querySerpFallbackSucceeded = execution.serpApiFallbackSucceeded;
       querySerpFallbackSkipped = execution.serpApiFallbackSkipped;
       queryTavilyFailed = execution.tavilyFailed;
       queryTavilyFailureCode = execution.tavilyFailureCode;
@@ -511,6 +617,11 @@ export async function runFastTavilySearch(
       if (execution.tavilyUsefulRecall) {
         tavilyUsefulRecall = true;
       }
+
+      providerRequestTelemetry = recordDiscoveryQueryTelemetry(
+        providerRequestTelemetry,
+        execution.providerRuns,
+      );
 
       for (const enriched of execution.enrichedResults) {
         allEnriched.push(enriched);
@@ -591,6 +702,7 @@ export async function runFastTavilySearch(
       serpApiFallbackTriggered: querySerpFallback,
       serpApiFallbackReason: querySerpFallbackReason,
       serpApiFallbackAttempted: querySerpFallbackAttempted,
+      serpApiFallbackSucceeded: querySerpFallbackSucceeded,
       serpApiFallbackSkipped: querySerpFallbackSkipped,
       tavilyFailed: queryTavilyFailed,
       tavilyFailureCode: queryTavilyFailureCode,
@@ -658,12 +770,34 @@ export async function runFastTavilySearch(
       desiredRoles,
       maxResults: perQueryMax,
       timeoutMs: options.timeoutMs,
-      maxSupplementalQueries: Math.min(coverageGaps.length, 6),
+      maxSupplementalQueries: Math.min(
+        coverageGaps.length,
+        config.discoverySupplementalQueryCap,
+      ),
       processHits: (hits, hitProviderId, variant) =>
-        processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies),
+        processHits(hits, hitProviderId, variant, config.excludeRecruitmentAgencies, targetedConstraints),
     });
 
     if (supplemental.queriesExecuted > 0) {
+      const supplementalRuns: DiscoveryProviderDebugEntry[] = Array.from(
+        { length: supplemental.queriesExecuted },
+        () => ({
+          providerId: "serpapi",
+          name: "SerpAPI supplemental",
+          configured: true,
+          started: true,
+          success: supplemental.rawHits > 0,
+          skipped: false,
+          skipReason: null,
+          resultCount: supplemental.rawHits,
+          durationMs: 0,
+          queryCount: 1,
+        }),
+      );
+      for (const run of supplementalRuns) {
+        providerRequestTelemetry = recordDiscoveryQueryTelemetry(providerRequestTelemetry, [run]);
+      }
+
       serpApiFallbackTriggered = true;
       serpApiSupplementalQueries = supplemental.queriesExecuted;
       serpApiRawHits += supplemental.rawHits;
@@ -742,6 +876,18 @@ export async function runFastTavilySearch(
     usableRecallDiagnostics,
   });
 
+  const successfulProviders = [
+    ...new Set(
+      aggregateProviderRuns.filter((run) => run.success).map((run) => run.providerId),
+    ),
+  ];
+
+  const providerDegradedMode = buildProviderDegradedModeReport({
+    providerRuns: aggregateProviderRuns,
+    successfulProviderIds: successfulProviders,
+    budget: apiBudget.snapshot(),
+  });
+
   return {
     results: results.slice(0, globalMax),
     enrichedResults: deduped,
@@ -756,6 +902,10 @@ export async function runFastTavilySearch(
     serpApiFallbackReason,
     tavilyUsefulRecall,
     usableRecallDiagnostics,
+    providerRequestTelemetry,
+    providerDegradedMode,
+    discoveryQueryDuplicatesRemoved: dedupedQueries.duplicatesRemoved,
+    apiBudgetSnapshot: apiBudget.snapshot(),
   };
 }
 

@@ -24,9 +24,15 @@ type ProspectDecisionRow = {
   manual_eligibility_override?: boolean;
 };
 
+type QualificationPolicy = {
+  conceptReadinessMin: number;
+  commercialHiringMin: number;
+  commercialOpportunityMin: number;
+  responsibilityNotes?: Record<string, string>;
+};
+
 type ProspectDecisionsPanelProps = {
   runId: string;
-  threshold?: number;
   onDraftCreated?: () => void;
 };
 
@@ -50,10 +56,10 @@ function conceptStatusLabel(decision: ProspectDecisionRow): string {
 
 export function ProspectDecisionsPanel({
   runId,
-  threshold = 30,
   onDraftCreated,
 }: ProspectDecisionsPanelProps) {
   const [decisions, setDecisions] = useState<ProspectDecisionRow[]>([]);
+  const [qualificationPolicy, setQualificationPolicy] = useState<QualificationPolicy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionItemId, setActionItemId] = useState<string | null>(null);
@@ -65,6 +71,7 @@ export function ProspectDecisionsPanel({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Laden mislukt");
       setDecisions(payload.decisions ?? []);
+      setQualificationPolicy(payload.qualificationPolicy ?? null);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Laden mislukt");
@@ -123,6 +130,7 @@ export function ProspectDecisionsPanel({
   const eligible = decisions.filter(
     (d) => d.eligibility_status === "eligible" || d.eligibility_status === "manual_override",
   );
+  const needsEvidence = decisions.filter((d) => d.eligibility_status === "needs_evidence");
   const averageScore =
     decisions.length > 0
       ? Math.round(
@@ -138,7 +146,7 @@ export function ProspectDecisionsPanel({
         </p>
       ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-4 text-sm">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6 text-sm">
         <div className="rounded-lg border px-3 py-2">
           <p className="text-muted-foreground">Beoordeeld</p>
           <p className="text-xl font-semibold">{decisions.length}</p>
@@ -148,12 +156,24 @@ export function ProspectDecisionsPanel({
           <p className="text-xl font-semibold">{eligible.length}</p>
         </div>
         <div className="rounded-lg border px-3 py-2">
-          <p className="text-muted-foreground">Gem. score</p>
+          <p className="text-muted-foreground">Needs evidence</p>
+          <p className="text-xl font-semibold">{needsEvidence.length}</p>
+        </div>
+        <div className="rounded-lg border px-3 py-2">
+          <p className="text-muted-foreground">Gem. prospectscore</p>
           <p className="text-xl font-semibold">{averageScore}</p>
         </div>
         <div className="rounded-lg border px-3 py-2">
-          <p className="text-muted-foreground">Drempel</p>
-          <p className="text-xl font-semibold">{threshold}</p>
+          <p className="text-muted-foreground">Conceptdrempel</p>
+          <p className="text-xl font-semibold">{qualificationPolicy?.conceptReadinessMin ?? 30}</p>
+        </div>
+        <div className="rounded-lg border px-3 py-2">
+          <p className="text-muted-foreground">Commercieel (hiring / opportunity)</p>
+          <p className="text-xl font-semibold">
+            {qualificationPolicy
+              ? `${qualificationPolicy.commercialHiringMin} / ${qualificationPolicy.commercialOpportunityMin}`
+              : "— / —"}
+          </p>
         </div>
       </div>
 
@@ -171,7 +191,9 @@ export function ProspectDecisionsPanel({
                     decision.eligibility_status === "eligible"
                     || decision.eligibility_status === "manual_override"
                       ? "default"
-                      : "secondary"
+                      : decision.eligibility_status === "needs_evidence"
+                        ? "outline"
+                        : "secondary"
                   }
                 >
                   {decision.eligibility_status}

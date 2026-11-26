@@ -10,10 +10,20 @@ const ROLE_MATCH_GROUPS: RoleMatchGroup[] = [
     keys: ["recruiter", "recruiters", "recruitment", "hr recruiter", "talent acquisition"],
     patterns: [
       /\brecruiter\b/i,
+      /\bit recruiter\b/i,
       /\btalent acquisition\b/i,
+      /\btalent partner\b/i,
       /\bcorporate recruiter\b/i,
       /\brecruitment specialist\b/i,
+      /\brecruitment consultant\b/i,
       /\bwervings(?:adviseur|consultant)?\b/i,
+      /\binternal recruiter\b/i,
+      /\binterne recruiter\b/i,
+      /\bhr recruiter\b/i,
+      /\btalent acquisition (?:specialist|partner)\b/i,
+      /\brecruitment (?:specialist|business partner)\b/i,
+      /\bwervingspecialist\b/i,
+      /\bwervingspartner\b/i,
     ],
   },
   {
@@ -22,6 +32,9 @@ const ROLE_MATCH_GROUPS: RoleMatchGroup[] = [
       /\baccount\s?manager\b/i,
       /\baccountmanager\b/i,
       /\bsales account manager\b/i,
+      /\bkey account manager\b/i,
+      /\bcommercial account manager\b/i,
+      /\brelatiebeheerder\b/i,
     ],
   },
   {
@@ -33,7 +46,9 @@ const ROLE_MATCH_GROUPS: RoleMatchGroup[] = [
       "csm",
     ],
     patterns: [
-      /\bcustomer success(?: manager| specialist| lead)?\b/i,
+      /\bcustomer success(?: manager| specialist| lead| medewerker)?\b/i,
+      /\bklant succes\b/i,
+      /\bklantsucces\b/i,
       /\bclient success(?: manager| specialist)?\b/i,
       /\bcsm\b/i,
     ],
@@ -57,16 +72,23 @@ function desiredRoleGroups(desiredRoles: string[]): RoleMatchGroup[] {
   );
 }
 
+export function vacancyTitleMatchesDesiredRoleList(
+  vacancyTitle: string,
+  desiredRoles: string[],
+): boolean {
+  if (desiredRoles.length === 0) return true;
+
+  const title = normalize(vacancyTitle);
+  const groups = desiredRoleGroups(desiredRoles);
+
+  return groups.some((group) => group.patterns.some((pattern) => pattern.test(title)));
+}
+
 export function vacancyTitleMatchesDesiredRoles(
   vacancyTitle: string,
   plan: AiRecruiterSearchPlan,
 ): boolean {
-  if (plan.desired_roles.length === 0) return true;
-
-  const title = normalize(vacancyTitle);
-  const groups = desiredRoleGroups(plan.desired_roles);
-
-  return groups.some((group) => group.patterns.some((pattern) => pattern.test(title)));
+  return vacancyTitleMatchesDesiredRoleList(vacancyTitle, plan.desired_roles);
 }
 
 export function findMatchingDesiredRoles(

@@ -31,6 +31,7 @@ export const discoveryRejectionReasonCodeSchema = [
   "duplicate",
   "insufficient_evidence",
   "invalid_source",
+  "wrong_employer",
   "other",
 ] as const;
 

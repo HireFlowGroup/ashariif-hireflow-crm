@@ -20,5 +20,6 @@ export async function createCompanyFinderService(): Promise<CompanyFinderService
   return new CompanyFinderService(
     new SupabaseCompanySearchJobRepository(authClient),
     companiesService,
+    authClient,
   );
 }

@@ -137,7 +137,10 @@ export async function enrichEmployeeRangeBeforeQualification(input: {
   };
 
   const aiResult = await classifyAndSummarizeLead(toCandidate(company), criteria);
-  const parsed = parseEmployeeRangeFromLabel(aiResult.employeeCountLabel);
+  const rawLabel = aiResult.employeeCountLabel?.trim() ?? null;
+  const parsed = parseEmployeeRangeFromLabel(rawLabel);
+  const verifiedSource = rawLabel
+    && /(linkedin|kvk|offici[eë]le|bron:|werknemers:\s*\d|fte:\s*\d|employees:\s*\d)/i.test(rawLabel);
 
   if (!parsed) {
     return {
@@ -146,7 +149,21 @@ export async function enrichEmployeeRangeBeforeQualification(input: {
       enriched: false,
       employeeCountMin: null,
       employeeCountMax: null,
-      employeeCountLabel: aiResult.employeeCountLabel,
+      employeeCountLabel: rawLabel ? `Onbekend (geen parseerbare range): ${rawLabel}` : null,
+    };
+  }
+
+  if (!verifiedSource) {
+    return {
+      company: {
+        ...company,
+        employeeCountLabel: `Geschat (AI, niet geverifieerd): ${rawLabel}`,
+      },
+      outcome: "unknown",
+      enriched: false,
+      employeeCountMin: null,
+      employeeCountMax: null,
+      employeeCountLabel: `Geschat (AI, niet geverifieerd): ${rawLabel}`,
     };
   }
 
@@ -154,7 +171,7 @@ export async function enrichEmployeeRangeBeforeQualification(input: {
     ...company,
     employeeCountMin: parsed.min,
     employeeCountMax: parsed.max,
-    employeeCountLabel: aiResult.employeeCountLabel,
+    employeeCountLabel: `Bewijs in bron: ${rawLabel}`,
   };
 
   return {

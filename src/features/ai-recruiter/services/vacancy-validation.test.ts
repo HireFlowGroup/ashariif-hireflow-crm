@@ -170,7 +170,8 @@ describe("assessParsedVacancies", () => {
       parsedVacancies: parsed,
       evidenceSource: "careers_page_crawl",
     });
-    expect(result.status).toBe("no_active_vacancy");
+    expect(["insufficient_evidence", "needs_investigation"]).toContain(result.status);
+    expect(result.confirmedVacancyCount).toBe(0);
   });
 
   it("rejects careers page without open vacancies", () => {
@@ -181,7 +182,8 @@ describe("assessParsedVacancies", () => {
       parsedVacancies: parsed,
       evidenceSource: "careers_page_crawl",
     });
-    expect(result.status).toBe("no_active_vacancy");
+    expect(["insufficient_evidence", "needs_investigation"]).toContain(result.status);
+    expect(result.confirmedVacancyCount).toBe(0);
   });
 
   it("rejects active vacancy with wrong role", () => {

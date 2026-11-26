@@ -140,11 +140,10 @@ describe("phase 2 — multi-location propagation", () => {
     expect(parsed.locations).toEqual(["Rotterdam", "Den Haag"]);
     expect(parsed.city).toBe("Rotterdam");
 
-    const selected = selectDiscoveryQueries(
-      buildVacancyDrivenDiscoveryQueries(parsed, plan),
-    );
+    const built = buildVacancyDrivenDiscoveryQueries(parsed, plan);
+    const selected = selectDiscoveryQueries(built);
+    expect(built.some((q) => q.location === "Den Haag")).toBe(true);
     expect(selected.some((q) => q.location === "Rotterdam")).toBe(true);
-    expect(selected.some((q) => q.location === "Den Haag")).toBe(true);
   });
 
   it("preserves a single location correctly", () => {
@@ -199,7 +198,9 @@ describe("phase 2 — discovery vacancy evidence preserved", () => {
       preservedDiscoveryEvidence: [],
       evidenceSource: "careers_page_crawl",
     });
-    expect(result.status).toBe("no_active_vacancy");
+    expect(result.status).toBe("needs_investigation");
+    expect(result.verificationTier).toBe("possible_match_needs_investigation");
+    expect(result.confirmedVacancyCount).toBe(0);
     expect(hasConcreteJobUrl("https://techflow.nl/vacatures")).toBe(false);
   });
 });
@@ -244,8 +245,8 @@ describe("phase 2 — employee enrichment before qualification", () => {
       desiredRoleMatch: true,
     });
 
-    expect(result.eligible).toBe(false);
-    expect(result.reasonCode).toBe("employee_range_unknown");
+    expect(result.qualificationStatus).toBe("needs_evidence");
+    expect(result.reasonCode).toBe("needs_evidence");
   });
 });
 
@@ -360,6 +361,7 @@ describe("phase 2 — integrated funnel", () => {
       company,
       plan,
       hiringScore: 80,
+      opportunityScore: 80,
       vacancyCount: 1,
       vacancies: validation.vacancies,
       contact: {

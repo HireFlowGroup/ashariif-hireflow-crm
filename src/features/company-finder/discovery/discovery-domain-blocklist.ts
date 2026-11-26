@@ -33,6 +33,10 @@ export const BLOCKED_OFFICIAL_DOMAINS = [
   "medium.com",
   "overheid.nl",
   "gemeente",
+  "magnet.me",
+  "hiringnotes.com",
+  "jobleads.com",
+  "virtualvaults",
 ];
 
 export const VACANCY_BOARD_DOMAINS = [
@@ -46,6 +50,9 @@ export const VACANCY_BOARD_DOMAINS = [
   "vacatures.nl",
   "stepstone.",
   "banenmarkt.",
+  "magnet.me",
+  "hiringnotes.com",
+  "jobleads.com",
 ];
 
 export const DIRECTORY_DOMAINS = [

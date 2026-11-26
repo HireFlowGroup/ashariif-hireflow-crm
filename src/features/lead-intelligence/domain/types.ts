@@ -82,6 +82,11 @@ export type CompanySearchCriteria = {
   regions?: string[];
   sectors?: string[];
   desiredRoles?: string[];
+  /** AI Recruiter run id for per-run discovery HTTP budgets. */
+  aiRecruiterRunId?: string;
+  discoveryMode?: "open" | "targeted";
+  targetEmployerNames?: string[];
+  targetEmployerDomains?: string[];
   /** @deprecated Legacy compat */
   employeeCountRange?: string;
 };

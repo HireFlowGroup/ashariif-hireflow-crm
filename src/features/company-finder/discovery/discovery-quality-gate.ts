@@ -37,7 +37,9 @@ import {
 } from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
 import { runWithConcurrencySettled } from "@/lib/async/run-with-concurrency-settled";
+import { evaluateDiscoveryPlanConstraints } from "@/features/company-finder/discovery/discovery-plan-constraint.service";
 import { logDiscoveryRejection, logPipelinePhase } from "@/lib/company-finder/pipeline-logger";
+import { applyDiscoveryVacancyEvidenceToCandidate } from "@/features/company-finder/services/discovery-vacancy-persistence";
 
 export type TavilyDiscoveryResult = {
   title: string;
@@ -292,18 +294,41 @@ export async function runDiscoveryQualityGate(input: {
     return { qualified, rejected, report };
   }
 
-  const classifications = await classifyDiscoveryUrls(
-    heuristicPassed.map(({ result }) => ({
-      url: result.url,
-      title: result.title,
-      description: result.description,
-    })),
-  );
+  const vacancyEvidencePassed: typeof heuristicPassed = [];
+  const needsAiCategory: typeof heuristicPassed = [];
 
-  const companyPassed: typeof heuristicPassed = [];
+  if (input.criteria.discoveryMode === "targeted") {
+    vacancyEvidencePassed.push(...heuristicPassed);
+  } else {
+    for (const entry of heuristicPassed) {
+      const hasConcreteVacancy =
+        Boolean(entry.result.discoveryVacancyUrl)
+        && (entry.result.discoveryResultType === "individual_vacancy"
+          || entry.result.discoveryResultType === "vacancy_board"
+          || entry.result.discoveryResultType === "company_careers_page");
+      if (hasConcreteVacancy) {
+        vacancyEvidencePassed.push(entry);
+        continue;
+      }
+      needsAiCategory.push(entry);
+    }
+  }
 
-  for (let index = 0; index < heuristicPassed.length; index += 1) {
-    const entry = heuristicPassed[index]!;
+  const classifications =
+    needsAiCategory.length > 0
+      ? await classifyDiscoveryUrls(
+          needsAiCategory.map(({ result }) => ({
+            url: result.url,
+            title: result.title,
+            description: result.description,
+          })),
+        )
+      : [];
+
+  const companyPassed: typeof heuristicPassed = [...vacancyEvidencePassed];
+
+  for (let index = 0; index < needsAiCategory.length; index += 1) {
+    const entry = needsAiCategory[index]!;
     const classification = classifications[index]!;
 
     if (classification.category !== "company") {
@@ -510,6 +535,30 @@ export async function runDiscoveryQualityGate(input: {
       continue;
     }
 
+    const planConstraint = evaluateDiscoveryPlanConstraints({
+      candidate: entry.candidate,
+      result: entry.result,
+      criteria: input.criteria,
+    });
+
+    if (!planConstraint.acceptable) {
+      report.rejectedByAiValidation += 1;
+      reject(
+        report,
+        rejected,
+        {
+          url: entry.result.url,
+          title: entry.result.title,
+          category: "company",
+          reason: "score_below_threshold",
+          detail: `Planconstraint ${planConstraint.reason}: ${planConstraint.detail}`,
+          score: outcome.confidence,
+        },
+        input.jobId,
+      );
+      continue;
+    }
+
     if (outcome.saveStatus === "review") {
       report.review += 1;
     }
@@ -524,12 +573,18 @@ export async function runDiscoveryQualityGate(input: {
       `validation:${validation.companyType}`,
     ].join(" | ");
 
-    qualified.push({
-      candidate: {
+    const candidateWithVacancy = applyDiscoveryVacancyEvidenceToCandidate(
+      {
         ...entry.candidate,
         confidence: outcome.confidence / 100,
         description: entry.candidate.description,
       },
+      entry.result,
+      provider,
+    );
+
+    qualified.push({
+      candidate: candidateWithVacancy,
       companyType: validation.companyType,
       companyConfidence: outcome.confidence,
       discoveryReason,

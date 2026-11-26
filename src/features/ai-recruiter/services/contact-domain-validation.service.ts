@@ -15,6 +15,14 @@ function normalizeDomain(domain: string): string {
   return domain.toLowerCase().replace(/^www\./, "");
 }
 
+/** Bijv. werkenbij.laurens.nl → laurens.nl (voor subdomain ↔ hoofddomein). */
+export function registrableDomain(hostname: string): string {
+  const normalized = normalizeDomain(hostname);
+  const parts = normalized.split(".").filter(Boolean);
+  if (parts.length <= 2) return normalized;
+  return parts.slice(-2).join(".");
+}
+
 export function extractEmailDomain(email: string): string {
   return normalizeDomain(email.split("@")[1] ?? "");
 }
@@ -32,9 +40,14 @@ export function contactEmailMatchesCompanyDomain(
   if (!companyDomain) return true;
 
   const normalizedCompany = normalizeDomain(companyDomain);
+  const companyBase = registrableDomain(normalizedCompany);
+  const emailBase = registrableDomain(emailDomain);
+
   return (
     emailDomain === normalizedCompany
     || emailDomain.endsWith(`.${normalizedCompany}`)
+    || normalizedCompany.endsWith(`.${emailDomain}`)
+    || (emailBase.length > 0 && emailBase === companyBase)
   );
 }
 

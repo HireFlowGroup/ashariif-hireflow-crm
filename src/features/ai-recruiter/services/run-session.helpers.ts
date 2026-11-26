@@ -2,6 +2,7 @@ import type { CompanySearchJob } from "@/features/company-finder/domain";
 import type { CompanyFinderRunEvent } from "@/features/company-finder/services/company-finder.service";
 import type { AiRecruiterRun, AiRecruiterRunSettings } from "@/features/ai-recruiter/domain/types";
 import type { RunDiagnostics } from "@/features/ai-recruiter/domain/run-diagnostics";
+import type { PipelineFunnelDiagnostics } from "@/features/ai-recruiter/domain/pipeline-funnel-diagnostics.types";
 import type { RecruiterPipelineTracker } from "@/features/ai-recruiter/services/recruiter-pipeline-tracker";
 import {
   type DiscoveryEventSummary,
@@ -83,11 +84,13 @@ export function buildRunSettingsWithDiagnostics(
   settings: AiRecruiterRunSettings,
   diagnostics: RunDiagnostics,
   finderJobId?: string,
+  pipelineFunnel?: PipelineFunnelDiagnostics | null,
 ): AiRecruiterRunSettings {
   return {
     ...settings,
     runDiagnostics: diagnostics,
     ...(finderJobId ? { finderJobId } : {}),
+    ...(pipelineFunnel ? { pipelineFunnel } : {}),
   };
 }
 

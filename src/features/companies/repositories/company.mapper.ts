@@ -30,6 +30,8 @@ type CompanyRowExtended = CompanyRow & {
   country?: string | null;
   employee_count_min?: number | null;
   employee_count_max?: number | null;
+  employee_count_label?: string | null;
+  employee_count?: number | null;
   source?: string | null;
   source_url?: string | null;
   confidence?: number | null;
@@ -75,10 +77,10 @@ export function mapCompanyRowToDomain(
     region: extended.region ?? null,
     province: extended.province ?? extended.region ?? null,
     country: extended.country ?? "NL",
-    employeeCount: extended.employee_count_min ?? null,
+    employeeCount: extended.employee_count ?? extended.employee_count_min ?? null,
     employeeCountMin: extended.employee_count_min ?? null,
     employeeCountMax: extended.employee_count_max ?? null,
-    employeeCountLabel: null,
+    employeeCountLabel: extended.employee_count_label ?? null,
     priority: null,
     leadScore: extended.lead_score ?? null,
     leadPriority: extended.priority ?? null,
@@ -175,6 +177,10 @@ export function mapDiscoveryCreateInputToRow(
     company_confidence: input.companyConfidence ?? null,
     discovery_reason: input.discoveryReason ?? null,
     discovery_provider: input.discoveryProvider ?? null,
+    vacancy_count: input.vacancyCount ?? 0,
+    hiring_signals: input.hiringSignals ?? [],
+    careers_url: input.careersUrl ?? null,
+    vacancy_page_url: input.vacancyPageUrl ?? null,
     status: toDbCompanyStatus(input.status ?? "prospect"),
     owner_id: input.ownerId ?? null,
     notes: input.notes ?? null,
@@ -269,6 +275,11 @@ export function mapUpdateInputToRow(input: Partial<LeadFieldsInput>): CompanyIns
   if (input.scoreBreakdown !== undefined) row.score_breakdown = input.scoreBreakdown;
   if (input.vacancyCount !== undefined) row.vacancy_count = input.vacancyCount;
   if (input.hiringSignals !== undefined) row.hiring_signals = input.hiringSignals;
+  if (input.employeeCountMin !== undefined) row.employee_count_min = input.employeeCountMin;
+  if (input.employeeCountMax !== undefined) row.employee_count_max = input.employeeCountMax;
+  if (input.employeeCountLabel !== undefined) {
+    row.employee_count_label = input.employeeCountLabel;
+  }
   if (input.source !== undefined) row.source = input.source;
   if (input.sourceUrl !== undefined) row.source_url = input.sourceUrl;
   if (input.confidence !== undefined) row.confidence = input.confidence;

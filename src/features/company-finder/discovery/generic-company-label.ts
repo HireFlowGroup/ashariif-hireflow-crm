@@ -55,6 +55,18 @@ function containsGenericIndustryTerm(name: string): boolean {
   return GENERIC_INDUSTRY_TERMS.some((term) => normalized.includes(term));
 }
 
+/** Serp/Google snippet titles — geen merknamen (Controlled Run I Retry RCA). */
+function looksLikeSerpSnippetTitle(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.length > 52) return true;
+  if (/\buntil you\b/i.test(trimmed)) return true;
+  if (/\bapprove a profile\b/i.test(trimmed)) return true;
+  if (/\bclick here\b|\bread more\b|\blearn more\b/i.test(trimmed)) return true;
+  if (/^jobs\b/i.test(trimmed) && trimmed.split(/\s+/).length <= 3) return true;
+  if (trimmed.split(/\s+/).length >= 10 && !/\b(BV|B\.V\.|NV|GmbH|Ltd)\b/.test(trimmed)) return true;
+  return false;
+}
+
 function looksLikeRolePlusCity(name: string): boolean {
   const normalized = normalizeLabel(name);
   for (const role of GENERIC_ROLE_TERMS) {
@@ -77,6 +89,7 @@ export function isGenericCompanyLabel(name: string | null | undefined): boolean 
   if (trimmed.length < 2) return true;
   if (looksLikeCityOnly(trimmed)) return true;
   if (looksLikeRolePlusCity(trimmed)) return true;
+  if (looksLikeSerpSnippetTitle(trimmed)) return true;
   if (containsGenericIndustryTerm(trimmed) && !/[A-Z]{2,}/.test(trimmed.replace(trimmed[0], ""))) {
     return true;
   }
@@ -87,6 +100,7 @@ export function isGenericCompanyLabel(name: string | null | undefined): boolean 
 }
 
 export function genericLabelReason(name: string): string {
+  if (looksLikeSerpSnippetTitle(name)) return "Zoek-snippet titel — geen merknaam";
   if (looksLikeRolePlusCity(name)) return "Dienst/functie + plaats — geen merknaam";
   if (containsGenericIndustryTerm(name)) return "Generieke branche- of SEO-titel";
   if (looksLikeCityOnly(name)) return "Alleen plaatsnaam";

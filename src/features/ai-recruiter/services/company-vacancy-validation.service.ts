@@ -22,9 +22,16 @@ import { hasConcreteJobUrl } from "@/features/ai-recruiter/services/vacancy-url.
 import type { VacancyAuditStatus } from "@/features/ai-recruiter/services/vacancy-audit-status.service";
 import { fetchHomepageHtml } from "@/features/company-finder/discovery/homepage-signals";
 import { getLeadIntelligenceConfig } from "@/features/lead-intelligence/config/providers.config";
+import {
+  classifyVacancyVerification,
+  type VacancyHint,
+  type VacancyVerificationTier,
+} from "@/features/ai-recruiter/services/vacancy-verification-classifier.service";
 
 export type VacancyValidationStatus =
   | "accepted"
+  | "needs_investigation"
+  | "insufficient_evidence"
   | "no_active_vacancy"
   | "no_matching_role"
   | "not_required";
@@ -36,6 +43,10 @@ export type VacancyValidationResult = {
   careersUrlsChecked: string[];
   auditStatus: VacancyAuditStatus;
   parsedVacancyCount: number;
+  verificationTier: VacancyVerificationTier;
+  hints: VacancyHint[];
+  /** Strict confirmed vacancy count — hints are never counted here. */
+  confirmedVacancyCount: number;
 };
 
 function companyDomain(company: Company): string {
@@ -72,6 +83,9 @@ export function assessVacancyEvidence(input: {
       careersUrlsChecked: [],
       auditStatus: "none",
       parsedVacancyCount: 0,
+      verificationTier: "insufficient_evidence",
+      hints: [],
+      confirmedVacancyCount: 0,
     };
   }
 
@@ -82,15 +96,49 @@ export function assessVacancyEvidence(input: {
   const evidence = dedupeVacancyEvidence([...discoveryEvidence, ...crawlEvidence]).filter(strictVacancyEvidence);
 
   if (evidence.length === 0) {
-    return {
-      status: "no_active_vacancy",
-      vacancies: [],
-      message: parsedVacancyCount > 0
-        ? "Alleen careers-navigatie of marketingtekst gevonden — geen concrete vacature."
-        : "Geen actuele vacature gevonden op de careers-pagina.",
-      careersUrlsChecked: [],
-      auditStatus: parsedVacancyCount > 0 ? "noise" : "none",
+  if (parsedVacancyCount > 0) {
+      const classified = classifyVacancyVerification({
+        strictEvidence: [],
+        parsedVacancyCount,
+        company,
+        roleMismatchConfirmed: false,
+      });
+      return {
+        status: "no_active_vacancy",
+        vacancies: [],
+        message:
+          "Geen concrete actieve vacatures — alleen ruis of afdelingslabels op de careers-pagina.",
+        careersUrlsChecked: [],
+        auditStatus: "noise",
+        parsedVacancyCount,
+        verificationTier: classified.tier,
+        hints: classified.hints,
+        confirmedVacancyCount: 0,
+      };
+    }
+
+    const classified = classifyVacancyVerification({
+      strictEvidence: [],
       parsedVacancyCount,
+      company,
+      roleMismatchConfirmed: false,
+    });
+
+    const status: VacancyValidationStatus =
+      classified.tier === "insufficient_evidence"
+        ? "insufficient_evidence"
+        : "needs_investigation";
+
+    return {
+      status,
+      vacancies: [],
+      message: classified.message,
+      careersUrlsChecked: [],
+      auditStatus: "none",
+      parsedVacancyCount,
+      verificationTier: classified.tier,
+      hints: classified.hints,
+      confirmedVacancyCount: 0,
     };
   }
 
@@ -98,6 +146,12 @@ export function assessVacancyEvidence(input: {
     const matching = evidence.filter((vacancy) => vacancyTitleMatchesDesiredRoles(vacancy.title, plan));
     if (matching.length === 0) {
       const foundTitles = evidence.map((vacancy) => vacancy.title).join(", ");
+      const classified = classifyVacancyVerification({
+        strictEvidence: evidence,
+        parsedVacancyCount,
+        company,
+        roleMismatchConfirmed: true,
+      });
       return {
         status: "no_matching_role",
         vacancies: evidence,
@@ -105,6 +159,9 @@ export function assessVacancyEvidence(input: {
         careersUrlsChecked: [],
         auditStatus: "no_matching_role",
         parsedVacancyCount,
+        verificationTier: classified.tier,
+        hints: classified.hints,
+        confirmedVacancyCount: evidence.length,
       };
     }
 
@@ -115,6 +172,9 @@ export function assessVacancyEvidence(input: {
       careersUrlsChecked: [],
       auditStatus: "matched",
       parsedVacancyCount,
+      verificationTier: "confirmed_active",
+      hints: [],
+      confirmedVacancyCount: matching.length,
     };
   }
 
@@ -125,6 +185,9 @@ export function assessVacancyEvidence(input: {
     careersUrlsChecked: [],
     auditStatus: "found",
     parsedVacancyCount,
+    verificationTier: "confirmed_active",
+    hints: [],
+    confirmedVacancyCount: evidence.length,
   };
 }
 
@@ -157,13 +220,22 @@ export async function validateCompanyVacancies(input: {
   const website = companyWebsite(company);
 
   if (!website && preservedDiscoveryEvidence.length === 0) {
+    const classified = classifyVacancyVerification({
+      strictEvidence: [],
+      parsedVacancyCount: 0,
+      company,
+      roleMismatchConfirmed: false,
+    });
     return {
-      status: "no_active_vacancy",
+      status: "needs_investigation",
       vacancies: [],
-      message: "Geen bedrijfswebsite beschikbaar voor vacaturevalidatie.",
+      message: classified.message,
       careersUrlsChecked: [],
       auditStatus: "none",
       parsedVacancyCount: 0,
+      verificationTier: classified.tier,
+      hints: classified.hints,
+      confirmedVacancyCount: 0,
     };
   }
 

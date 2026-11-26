@@ -18,6 +18,8 @@ export type PersistProspectDecisionInput = {
   runItemId: string;
   company: Company | null;
   eligibility: ConceptEligibilityResult;
+  commercialHiringScore?: number | null;
+  commercialOpportunityScore?: number | null;
   vacancies: VacancyEvidence[];
   contact: SelectedDiscoveredContact | null;
   contactStage: string;
@@ -73,18 +75,31 @@ export class ProspectAuditRepository {
       contact_type: input.contact?.isGeneralMailbox ? "general_mailbox" : input.contact ? "personal" : null,
       contact_email: input.contact?.email ?? null,
       contact_verification_status: input.contact?.verificationStatus ?? null,
-      contact_score: input.eligibility.score,
-      opportunity_score: input.eligibility.score,
+      contact_score: input.contact?.relevanceScore ?? null,
+      opportunity_score:
+        input.commercialOpportunityScore
+        ?? input.eligibility.contract?.commercial.opportunityScore
+        ?? null,
       deterministic_score: input.eligibility.score,
-      eligibility_status: input.eligibility.eligible || input.manualEligibilityOverride
-        ? input.manualEligibilityOverride
-          ? "manual_override"
-          : "eligible"
-        : "ineligible",
+      eligibility_status: input.manualEligibilityOverride
+        ? "manual_override"
+        : input.eligibility.qualificationStatus === "needs_evidence"
+          ? "needs_evidence"
+          : input.eligibility.qualificationStatus === "eligible"
+            ? "eligible"
+            : "ineligible",
       concept_status: input.conceptStatus,
-      accepted_rules: input.eligibility.acceptedRules,
+      accepted_rules: [
+        ...input.eligibility.acceptedRules,
+        ...(input.eligibility.contract
+          ? [
+              `qualification_contract:${input.eligibility.contract.version}`,
+              `qualification_policy:${input.eligibility.contract.thresholds.conceptReadinessMin}/${input.eligibility.contract.thresholds.commercialHiringMin}/${input.eligibility.contract.thresholds.commercialOpportunityMin}`,
+            ]
+          : []),
+      ],
       rejected_rules: input.eligibility.rejectedRules,
-      final_decision: input.eligibility.eligible ? "eligible" : "rejected",
+      final_decision: input.eligibility.qualificationStatus,
       final_reason: input.eligibility.userMessage,
       reason_code: input.eligibility.reasonCode,
       manual_eligibility_override: input.manualEligibilityOverride ?? false,

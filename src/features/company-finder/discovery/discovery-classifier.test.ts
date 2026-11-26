@@ -118,13 +118,13 @@ describe("discovery classifier and pipeline", () => {
     expect(result.employerName).toBeTruthy();
   });
 
-  it("9. meerdere queries worden gegenereerd (minimaal 12)", () => {
-    const queries = selectDiscoveryQueries(
-      buildVacancyDrivenDiscoveryQueries(criteria, basePlan),
-    );
-    expect(queries.length).toBeGreaterThanOrEqual(12);
+  it("9. queryselectie respecteert discovery-cap en dekt varianten", () => {
+    const built = buildVacancyDrivenDiscoveryQueries(criteria, basePlan);
+    const queries = selectDiscoveryQueries(built);
+    expect(built.length).toBeGreaterThanOrEqual(12);
+    expect(queries.length).toBeLessThanOrEqual(built.length);
     expect(queries.some((q) => q.location === "Rotterdam")).toBe(true);
-    expect(queries.some((q) => q.location === "Den Haag")).toBe(true);
+    expect(built.some((q) => q.location === "Den Haag")).toBe(true);
     expect(queries.every((q) => q.intent !== "company_discovery")).toBe(true);
   });
 

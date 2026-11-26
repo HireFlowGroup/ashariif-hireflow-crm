@@ -10,6 +10,8 @@ export type OutreachReadinessEvidence = {
 
 export type OutreachReadinessResult = {
   ready: boolean;
+  /** Concept mag worden opgeslagen (niet-verzendklaar) ondanks ontbrekende ontvanger/score. */
+  readyForConceptDraft: boolean;
   companyId: string;
   vacancyId: string | null;
   contactId: string | null;
