@@ -152,6 +152,7 @@ export class SupabaseIntelligenceNotificationsRepository
       .is("read_at", null);
 
     if (error) {
+      if (isRecoverableNotificationsDbError(error)) return 0;
       throw new IntelligenceNotificationsRepositoryError("Ongelezen notificaties tellen mislukt.");
     }
 
