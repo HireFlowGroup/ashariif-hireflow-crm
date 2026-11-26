@@ -18,14 +18,23 @@ export async function GET(request: Request) {
   const client = await createClient();
   const repository = new SupabaseIntelligenceNotificationsRepository(client);
 
-  const [notifications, unreadCount] = await Promise.all([
-    unreadOnly
-      ? repository.listUnread(context.organizationId, limit)
-      : repository.listRecent(context.organizationId, limit),
-    repository.countUnread(context.organizationId),
-  ]);
+  try {
+    const [notifications, unreadCount] = await Promise.all([
+      unreadOnly
+        ? repository.listUnread(context.organizationId, limit)
+        : repository.listRecent(context.organizationId, limit),
+      repository.countUnread(context.organizationId),
+    ]);
 
-  return NextResponse.json({ notifications, unreadCount });
+    return NextResponse.json({ notifications, unreadCount });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/permission denied|PGRST205|42501|Notificaties/i.test(message)) {
+      return NextResponse.json({ notifications: [], unreadCount: 0 });
+    }
+    console.error("[intelligence/notifications] GET failed", error);
+    return NextResponse.json({ error: "Notificaties laden mislukt." }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {

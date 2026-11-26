@@ -173,6 +173,34 @@ export class SupabaseDashboardRepository implements DashboardRepository {
         generatedAt: new Date().toISOString(),
       };
     } catch (error) {
+      if (isRecoverableSupabaseAccessError(error)) {
+        console.warn("[Dashboard] loadSnapshot degraded:", error instanceof Error ? error.message : error);
+        return {
+          filters,
+          kpis: EMPTY_KPIS,
+          bdMetrics: EMPTY_BD_METRICS,
+          warmLeads: [],
+          recentSignals: [],
+          recentVacancies: [],
+          recruiterSignals: [],
+          priorityDistribution: [],
+          pipelineStages: [],
+          outreachDistribution: [],
+          aiRecommendations: [],
+          todaysIntelligence: {
+            scanStatus: null,
+            signalsCreated: 0,
+            signalsUpdated: 0,
+            notificationsCreated: 0,
+            companiesProcessed: 0,
+            companiesTotal: 0,
+            lastScanAt: null,
+            recentNotifications: [],
+          },
+          signalTrend: [],
+          generatedAt: new Date().toISOString(),
+        };
+      }
       throw new DashboardRepositoryError(
         error instanceof Error ? error.message : "Dashboard laden mislukt.",
       );
