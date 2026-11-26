@@ -1,14 +1,14 @@
 {
-  "generatedAt": "2026-11-26T13:29:17.759Z",
+  "generatedAt": "2026-11-26T13:51:08.428Z",
   "cleanup": [
-    "run f2b96d37-f156-4205-8973-7e3b965ba252",
-    "run fa95f0aa-3490-476b-be47-ab820b9a26b4",
-    "run fa95f0aa-3490-476b-be47-ab820b9a26b4",
-    "company 4d9e90d5-24c8-4b78-a8e5-0446a3d719f4"
+    "run b2514961-1bb0-425f-b76e-25e5a3a25992",
+    "run 75e6d467-753b-4dbe-b183-55628a11030d",
+    "run 75e6d467-753b-4dbe-b183-55628a11030d",
+    "company 05b05830-9804-4923-8333-fc5717aed96a"
   ],
   "organizationId": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
   "userId": "3176acff-989c-4c80-accd-321552bd9972",
-  "slotRunId": "f2b96d37-f156-4205-8973-7e3b965ba252",
+  "slotRunId": "b2514961-1bb0-425f-b76e-25e5a3a25992",
   "slotTests": {
     "firstReserved": true,
     "secondReserved": true,
@@ -17,22 +17,22 @@
     "tenantGuardRejected": true
   },
   "commitCounters": {
-    "run_id": "fa95f0aa-3490-476b-be47-ab820b9a26b4",
+    "run_id": "75e6d467-753b-4dbe-b183-55628a11030d",
     "organization_id": "7e6d935f-14c1-4b47-abb4-9ed71d34e410",
     "companies_committed": 1,
     "drafts_committed": 0,
-    "updated_at": "2026-11-26T13:29:20.927514+00:00"
+    "updated_at": "2026-11-26T13:51:11.714576+00:00"
   },
-  "downstreamRunId": "fa95f0aa-3490-476b-be47-ab820b9a26b4",
-  "companyId": "4d9e90d5-24c8-4b78-a8e5-0446a3d719f4",
-  "itemId": "58e9b641-6f6b-4ee6-be32-5ee1409a140e",
-  "downstreamDraftId": "6ea53d13-dded-48e3-941b-45f732795c6d",
+  "downstreamRunId": "75e6d467-753b-4dbe-b183-55628a11030d",
+  "companyId": "05b05830-9804-4923-8333-fc5717aed96a",
+  "itemId": "f9383f8f-6182-49a2-969d-98f219282572",
+  "downstreamDraftId": "edc14c37-8577-42a1-a548-48d21d810807",
   "downstream": {
     "saveType": "saved",
     "companiesCommitted": 1,
     "eligibilityEligible": true,
-    "itemId": "58e9b641-6f6b-4ee6-be32-5ee1409a140e",
-    "companyDomain": "qa-accept-377c4d44.fixture.test",
-    "uiPath": "/ai-recruiter/runs/fa95f0aa-3490-476b-be47-ab820b9a26b4"
+    "itemId": "f9383f8f-6182-49a2-969d-98f219282572",
+    "companyDomain": "qa-accept-a66649e3.fixture.test",
+    "uiPath": "/ai-recruiter/runs/75e6d467-753b-4dbe-b183-55628a11030d"
   }
 }

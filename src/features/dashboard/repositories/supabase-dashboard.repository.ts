@@ -19,6 +19,10 @@ import {
   periodToStartDate,
   todayStartIso,
 } from "@/features/dashboard/domain/dashboard.types";
+import {
+  isRecoverableSupabaseAccessError,
+  throwUnlessRecoverableSupabaseError,
+} from "@/features/dashboard/repositories/dashboard-db-access";
 import { loadBdDashboardMetrics } from "@/features/dashboard/repositories/bd-dashboard-metrics.loader";
 import { DashboardRepositoryError } from "@/features/dashboard/repositories/dashboard.repository";
 import type { DashboardRepository } from "@/features/dashboard/repositories/dashboard.repository";
@@ -196,14 +200,22 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       // intelligence tables may not exist until migration is applied
     }
 
+    const countOrZero = (result: { count: number | null; error: unknown }) => {
+      if (result.error) {
+        if (isRecoverableSupabaseAccessError(result.error)) return 0;
+        throw result.error;
+      }
+      return result.count ?? 0;
+    };
+
     return {
-      newHiringSignals: signalsResult.count ?? 0,
-      newVacancies: vacanciesResult.count ?? 0,
-      newCompanies: companiesResult.count ?? 0,
-      newRecruiters: recruitersResult.count ?? 0,
+      newHiringSignals: countOrZero(signalsResult),
+      newVacancies: countOrZero(vacanciesResult),
+      newCompanies: countOrZero(companiesResult),
+      newRecruiters: countOrZero(recruitersResult),
       todaysIntelligence,
       unreadNotifications,
-      warmLeadsCount: warmLeadsResult.count ?? 0,
+      warmLeadsCount: countOrZero(warmLeadsResult),
     };
   }
 
@@ -228,7 +240,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
 
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     return ((data ?? []) as CompanyIntelligence[]).map((row) => ({
       id: row.id,
@@ -356,7 +371,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     const counts = new Map<string, number>();
     for (const row of data ?? []) {
@@ -438,7 +456,10 @@ export class SupabaseDashboardRepository implements DashboardRepository {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isRecoverableSupabaseAccessError(error)) return [];
+      throw error;
+    }
 
     return ((data ?? []) as CompanyIntelligence[]).map((row) => {
       const outreach = row.outreach_status ?? "none";

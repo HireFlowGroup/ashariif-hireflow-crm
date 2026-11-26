@@ -224,6 +224,21 @@ export function selectDiscoveryQueries(
   const selected: DiscoveryQueryVariant[] = [];
   const seen = new Set<string>();
 
+  const rolesInPool = new Set(queries.map((q) => q.role));
+  for (const role of rolesInPool) {
+    if (selected.length >= target) break;
+    const candidate = queries.find((q) => q.role === role && !seen.has(q.query.toLowerCase()));
+    if (!candidate) continue;
+    seen.add(candidate.query.toLowerCase());
+    selected.push(candidate);
+    const bucketKey = `${candidate.location}|${candidate.role}`;
+    const bucket = buckets.get(bucketKey);
+    if (bucket?.length) {
+      const idx = bucket.findIndex((q) => q.query.toLowerCase() === candidate.query.toLowerCase());
+      if (idx >= 0) bucket.splice(idx, 1);
+    }
+  }
+
   while (selected.length < target) {
     let added = false;
     for (const key of pairKeys) {

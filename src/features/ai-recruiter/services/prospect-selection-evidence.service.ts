@@ -25,7 +25,7 @@ function record(input: Omit<ProspectSelectionEvidenceRecord, "verifiedAt">): Pro
 export function employeeLabelIsVerified(label: string | null | undefined): boolean {
   if (!label?.trim()) return false;
   if (/Geschat \(AI/i.test(label)) return false;
-  return /(bewijs in bron|linkedin|kvk|offici[eë]le|fte:\s*\d|employees:\s*\d|\d+\s*(?:tot|-)\s*\d+)/i.test(label);
+  return /(bewijs in bron|linkedin|kvk|offici[eë]le|fte:\s*\d|employees:\s*\d)/i.test(label);
 }
 
 export function collectCompanyRecordEvidence(company: Company): ProspectSelectionEvidenceRecord[] {

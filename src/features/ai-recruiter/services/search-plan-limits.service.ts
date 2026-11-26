@@ -13,10 +13,23 @@ import {
  * Parsed or client-submitted values are never allowed to exceed these.
  */
 export function clampAiRecruiterSearchPlan(plan: AiRecruiterSearchPlan): AiRecruiterSearchPlan {
-  const { planLimitMaximumCompanies, planLimitMaximumDrafts } = getAiRecruiterConfig();
+  const {
+    planLimitMaximumCompanies,
+    planLimitMaximumDrafts,
+    defaultMaximumCompanies,
+    defaultMaximumDrafts,
+  } = getAiRecruiterConfig();
 
-  const maxCompanies = Math.min(plan.maximum_companies, planLimitMaximumCompanies);
-  const maxDrafts = Math.min(plan.maximum_drafts, planLimitMaximumDrafts);
+  const maxCompanies = Math.min(
+    plan.maximum_companies,
+    planLimitMaximumCompanies,
+    defaultMaximumCompanies,
+  );
+  const maxDrafts = Math.min(
+    plan.maximum_drafts,
+    planLimitMaximumDrafts,
+    defaultMaximumDrafts,
+  );
 
   return {
     ...plan,
