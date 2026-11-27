@@ -58,7 +58,11 @@ export const companyFinderCriteriaSchema = z.object({
   maxResults: z.coerce.number().int().min(1).max(100).optional(),
   excludedNames: z.array(z.string().trim().max(120)).max(20).optional(),
   excludedSectors: z.array(z.string().trim().max(120)).max(20).optional(),
-  sourceQuery: z.string().trim().max(500).optional(),
+  sourceQuery: z
+    .string()
+    .trim()
+    .max(500, "Bronopdracht voor discovery is te lang (max. 500 tekens).")
+    .optional(),
   fastMode: z.boolean().optional().default(true),
   /** Multi-location discovery (AI Recruiter) — preserved end-to-end */
   locations: z.array(z.string().trim().min(1).max(120)).max(10).optional(),

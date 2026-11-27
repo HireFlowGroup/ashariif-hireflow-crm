@@ -1239,7 +1239,13 @@ export class AiRecruiterOrchestrator {
       yield { type: "complete", run: finalRun };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Run mislukt";
-      pipeline.finalizeTerminalRun("Afgebroken door fout");
+      const discoveryStep = pipeline.getSnapshot().find((step) => step.id === "discovery");
+      if (discoveryStep?.status === "running") {
+        pipeline.failStep("discovery", message, { processed: 0, errors: 1 });
+        skipEnrichmentAndDownstream(pipeline, "Overgeslagen — discovery mislukt");
+      } else {
+        pipeline.finalizeTerminalRun("Afgebroken door fout");
+      }
       const failedRun = await this.repository.updateRun(context.organizationId, runId, {
         status: error instanceof AiRecruiterOrchestratorError && error.code === "timeout" ? "partially_completed" : "failed",
         counters,
