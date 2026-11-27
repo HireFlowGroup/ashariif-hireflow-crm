@@ -24,7 +24,7 @@ export function prepareSerpApiDiscoveryQuery(query: string): string {
     return trimmed.slice(0, SERPAPI_DISCOVERY_QUERY_MAX_LEN);
   }
 
-  let normalized = trimmed
+  const normalized = trimmed
     .replace(/\binurl:\S+/gi, " ")
     .replace(/\bor\b/gi, " ")
     .replace(/"([^"]+)"/g, "$1")
