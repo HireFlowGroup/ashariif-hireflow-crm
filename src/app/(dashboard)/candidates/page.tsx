@@ -1,22 +1,28 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+
+import { CandidateSourcingClient } from "@/components/candidates/candidate-sourcing-client";
 import { PageHeader } from "@/components/layout/page-header";
-import { EmptyState } from "@/components/shared/empty-state";
+import { getAuthenticatedServiceContext } from "@/lib/api/authenticated-context";
+import { authRoutes } from "@/config/navigation";
 
 export const metadata: Metadata = {
   title: "Candidates",
 };
 
-export default function CandidatesPage() {
+export default async function CandidatesPage() {
+  const context = await getAuthenticatedServiceContext();
+  if (!context) {
+    redirect(authRoutes.login);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Candidates"
-        description="Maintain candidate profiles, sources, and hiring status."
+        description="AI Candidate Sourcing via publiek geïndexeerde LinkedIn-profielen (x-ray). Handmatige goedkeuring, geen automatische verzending."
       />
-      <EmptyState
-        title="No candidates in the pipeline"
-        description="Add candidates manually or integrate sourcing channels through Supabase-backed services."
-      />
+      <CandidateSourcingClient />
     </div>
   );
 }

@@ -23,5 +23,6 @@ export interface CandidateDiscoveryRepository {
   ): Promise<CandidateDiscoveryRun[]>;
   insertProposals(input: InsertProposalsFromRankInput): Promise<InsertProposalsResult>;
   listProposalsByRun(organizationId: string, runId: string): Promise<CandidateDiscoveryProposal[]>;
+  getProposal(organizationId: string, proposalId: string): Promise<CandidateDiscoveryProposal | null>;
   updateProposalStatus(input: UpdateProposalStatusInput): Promise<CandidateDiscoveryProposal>;
 }

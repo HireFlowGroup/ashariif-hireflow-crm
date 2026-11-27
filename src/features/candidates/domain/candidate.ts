@@ -30,8 +30,14 @@ export type Candidate = {
   salaryExpectationMax: number | null;
   availability: string | null;
   ownerId: string | null;
+  linkedinUrl: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CreateCandidateFromDiscoveryInput = {
+  proposal: import("@/features/candidate-discovery/domain/candidate-discovery.persistence.types").CandidateDiscoveryProposal;
+  vacancyId: import("@/features/vacancies/domain").VacancyId;
 };
 
 export type CandidateContext = {

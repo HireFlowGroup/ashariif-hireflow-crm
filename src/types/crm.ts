@@ -87,6 +87,12 @@ export type Candidate = TimestampFields & {
   email: string | null;
   phone: string | null;
   source: string | null;
+  linkedin_url?: string | null;
+  candidate_current_role?: string | null;
+  location?: string | null;
+  summary?: string | null;
+  skills?: unknown;
+  experience_years?: number | null;
   status: "new" | "screening" | "interview" | "offer" | "hired" | "rejected";
 };
 

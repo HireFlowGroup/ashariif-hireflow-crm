@@ -12,6 +12,9 @@ export type {
   RankedCandidateProposal,
 } from "@/features/candidate-discovery/domain/candidate-discovery.types";
 export { buildCandidateDiscoveryQueryPlan } from "@/features/candidate-discovery/services/candidate-discovery-query-builder.service";
+export { buildCandidateSourcingQueryPlan } from "@/features/candidate-discovery/services/candidate-sourcing-query-builder.service";
+export { executeCandidateSourcingRun } from "@/features/candidate-discovery/services/candidate-discovery-orchestrator.service";
+export type { CandidateSourcingSearchCriteria } from "@/features/candidate-discovery/domain/candidate-sourcing-criteria.types";
 export { rankCandidateDiscoveryResults } from "@/features/candidate-discovery/services/candidate-discovery-rank.service";
 export {
   createProviderManagerSearchExecutor,

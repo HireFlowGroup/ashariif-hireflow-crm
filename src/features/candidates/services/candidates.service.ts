@@ -2,6 +2,7 @@ import type {
   Candidate,
   CandidateContext,
   CandidateId,
+  CreateCandidateFromDiscoveryInput,
   ListCandidatesInput,
   ListCandidatesResult,
 } from "@/features/candidates/domain";
@@ -24,5 +25,16 @@ export class CandidatesService {
     input: ListCandidatesInput = {},
   ): Promise<ListCandidatesResult> {
     return this.repository.list(context.organizationId, input);
+  }
+
+  async findByLinkedInUrl(context: CandidateContext, linkedinUrl: string): Promise<Candidate | null> {
+    return this.repository.findByLinkedInUrl(context.organizationId, linkedinUrl);
+  }
+
+  async createFromDiscoveryProposal(
+    context: CandidateContext,
+    input: CreateCandidateFromDiscoveryInput,
+  ): Promise<Candidate> {
+    return this.repository.createFromDiscovery(context.organizationId, context.userId, input);
   }
 }

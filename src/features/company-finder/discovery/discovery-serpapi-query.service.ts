@@ -10,6 +10,7 @@ export const SERPAPI_DISCOVERY_QUERY_MAX_LEN = 256;
 export function shouldNormalizeSerpDiscoveryQuery(query: string): boolean {
   const trimmed = query.trim();
   if (!trimmed) return false;
+  if (/site:linkedin\.com\/in\b/i.test(trimmed)) return false;
   if (/\binurl:/i.test(trimmed)) return true;
   if ((trimmed.match(/-\S+/g)?.length ?? 0) > 4) return true;
   if (trimmed.length > SERPAPI_DISCOVERY_QUERY_MAX_LEN) return true;

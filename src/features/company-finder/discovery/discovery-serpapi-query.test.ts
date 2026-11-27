@@ -24,6 +24,12 @@ describe("discovery SerpAPI query normalization", () => {
     expect(normalized.length).toBeLessThanOrEqual(256);
   });
 
+  it("skips normalization for LinkedIn x-ray queries", () => {
+    const xray = 'site:linkedin.com/in "Corporate Recruiter" Rotterdam';
+    expect(shouldNormalizeSerpDiscoveryQuery(xray)).toBe(false);
+    expect(prepareSerpApiDiscoveryQuery(xray)).toBe(xray);
+  });
+
   it("builds compact broadening query from role and location", () => {
     const broad = buildSerpApiBroadDiscoveryQuery({
       role: "Corporate Recruiter",

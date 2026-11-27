@@ -196,6 +196,21 @@ export class SupabaseCandidateDiscoveryRepository implements CandidateDiscoveryR
     return (data ?? []).map((row) => mapProposalRowToDomain(row as CandidateDiscoveryProposalRow));
   }
 
+  async getProposal(organizationId: string, proposalId: string): Promise<CandidateDiscoveryProposal | null> {
+    const { data, error } = await this.client
+      .from("candidate_discovery_proposals")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .eq("id", proposalId)
+      .maybeSingle();
+
+    if (error) {
+      throw new CandidateDiscoveryRepositoryError("Voorstel kon niet worden opgehaald.");
+    }
+
+    return data ? mapProposalRowToDomain(data as CandidateDiscoveryProposalRow) : null;
+  }
+
   async updateProposalStatus(input: UpdateProposalStatusInput): Promise<CandidateDiscoveryProposal> {
     const { data, error } = await this.client
       .from("candidate_discovery_proposals")
