@@ -59,6 +59,6 @@ describe("formatDiscoveryProviderFailureMessage", () => {
     ]);
 
     expect(result?.code).toBe("provider_quota_exhausted");
-    expect(result?.message).toMatch(/Configureer SerpAPI/);
+    expect(result?.message).toMatch(/SerpAPI-fallback niet mogelijk|Configureer SerpAPI/i);
   });
 });

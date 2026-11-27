@@ -16,6 +16,9 @@ import {
 import type { RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { executeDiscoverySearchWithFailover } from "@/features/company-finder/discovery/discovery-provider-failover.service";
 import {
+  buildSerpApiBroadDiscoveryQuery,
+} from "@/features/company-finder/discovery/discovery-serpapi-query.service";
+import {
   resolveAiRecruiterDiscoveryProviderPriority,
   resolveDiscoveryMaxProviderAttempts,
 } from "@/features/company-finder/discovery/discovery-provider-resilience.service";
@@ -71,31 +74,63 @@ export async function executeSerpApiDiscoveryQuery(input: {
   query: string;
   maxResults: number;
   timeoutMs: number;
+  apiBudget?: DiscoveryRunApiBudget;
+  serpContext?: { location?: string; role?: string; sector?: string };
   processHits: (hits: SearchResultItem[], providerId: string) => EnrichedDiscoveryResult[];
 }): Promise<{
   enrichedResults: EnrichedDiscoveryResult[];
   rawResults: SearchResultItem[];
   rawHitCount: number;
   error: string | null;
+  broadeningAttempted: boolean;
 }> {
   if (!getSerpApiKey()) {
-    return { enrichedResults: [], rawResults: [], rawHitCount: 0, error: "SerpAPI niet geconfigureerd" };
+    return {
+      enrichedResults: [],
+      rawResults: [],
+      rawHitCount: 0,
+      error: "SerpAPI niet geconfigureerd",
+      broadeningAttempted: false,
+    };
   }
 
-  try {
+  const runSearch = async (query: string) => {
     const manager = getProviderManager();
-    const execution = await manager.executeSingleProviderSearch(
+    return manager.executeSingleProviderSearch(
       SERPAPI_PROVIDER_ID,
-      input.query,
+      query,
       input.maxResults,
       input.timeoutMs,
     );
+  };
+
+  try {
+    let broadeningAttempted = false;
+    let execution = await runSearch(input.query);
+
+    if (execution.results.length === 0 && input.serpContext) {
+      const broadQuery = buildSerpApiBroadDiscoveryQuery(input.serpContext);
+      const budgetOk = input.apiBudget?.tryConsumeHttpAttempt(SERPAPI_PROVIDER_ID).allowed ?? true;
+      if (budgetOk && broadQuery !== input.query) {
+        broadeningAttempted = true;
+        execution = await runSearch(broadQuery);
+      }
+    }
+
     const enrichedResults = input.processHits(execution.results, SERPAPI_PROVIDER_ID);
+    let error: string | null = null;
+    if (execution.results.length === 0) {
+      error = "SerpAPI leverde 0 resultaten";
+    } else if (enrichedResults.length === 0) {
+      error = "SerpAPI leverde zoekresultaten, maar geen bruikbare werkgevers na classificatie";
+    }
+
     return {
       enrichedResults,
       rawResults: execution.results,
       rawHitCount: execution.results.length,
-      error: null,
+      error,
+      broadeningAttempted,
     };
   } catch (error) {
     return {
@@ -103,6 +138,7 @@ export async function executeSerpApiDiscoveryQuery(input: {
       rawResults: [],
       rawHitCount: 0,
       error: error instanceof Error ? error.message : "SerpAPI query mislukt",
+      broadeningAttempted: false,
     };
   }
 }
@@ -113,6 +149,7 @@ export async function executeQualityAwareDiscoveryQuery(input: {
   maxResults: number;
   timeoutMs: number;
   desiredRoles: string[];
+  serpContext?: { location?: string; role?: string; sector?: string };
   skipProviderIds?: ReadonlySet<DiscoverySearchProviderId>;
   apiBudget?: DiscoveryRunApiBudget;
   processHits: (
@@ -218,6 +255,8 @@ export async function executeQualityAwareDiscoveryQuery(input: {
       query: input.query,
       maxResults: input.maxResults,
       timeoutMs: input.timeoutMs,
+      apiBudget: input.apiBudget,
+      serpContext: input.serpContext,
       processHits: input.processHits,
     });
 
@@ -235,16 +274,21 @@ export async function executeQualityAwareDiscoveryQuery(input: {
       errorMessage: serpExecution.error,
     });
 
-    if (serpExecution.error) {
+    if (serpExecution.error && serpExecution.rawHitCount === 0) {
       serpApiFallbackError = serpExecution.error;
     } else if (serpExecution.enrichedResults.length > 0 || serpExecution.rawHitCount > 0) {
-      serpApiFallbackSucceeded = true;
+      if (serpExecution.enrichedResults.length === 0 && serpExecution.rawHitCount > 0) {
+        serpApiFallbackError = serpExecution.error;
+      }
+      if (serpExecution.enrichedResults.length > 0) {
+        serpApiFallbackSucceeded = true;
+      }
       combinedEnriched = mergeEnrichedDiscoveryResults(tavilyEnriched, serpExecution.enrichedResults);
       combinedHits = [...tavilyHits, ...serpExecution.rawResults];
       providersUsed.push(SERPAPI_PROVIDER_ID);
       providerId = tavilyEnriched.length === 0 ? SERPAPI_PROVIDER_ID : `${TAVILY_PROVIDER_ID}+${SERPAPI_PROVIDER_ID}`;
     } else {
-      serpApiFallbackError = "SerpAPI leverde 0 resultaten";
+      serpApiFallbackError = serpExecution.error ?? "SerpAPI leverde 0 resultaten";
     }
   } else if (fallbackNeeded.trigger && !serpConfigured) {
     serpApiFallbackTriggered = true;

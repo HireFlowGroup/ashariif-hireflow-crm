@@ -1,3 +1,4 @@
+import { prepareSerpApiDiscoveryQuery } from "@/features/company-finder/discovery/discovery-serpapi-query.service";
 import { pipelineDebug } from "@/features/lead-intelligence/debug/pipeline-debug";
 import type { ManagedProviderDefinition } from "@/features/lead-intelligence/providers/manager/types";
 import {
@@ -116,13 +117,15 @@ export async function executeSerpApiSearch(
   const apiKey = getSerpApiKey();
   if (!apiKey) throw new Error("SerpAPI key ontbreekt");
 
+  const effectiveQuery = prepareSerpApiDiscoveryQuery(query);
+
   const timeoutMs = resolveSerpApiRequestTimeoutMs(requestTimeoutMs);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google");
-  url.searchParams.set("q", query);
+  url.searchParams.set("q", effectiveQuery);
   url.searchParams.set("num", String(Math.min(maxResults, 20)));
   url.searchParams.set("gl", "nl");
   url.searchParams.set("hl", "nl");

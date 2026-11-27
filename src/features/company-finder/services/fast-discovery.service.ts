@@ -573,6 +573,11 @@ export async function runFastTavilySearch(
         maxResults: perQueryMax,
         timeoutMs: options.timeoutMs,
         desiredRoles,
+        serpContext: {
+          location: variant.location,
+          role: variant.role,
+          sector,
+        },
         skipProviderIds,
         apiBudget,
         processHits: (hits, hitProviderId) =>

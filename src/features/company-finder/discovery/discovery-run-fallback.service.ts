@@ -203,6 +203,11 @@ export async function executeSupplementalSerpApiRetrieval(input: {
       query: variant.query,
       maxResults: input.maxResults,
       timeoutMs: input.timeoutMs,
+      serpContext: {
+        location: gap.location,
+        role: gap.role,
+        sector: input.sector,
+      },
       processHits: (hits, providerId) => input.processHits(hits, providerId, variant),
     });
 
