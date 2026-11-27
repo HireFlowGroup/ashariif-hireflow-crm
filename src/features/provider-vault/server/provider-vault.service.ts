@@ -18,6 +18,10 @@ import {
   setOrgProviderCredentials,
 } from "@/features/provider-vault/server/credential-cache.service";
 import { firstEnvKey } from "@/features/lead-intelligence/providers/manager/provider-env";
+import type {
+  ProviderRuntimeStats,
+  ProviderStatusLabel,
+} from "@/features/lead-intelligence/providers/manager/types";
 import {
   getProviderRuntimeStats,
   resetProviderStats,
@@ -46,6 +50,29 @@ function resolveEnvSecrets(providerId: ManagedProviderId): ProviderSecrets | nul
   if (!apiKey) return null;
 
   return { apiKey };
+}
+
+/** UI badge: runtime wins after activity today; else use last persisted snapshot. */
+export function resolveProviderSnapshotStatus(input: {
+  configured: boolean;
+  enabled: boolean;
+  runtime: ProviderRuntimeStats;
+  persistedStatus?: ProviderStatusLabel | null;
+}): ProviderStatusLabel {
+  if (!input.configured || !input.enabled) {
+    return "disabled";
+  }
+
+  const hasRuntimeActivity =
+    input.runtime.requestsToday > 0
+    || input.runtime.lastSuccessAt != null
+    || input.runtime.lastFailureAt != null;
+
+  if (hasRuntimeActivity) {
+    return input.runtime.status;
+  }
+
+  return input.persistedStatus ?? input.runtime.status;
 }
 
 function hasRequiredSecrets(
@@ -105,9 +132,12 @@ export class ProviderVaultService {
 
       const persisted = healthByProvider.get(definition.id);
 
-      const status = !configured || !enabled
-        ? "disabled" as const
-        : persisted?.status ?? runtime.status;
+      const status = resolveProviderSnapshotStatus({
+        configured,
+        enabled,
+        runtime,
+        persistedStatus: persisted?.status ?? null,
+      });
 
       return {
         id: definition.id,
@@ -205,7 +235,7 @@ export class ProviderVaultService {
     const runtime = getProviderRuntimeStats(providerId, snapshot.configured && snapshot.enabled);
 
     return this.repository.upsertHealth(organizationId, providerId, {
-      status: snapshot.status,
+      status: runtime.status,
       healthScore: runtime.healthScore,
       requestsToday: runtime.requestsToday,
       successRate: runtime.successRate,
