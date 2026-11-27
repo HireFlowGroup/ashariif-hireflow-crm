@@ -13,6 +13,7 @@ import {
 } from "@/features/ai-recruiter/validation/search-plan.schemas";
 import { clampAiRecruiterSearchPlan } from "@/features/ai-recruiter/services/search-plan-limits.service";
 import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
+import { buildDiscoverySourceQueryLabel } from "@/features/ai-recruiter/services/discovery-source-query";
 import { extractTargetedEmployerConstraints } from "@/features/ai-recruiter/services/targeted-employer-constraint.service";
 import { DEFAULT_MODEL } from "@/lib/ai/config";
 import { getOpenAIClient } from "@/lib/ai/client";
@@ -201,12 +202,13 @@ export async function parseAiRecruiterSearchPlan(prompt: string): Promise<AiRecr
 
 export function searchPlanToCompanyFinderCriteria(
   plan: AiRecruiterSearchPlan,
-  sourceQuery: string,
+  runPrompt: string,
 ): CompanyFinderCriteria {
   const city = plan.locations[0] ?? undefined;
   const region = plan.regions[0] ?? undefined;
   const sector = plan.sectors[0] ?? undefined;
-  const targeted = extractTargetedEmployerConstraints(sourceQuery);
+  const targeted = extractTargetedEmployerConstraints(runPrompt);
+  const sourceQuery = buildDiscoverySourceQueryLabel(plan, runPrompt);
 
   return {
     city,
