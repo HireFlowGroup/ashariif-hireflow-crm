@@ -3,6 +3,8 @@ import { z } from "zod";
 export const runFailureCodeSchema = z.enum([
   "provider_not_configured",
   "provider_auth_failed",
+  /** Monthly / plan quota (e.g. Tavily HTTP 432 usage limit). */
+  "provider_quota_exhausted",
   "provider_rate_limited",
   "provider_timeout",
   "provider_request_failed",

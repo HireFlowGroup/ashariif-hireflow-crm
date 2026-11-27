@@ -43,9 +43,14 @@ export function classifyProviderError(message: string, httpStatus: number | null
     return "provider_auth_failed";
   }
   if (
+    resolvedStatus === 432
+    || /usage limit|exceeds your plan|abonnementslimiet|plan.?limit/.test(lower)
+  ) {
+    return "provider_quota_exhausted";
+  }
+  if (
     resolvedStatus === 429
-    || resolvedStatus === 432
-    || /rate limit|too many requests|429|quota|usage limit|exceeds your plan/.test(lower)
+    || /rate limit|too many requests|429/.test(lower)
   ) {
     return "provider_rate_limited";
   }
@@ -157,10 +162,24 @@ export function buildRunFailureUiMessage(
     };
   }
 
+  if (diagnostics.errorCode === "provider_quota_exhausted") {
+    return {
+      title: "Zoekprovider abonnementslimiet bereikt",
+      body:
+        diagnostics.errorMessage
+        ?? `${diagnostics.providerName ?? "Tavily"} heeft het planquotum bereikt (geen nuttige retries). Controleer fallback SerpAPI in Settings → Providers.`,
+      retryRecommended: false,
+      showProviderSettings: true,
+      providerName: diagnostics.providerName,
+    };
+  }
+
   if (diagnostics.errorCode === "provider_rate_limited") {
     return {
-      title: "Zoekprovider rate limit",
-      body: `${diagnostics.providerName ?? "De provider"} blokkeert tijdelijk door te veel requests. Probeer het later opnieuw.`,
+      title: "Tijdelijke rate limit",
+      body:
+        diagnostics.errorMessage
+        ?? `${diagnostics.providerName ?? "De provider"} blokkeert tijdelijk door te veel requests. Wacht enkele minuten en probeer opnieuw.`,
       retryRecommended: true,
       showProviderSettings: false,
       providerName: diagnostics.providerName,
@@ -218,9 +237,12 @@ export type DiscoveryQueryFailureHint = {
   rawResultCount?: number;
   serpApiFallbackAttempted?: boolean;
   serpApiFallbackSucceeded?: boolean;
+  serpApiFallbackSkipped?: boolean;
+  serpApiFallbackError?: string | null;
+  providersUsed?: string[];
 };
 
-export function resolvePrimaryDiscoveryProviderFailure(
+export function formatDiscoveryProviderFailureMessage(
   queries: DiscoveryQueryFailureHint[],
 ): { code: RunFailureCode; message: string } | null {
   for (const query of queries) {
@@ -229,26 +251,53 @@ export function resolvePrimaryDiscoveryProviderFailure(
       || (query.serpApiFallbackAttempted === true && (query.rawResultCount ?? 0) > 0);
     if (serpRecovered) continue;
 
-    if (query.tavilyFailureCode && isProviderFailure(query.tavilyFailureCode)) {
-      return {
-        code: query.tavilyFailureCode,
-        message: sanitizeDiscoveryProviderError(query.error ?? "Zoekprovider mislukt"),
-      };
-    }
-    if (query.error) {
-      const code = classifyProviderError(query.error);
-      if (isProviderFailure(code)) {
-        return { code, message: sanitizeDiscoveryProviderError(query.error) };
+    const rawError = query.error ?? "Zoekprovider mislukt";
+    const code =
+      query.tavilyFailureCode && isProviderFailure(query.tavilyFailureCode)
+        ? query.tavilyFailureCode
+        : classifyProviderError(rawError, parseProviderHttpStatus(rawError));
+
+    let message = sanitizeDiscoveryProviderError(rawError);
+
+    if (code === "provider_quota_exhausted") {
+      if (query.serpApiFallbackAttempted && query.serpApiFallbackError) {
+        message =
+          `Tavily-abonnementslimiet bereikt (HTTP 432). SerpAPI-fallback geprobeerd: ${sanitizeDiscoveryProviderError(query.serpApiFallbackError)}`;
+      } else if (query.serpApiFallbackSkipped && query.serpApiFallbackError) {
+        message =
+          `Tavily-abonnementslimiet bereikt (HTTP 432). SerpAPI-fallback niet mogelijk: ${sanitizeDiscoveryProviderError(query.serpApiFallbackError)}`;
+      } else if (
+        query.serpApiFallbackError
+        && /niet geconfigureerd|ontbreekt|missing|api_key/i.test(query.serpApiFallbackError)
+      ) {
+        message =
+          "Tavily-abonnementslimiet bereikt (HTTP 432). Configureer SerpAPI in Settings → Providers voor automatische fallback.";
+      } else if (!query.serpApiFallbackAttempted) {
+        message =
+          "Tavily-abonnementslimiet bereikt (HTTP 432). SerpAPI werd niet bereikt in de discovery-keten — controleer provider-instellingen en run-limieten.";
       }
+    } else if (code === "provider_rate_limited") {
+      message =
+        "Tijdelijke rate limit bij de zoekprovider (HTTP 429). Wacht enkele minuten of verklein het aantal parallelle queries.";
     }
+
+    return { code, message };
   }
+
   return null;
+}
+
+export function resolvePrimaryDiscoveryProviderFailure(
+  queries: DiscoveryQueryFailureHint[],
+): { code: RunFailureCode; message: string } | null {
+  return formatDiscoveryProviderFailureMessage(queries);
 }
 
 export function isProviderFailure(code: RunFailureCode | null): boolean {
   return (
     code === "provider_not_configured"
     || code === "provider_auth_failed"
+    || code === "provider_quota_exhausted"
     || code === "provider_rate_limited"
     || code === "provider_timeout"
     || code === "provider_request_failed"

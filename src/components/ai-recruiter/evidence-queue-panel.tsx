@@ -36,6 +36,9 @@ type PipelineFunnel = {
   concepts: number;
   providerUsed: string | null;
   providerFailoverCount: number;
+  providerDegradedMode?: {
+    messages?: string[];
+  } | null;
 };
 
 export function EvidenceQueuePanel({ runId }: { runId: string }) {
@@ -114,6 +117,13 @@ export function EvidenceQueuePanel({ runId }: { runId: string }) {
                   ? ` · failover ×${funnel.providerFailoverCount}`
                   : ""}
               </p>
+            ) : null}
+            {funnel.providerDegradedMode?.messages?.length ? (
+              <ul className="col-span-full list-inside list-disc text-xs text-muted-foreground">
+                {funnel.providerDegradedMode.messages.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
             ) : null}
           </CardContent>
         </Card>

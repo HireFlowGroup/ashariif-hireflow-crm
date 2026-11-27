@@ -30,13 +30,13 @@ describe("resolvePrimaryDiscoveryProviderFailure", () => {
   it("returns provider_rate_limited from query diagnostics", () => {
     const resolved = resolvePrimaryDiscoveryProviderFailure([
       {
-        tavilyFailureCode: "provider_rate_limited",
+        tavilyFailureCode: "provider_quota_exhausted",
         error: 'Tavily HTTP 432: {"detail":{"error":"usage limit"}}',
       },
     ]);
 
-    expect(resolved?.code).toBe("provider_rate_limited");
-    expect(resolved?.message).toContain("432");
+    expect(resolved?.code).toBe("provider_quota_exhausted");
+    expect(resolved?.message).toMatch(/432|abonnementslimiet/i);
   });
 });
 
@@ -64,7 +64,7 @@ describe("buildDiscoveryDiagnostics provider vs empty market", () => {
       validatedCount: 0,
     });
 
-    expect(diagnostics.errorCode).toBe("provider_rate_limited");
+    expect(diagnostics.errorCode).toBe("provider_quota_exhausted");
     expect(diagnostics.errorCode).not.toBe("no_results");
   });
 });

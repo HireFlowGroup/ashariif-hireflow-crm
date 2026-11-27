@@ -109,7 +109,7 @@ describe("discovery provider fallback diagnostics", () => {
     });
 
     expect(result.tavilyFailed).toBe(true);
-    expect(result.tavilyFailureCode).toBe("provider_rate_limited");
+    expect(result.tavilyFailureCode).toBe("provider_quota_exhausted");
     expect(result.serpApiFallbackRequired).toBe(true);
     expect(result.serpApiFallbackSkipped).toBe(true);
     expect(result.serpApiFallbackAttempted).toBe(false);
@@ -172,7 +172,7 @@ describe("discovery provider fallback diagnostics", () => {
 
     expect(getSearchExecutor).toHaveBeenCalledWith("tavily");
     expect(getSearchExecutor).toHaveBeenCalledWith("serpapi");
-    expect(result.tavilyFailureCode).toBe("provider_rate_limited");
+    expect(result.tavilyFailureCode).toBe("provider_quota_exhausted");
     expect(result.tavilyFailed).toBe(true);
     expect(result.providersUsed).toContain("serpapi");
     expect(result.combinedMetrics.desiredRoleVacancyMatches).toBeGreaterThan(0);

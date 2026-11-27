@@ -66,6 +66,9 @@ export function buildDiscoveryDiagnostics(input: {
       errorCode === "provider_rate_limited"
       || errorCode === "provider_timeout"
       || errorCode === "pipeline_timeout";
+    if (errorCode === "provider_quota_exhausted") {
+      retryRecommended = false;
+    }
   } else if (responseCount > 0 && input.validatedCount === 0) {
     errorCode = "no_valid_companies";
     errorMessage =
@@ -80,6 +83,9 @@ export function buildDiscoveryDiagnostics(input: {
       errorCode === "provider_rate_limited"
       || errorCode === "provider_timeout"
       || errorCode === "pipeline_timeout";
+    if (errorCode === "provider_quota_exhausted") {
+      retryRecommended = false;
+    }
   } else if (responseCount === 0 && input.validatedCount === 0) {
     const providerCode = input.summary.lastErrorMessage
       ? classifyProviderError(input.summary.lastErrorMessage)

@@ -8,7 +8,6 @@ import {
   type UsefulRecallMetrics,
 } from "@/features/company-finder/discovery/discovery-useful-recall.service";
 import type { DiscoveryQueryVariant } from "@/features/ai-recruiter/services/discovery-query-builder.service";
-import { getAiRecruiterConfig } from "@/features/ai-recruiter/config/ai-recruiter.config";
 import {
   classifyProviderError,
   parseProviderHttpStatus,
@@ -16,6 +15,10 @@ import {
 } from "@/features/ai-recruiter/services/discovery-run-diagnostics.helpers";
 import type { RunFailureCode } from "@/features/ai-recruiter/domain/run-diagnostics";
 import { executeDiscoverySearchWithFailover } from "@/features/company-finder/discovery/discovery-provider-failover.service";
+import {
+  resolveAiRecruiterDiscoveryProviderPriority,
+  resolveDiscoveryMaxProviderAttempts,
+} from "@/features/company-finder/discovery/discovery-provider-resilience.service";
 import type {
   DiscoveryProviderDebugEntry,
   DiscoverySearchProviderId,
@@ -117,8 +120,9 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     providerId: string,
   ) => EnrichedDiscoveryResult[];
 }): Promise<QualityAwareQueryResult> {
-  const config = getAiRecruiterConfig();
   const providersUsed: string[] = [];
+  const maxProviderAttempts = resolveDiscoveryMaxProviderAttempts();
+  const recruiterProviderPriority = resolveAiRecruiterDiscoveryProviderPriority();
   let serpApiFallbackTriggered = false;
   let serpApiFallbackAttempted = false;
   let serpApiFallbackSucceeded = false;
@@ -140,12 +144,12 @@ export async function executeQualityAwareDiscoveryQuery(input: {
     input.skipProviderIds?.has(TAVILY_PROVIDER_ID) || isProviderQuotaExhausted(TAVILY_PROVIDER_ID);
   const failover = await executeDiscoverySearchWithFailover(input.query, input.maxResults, {
     stopOnFirstSuccess: !tavilySkipped,
-    maxProviderAttempts: config.discoveryMaxProviderAttemptsPerQuery,
+    maxProviderAttempts,
     skipProviderIds: input.skipProviderIds,
     apiBudget: input.apiBudget,
     providerPriority: tavilySkipped
       ? ([SERPAPI_PROVIDER_ID] as const)
-      : undefined,
+      : recruiterProviderPriority,
   });
 
   const hitsByProvider = new Map<string, SearchResultItem[]>();

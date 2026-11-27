@@ -13,6 +13,7 @@ import { DiscoveryFunnelPanel, buildFunnelSummary } from "@/components/ai-recrui
 import { EvidenceQueuePanel } from "@/components/ai-recruiter/evidence-queue-panel";
 import { ProspectDecisionsPanel } from "@/components/ai-recruiter/prospect-decisions-panel";
 import { ProspectReviewWorkspace } from "@/components/ai-recruiter/prospect-review-workspace";
+import { DiscoveryProviderStatus } from "@/components/ai-recruiter/discovery-provider-status";
 import { PipelineStepStats, RunFailureBanner } from "@/components/ai-recruiter/run-failure-banner";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { Badge } from "@/components/ui/badge";
@@ -239,8 +240,18 @@ export function AiRecruiterDashboard() {
         onError: (message) => {
           setStreaming(false);
           setError(message);
+          setActiveRun((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: prev.status === "discovering" || prev.status === "enriching" ? "failed" : prev.status,
+                  errorMessage: message,
+                }
+              : prev,
+          );
           eventSource.close();
           eventSourceRef.current = null;
+          void loadRunDetails(runId);
         },
       });
 
@@ -301,7 +312,12 @@ export function AiRecruiterDashboard() {
         </div>
       ) : null}
 
-      {activeRun ? <RunFailureBanner run={activeRun} /> : null}
+      {activeRun ? (
+        <>
+          <DiscoveryProviderStatus run={activeRun} />
+          <RunFailureBanner run={activeRun} />
+        </>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1 space-y-4">

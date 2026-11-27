@@ -10,6 +10,12 @@ export const DISCOVERY_SEARCH_PROVIDER_PRIORITY = [
 
 export type DiscoverySearchProviderId = (typeof DISCOVERY_SEARCH_PROVIDER_PRIORITY)[number];
 
+/** AI Recruiter discovery: Tavily primary, SerpAPI controlled fallback (no unrelated providers). */
+export const DISCOVERY_AI_RECRUITER_FAILOVER_PRIORITY = [
+  "tavily",
+  "serpapi",
+] as const satisfies readonly DiscoverySearchProviderId[];
+
 export type DiscoveryProviderSkipReason =
   | "missing_api_key"
   | "not_configured"

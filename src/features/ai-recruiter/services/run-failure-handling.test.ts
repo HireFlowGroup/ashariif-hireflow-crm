@@ -40,11 +40,11 @@ describe("classifyProviderError", () => {
     expect(classifyProviderError("Rate limit exceeded", 429)).toBe("provider_rate_limited");
   });
 
-  it("classifies Tavily HTTP 432 usage limit as provider_rate_limited", () => {
+  it("classifies Tavily HTTP 432 usage limit as provider_quota_exhausted", () => {
     const message =
       'Tavily HTTP 432: {"detail":{"error":"This request exceeds your plan\'s set usage limit."}}';
-    expect(classifyProviderError(message)).toBe("provider_rate_limited");
-    expect(classifyProviderError(message, 432)).toBe("provider_rate_limited");
+    expect(classifyProviderError(message)).toBe("provider_quota_exhausted");
+    expect(classifyProviderError(message, 432)).toBe("provider_quota_exhausted");
   });
 
   it("classifies timeout", () => {

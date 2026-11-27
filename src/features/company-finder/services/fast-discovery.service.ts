@@ -93,6 +93,7 @@ export type DiscoveryQueryDiagnostic = {
   serpApiFallbackAttempted: boolean;
   serpApiFallbackSucceeded?: boolean;
   serpApiFallbackSkipped: boolean;
+  serpApiFallbackError?: string | null;
   tavilyFailed: boolean;
   tavilyFailureCode: RunFailureCode | null;
   durationMs: number;
@@ -561,6 +562,7 @@ export async function runFastTavilySearch(
     let querySerpFallbackAttempted = false;
     let querySerpFallbackSucceeded = false;
     let querySerpFallbackSkipped = false;
+    let querySerpFallbackError: string | null = null;
     let queryTavilyFailed = false;
     let queryTavilyFailureCode: RunFailureCode | null = null;
 
@@ -580,7 +582,8 @@ export async function runFastTavilySearch(
       aggregateProviderRuns.push(...execution.providerRuns);
 
       if (
-        execution.tavilyFailureCode === "provider_rate_limited"
+        execution.tavilyFailureCode === "provider_quota_exhausted"
+        || execution.tavilyFailureCode === "provider_rate_limited"
         || (execution.tavilyFailed && /432|usage limit|quota exceeded/i.test(execution.tavilyErrorSanitized ?? ""))
       ) {
         skipProviderIds.add("tavily");
@@ -598,6 +601,7 @@ export async function runFastTavilySearch(
       querySerpFallbackAttempted = execution.serpApiFallbackAttempted;
       querySerpFallbackSucceeded = execution.serpApiFallbackSucceeded;
       querySerpFallbackSkipped = execution.serpApiFallbackSkipped;
+      querySerpFallbackError = execution.serpApiFallbackError;
       queryTavilyFailed = execution.tavilyFailed;
       queryTavilyFailureCode = execution.tavilyFailureCode;
 
@@ -704,6 +708,7 @@ export async function runFastTavilySearch(
       serpApiFallbackAttempted: querySerpFallbackAttempted,
       serpApiFallbackSucceeded: querySerpFallbackSucceeded,
       serpApiFallbackSkipped: querySerpFallbackSkipped,
+      serpApiFallbackError: querySerpFallbackError,
       tavilyFailed: queryTavilyFailed,
       tavilyFailureCode: queryTavilyFailureCode,
       durationMs: Date.now() - started,
